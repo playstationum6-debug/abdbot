@@ -48,6 +48,8 @@ RUN_MIN_BAR_DV = 50_000      # sinyal mumunda en az 50 bin $ işlem
 IEX_SHARE = 0.05             # öncesi/sonrası seansta hacim sadece IEX: $ hacim eşikleri bu oranla küçültülür
 COOLDOWN = 10 * 60       # aynı hisse + kurgu + yön için bekleme (sık işlem: 10 dk)
 R_SETUP = {"itki": 1.5, "vwap_sek": 1.5}   # 1 dk scalp kurgularında hedef = 1,5R
+MIN_STOP_PCT = 0.0025    # stop girişten en az fiyatın %0,25'i uzakta (1 dk gürültüsünde patlamasın)
+MIN_STOP_ATR = 2.2       # ve en az 1 dk ATR × 2,2 (≈ 5 dk mum oynaklığı)
 FILL_BARS = 3            # uzatılmış seansta limit emir en fazla 3 mum bekler
 FRESH_SEC = 300          # sadece son 5 dk içinde kapanan mumlar değerlendirilir
 MAX_KEEP = 6000          # bellekte tutulan en fazla sinyal
@@ -579,6 +581,11 @@ class Engine:
             cands = self._regular(sym, x) if x["ses"] == "regular" else self._extended(sym, x)
         best = {}   # aynı mum + aynı yön için tek sinyal: en yüksek güvenli kurgu
         for setup, d, entry, stop, risk, base, why in cands:
+            # Asgari stop mesafesi: çok dar stoplar normal 1 dk kıpırdamasında patlıyordu
+            min_risk = max(entry * MIN_STOP_PCT, x["atr"] * MIN_STOP_ATR)
+            if risk < min_risk:
+                risk = min_risk
+                stop = entry - d * risk
             conf = self._score(x, d, base, why, risk, sym)
             if d not in best or conf > best[d][-2]:
                 best[d] = (setup, d, entry, stop, risk, conf, why)

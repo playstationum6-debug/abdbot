@@ -3,9 +3,10 @@ Bot: sinyalleri seçer, Alpaca PAPER (sanal) hesabında işlem yapar, pozisyonla
 Gerçek para YOK — sadece paper-api.alpaca.markets kullanılır.
 
 Kurallar:
-- Pozisyon büyüklüğü: normal seansta BOT_NOTIONAL (varsayılan 250 $), uzatılmış seansta yarısı.
+- Pozisyon büyüklüğü: işlem başı en fazla BOT_RISK (varsayılan 5 $) risk; pozisyon en fazla BOT_NOTIONAL
+  (varsayılan 250 $), uzatılmış seansta yarısı.
 - Normal seans: piyasa emri. Uzatılmış seans: sadece limit emir (3 dk dolmazsa iptal).
-- Stop, hedef, kâr koruma (+1R'de stop girişe), iz süren stop (+1,5R'den sonra 1R geriden),
+- Stop, hedef, kâr koruma (+1,5R'de stop girişe), iz süren stop (+1,5R'den sonra 1R geriden),
   seans bitmeden kapatma, günlük zarar limiti, en fazla N açık pozisyon.
 - Uzatılmış seansta açığa satış yok; koşan küçük hisselerde sadece alış.
 - Öğrenme: yeterli veri varsa beklentisi negatif kurgular atlanır; her kapanan işlem için ders yazılır.
@@ -17,6 +18,8 @@ import time
 from datetime import datetime, timezone
 
 import httpx
+
+BE_R = 1.5   # kâr koruma: bu kadar R kâra ulaşınca stop girişe çekilir (1R çok erkendi)
 
 PAPER = "https://paper-api.alpaca.markets"
 OPEN_ST = ("emir", "açık", "çıkış")
@@ -183,6 +186,11 @@ class Bot:
             return skip(f"öğrenilmiş beklenti negatif ({e:+.2f}R, {n} işlem)")
         notional = self.cfg["notional"] * (1 if ses == "regular" else 0.5)
         px = sig["e"]
+        # Risk bazlı büyüklük: stop mesafesi ne olursa olsun işlem başı kayıp en fazla risk_usd
+        risk_px = abs(sig["e"] - sig["s"])
+        risk_usd = self.cfg.get("risk_usd", 5.0) * (1 if ses == "regular" else 0.5)
+        if px > 0 and risk_px > 0:
+            notional = min(notional, risk_usd / risk_px * px)
         whole = int(math.floor(notional / px)) if px > 0 else 0
         qty = whole
         # Normal seansta alışlarda kesirli adet (pahalı hisseler 250 $ ile de alınabilsin).
@@ -317,10 +325,10 @@ class Bot:
             pos["last"] = px
             pos["hw"] = max(pos["hw"], px) if d > 0 else min(pos["hw"], px)
             best_r = (pos["hw"] - entry) * d / risk if risk > 0 else 0
-            if not pos["be"] and best_r >= 1:
+            if not pos["be"] and best_r >= BE_R:
                 pos["be"] = True
                 pos["stop"] = entry + d * entry * 0.0005
-                self.note("koruma", "Kâr koruma: +1R'ye ulaştı, stop girişe çekildi", pos["sym"])
+                self.note("koruma", f"Kâr koruma: +{BE_R:g}R'ye ulaştı, stop girişe çekildi", pos["sym"])
             if best_r >= 1.5:
                 ns = pos["hw"] - d * risk
                 if (ns - pos["stop"]) * d > 0:

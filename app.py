@@ -71,7 +71,8 @@ BOT_DIR = "bot"
 BOT_CFG = {
     "enabled": os.getenv("BOT_ENABLED", "1") == "1",
     "notional": float(os.getenv("BOT_NOTIONAL", "250")),     # işlem başı pozisyon büyüklüğü ($)
-    "max_open": int(os.getenv("BOT_MAX_OPEN", "8")),         # aynı anda en fazla açık pozisyon
+    "max_open": int(os.getenv("BOT_MAX_OPEN", "15")),        # aynı anda en fazla açık pozisyon
+    "risk_usd": float(os.getenv("BOT_RISK", "5")),           # işlem başı en fazla risk ($), stop mesafesine göre adet
     "daily_loss": float(os.getenv("BOT_DAILY_LOSS", "50")),  # günlük zarar limiti ($)
     "min_conf": int(os.getenv("BOT_MIN_CONF", "55")),        # botun alacağı en düşük güven puanı (normal seans)
     "min_conf_ext": int(os.getenv("BOT_MIN_CONF_EXT", "50")),# piyasa öncesi/sonrası için eşik (yarım lot + limit emir)
