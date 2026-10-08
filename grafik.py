@@ -128,7 +128,7 @@ def _dash(d, x0, y0, x1, y1, col, w=2, on=9, off=7):
         s += on + off
 
 
-def ciz(bars, fx=None, title="", sub="", lines=None, pat=None, zone=None, max_bars=130, tf="5 dk"):
+def ciz(bars, fx=None, title="", sub="", lines=None, pat=None, zone=None, max_bars=130, tf="5 dk", kart=None):
     """
     bars: [(t, o, h, l, c, v)] 5 dk mumlar (eskiden yeniye)
     fx: formasyon.analyze çıktısı (lv, pat, zones)
@@ -165,7 +165,7 @@ def ciz(bars, fx=None, title="", sub="", lines=None, pat=None, zone=None, max_ba
     if Z:
         extra += [Z["lo"], Z["hi"]]
     for v in extra:
-        if v and lo * 0.85 < v < hi * 1.15:
+        if v and lo * 0.7 < v < hi * 1.35:
             hi, lo = max(hi, v), min(lo, v)
     rng = (hi - lo) or hi * 0.01
     hi += rng * 0.06
@@ -174,7 +174,8 @@ def ciz(bars, fx=None, title="", sub="", lines=None, pat=None, zone=None, max_ba
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img, "RGBA")
     x0, x1 = PAD_L, W - PAD_R
-    y0, y1 = PAD_T, H - PAD_B - VOL_H - 8
+    pad_t = 150 if kart else PAD_T
+    y0, y1 = pad_t, H - PAD_B - VOL_H - 8
     cw = (x1 - x0) / n
 
     def X(i):
@@ -335,14 +336,47 @@ def ciz(bars, fx=None, title="", sub="", lines=None, pat=None, zone=None, max_ba
         d.text((x1 + 7, y - 10), _t(t_), fill=BG, font=f12)
 
     # başlık
-    d.rectangle([0, 0, W, PAD_T - 14], fill=(18, 22, 36))
-    d.text((PAD_L, 14), _t(title[:70]), fill=TXT, font=font(26, True))
-    d.text((PAD_L, 50), _t(sub[:110]), fill=MUT, font=f14)
-    d.text((W - 150, 18), _t(f"ABD·BOT · {tf}"), fill=MUT, font=f12)
+    if kart:
+        _kart(d, kart, tf)
+    else:
+        d.rectangle([0, 0, W, PAD_T - 14], fill=(18, 22, 36))
+        d.text((PAD_L, 14), _t(title[:70]), fill=TXT, font=font(26, True))
+        d.text((PAD_L, 50), _t(sub[:110]), fill=MUT, font=f14)
+        d.text((W - 150, 18), _t(f"ABD·BOT · {tf}"), fill=MUT, font=f12)
 
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
     return buf.getvalue()
+
+
+def _kart(d, k, tf):
+    """Sinyal kartı başlığı: yön + sembol, kurgu, güven çubuğu, risk/ödül, potansiyel."""
+    al = k.get("yon", 1) > 0
+    col = UP if al else DN
+    d.rectangle([0, 0, W, 134], fill=(18, 22, 36))
+    d.rectangle([0, 0, 8, 134], fill=col)
+    d.rounded_rectangle([24, 18, 112, 58], radius=10, fill=col)
+    d.text((40, 24), _t(k.get("etiket") or ("AL" if al else "SAT")), fill=BG, font=font(24, True))
+    d.text((126, 16), _t("#" + k.get("sym", "")), fill=TXT, font=font(34, True))
+    d.text((26, 72), _t(k.get("ad", "")[:46]), fill=TXT, font=font(19))
+    if k.get("alt"):
+        d.text((26, 102), _t(k["alt"][:70]), fill=MUT, font=font(16))
+    # sağ blok: güven çubuğu + R/Ö + potansiyel
+    rx = W - 360
+    if k.get("conf") is not None:
+        c = int(k["conf"])
+        d.text((rx, 16), _t(f"Güven {c}"), fill=TXT, font=font(19, True))
+        for i in range(10):
+            on = i < round(c / 10)
+            d.rounded_rectangle([rx + i * 33, 46, rx + i * 33 + 26, 58], radius=3,
+                                fill=(col if on else (45, 52, 72)))
+    y = 72
+    for lbl, val, cc in (("Risk/ödül", k.get("rr"), TXT), ("Potansiyel", k.get("pot"), UP), ("Risk", k.get("risk"), DN)):
+        if val:
+            d.text((rx, y), _t(lbl), fill=MUT, font=font(15))
+            d.text((rx + 110, y - 2), _t(val), fill=cc, font=font(17, True))
+            y += 22
+    d.text((W - 150, 112), _t(f"ABD·BOT · {tf}"), fill=MUT, font=font(14))
 
 
 def ciz_karne(eq, spy, cap0, title="", sub=""):

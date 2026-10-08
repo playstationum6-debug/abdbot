@@ -1100,6 +1100,8 @@ class Telegram:
         self.table = {}        # {"id", "day", "txt"}
         self.offset = 0
         self.cmd_st = "—"
+        self.meta = {}         # anahtar -> {"base", "photo", "durum"}: mesajı sonradan güncellemek için
+        self.tr_cache = {}     # haber başlığı -> Türkçe çeviri + özet
 
     @property
     def ok(self):
@@ -1109,6 +1111,7 @@ class Telegram:
     def load(self, data):
         d = (data or {}).get("tg") or {}
         self.msg = {k: v for k, v in (d.get("msg") or {}).items()}
+        self.meta = d.get("meta") or {}
         self.done = set(d.get("done") or [])
         self.alarms = d.get("alarm") or []
         self.table = d.get("table") or {}
@@ -1118,14 +1121,50 @@ class Telegram:
             self.msg = dict(list(self.msg.items())[-400:])
         if len(self.done) > 600:
             self.done = set(list(self.done)[-400:])
-        backup.data["tg"] = {"msg": self.msg, "done": list(self.done), "alarm": self.alarms, "table": self.table}
+        if len(self.meta) > 120:
+            self.meta = dict(list(self.meta.items())[-80:])
+        backup.data["tg"] = {"msg": self.msg, "done": list(self.done), "alarm": self.alarms, "table": self.table,
+                             "meta": self.meta}
         backup.dirty = True
 
-    def send(self, html, chart=None, key=None, reply=None, sym=None, chat=None):
+    def send(self, html, chart=None, key=None, reply=None, sym=None, chat=None, quiet=False, haber=None,
+             durum=None):
         if self.ok:
-            self.queue.append({"html": html[:3900], "chart": chart, "key": key, "reply": reply, "sym": sym,
-                               "chat": chat})
+            self.queue.append({"html": html[:3600], "chart": chart, "key": key, "reply": reply, "sym": sym,
+                               "chat": chat, "quiet": quiet, "haber": haber, "durum": durum})
             del self.queue[:-40]
+
+    async def ceviri(self, c, headline):
+        """Haber başlığını yapay zekayla Türkçeye çevir + 1 cümle özet (GEMINI_API_KEY varsa)."""
+        if not headline or not scanner.ai_key:
+            return None
+        if headline in self.tr_cache:
+            return self.tr_cache[headline]
+        now = time.time()
+        scanner.ai_calls = [t for t in scanner.ai_calls if now - t < 60]
+        if len(scanner.ai_calls) >= 8:
+            return None
+        scanner.ai_calls.append(now)
+        prompt = ("Translate this US stock market news headline into natural, short Turkish. Then add ONE short "
+                  "Turkish sentence (max 18 words) explaining in plain words what it means for the stock. "
+                  'Answer ONLY JSON: {"tr": "...", "ozet": "..."}\nHeadline: ' + headline[:300])
+        try:
+            r = await c.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{scanner.ai_model}:generateContent",
+                headers={"x-goog-api-key": scanner.ai_key, "Content-Type": "application/json"},
+                json={"contents": [{"parts": [{"text": prompt}]}],
+                      "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}})
+            if r.status_code != 200:
+                return None
+            txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            js = json.loads(txt[txt.find("{"):txt.rfind("}") + 1])
+            res = {"tr": str(js.get("tr", ""))[:220], "ozet": str(js.get("ozet", ""))[:200]}
+            self.tr_cache[headline] = res
+            if len(self.tr_cache) > 500:
+                self.tr_cache = dict(list(self.tr_cache.items())[-300:])
+            return res
+        except Exception:
+            return None
 
     def _markup(self, sym):
         if not sym:
@@ -1153,11 +1192,25 @@ class Telegram:
         if not data:
             return None
         return await asyncio.to_thread(grafik.ciz, data[0], data[1], ch.get("title", ""), ch.get("sub", ""),
-                                       ch.get("lines"), ch.get("pat"), ch.get("zone"), 130, ch.get("tf", "5 dk"))
+                                       ch.get("lines"), ch.get("pat"), ch.get("zone"), 130, ch.get("tf", "5 dk"),
+                                       ch.get("kart"))
 
     async def _post(self, c, item):
         chat = item.get("chat") or TG_CHAT
         base = {"chat_id": chat, "parse_mode": "HTML"}
+        if item.get("quiet"):
+            base["disable_notification"] = True
+        html = item["html"]
+        if item.get("haber"):
+            tr = await self.ceviri(c, item["haber"])
+            if tr and tr.get("tr"):
+                html += f"\n🇹🇷 <i>{_h(tr['tr'])}</i>" + (f"\n💡 {_h(tr['ozet'])}" if tr.get("ozet") else "")
+        meta_base = html
+        if item.get("durum"):
+            html += f"\n\n{item['durum']}"
+        item = dict(item, html=html)
+        if item.get("key"):
+            self.meta[item["key"]] = {"base": meta_base, "durum": item.get("durum"), "photo": False, "sym": item.get("sym")}
         rid = self.msg.get(item["reply"]) if item.get("reply") else None
         if rid:
             base.update(reply_to_message_id=rid, allow_sending_without_reply=True)
@@ -1177,6 +1230,8 @@ class Telegram:
             r = await c.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto", data=data,
                              files={"photo": ("grafik.png", png, "image/png")})
             if r.status_code == 200:
+                if item.get("key") and item["key"] in self.meta:
+                    self.meta[item["key"]]["photo"] = True
                 return r
             log.warning("Telegram resmi gönderilemedi: %s", r.text[:160])
         body = dict(base, text=item["html"], disable_web_page_preview=True)
@@ -1407,30 +1462,55 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
         push.notify(f"#{s0} {txt}", sub, tag=f"plan-{s0}")
     elif k == "haber" and PUSH_PREF["push_haber"] and tone in ("iyi", "kötü") and (extra or {}).get("watched"):
         push.notify(f"#{s0} {'olumlu' if tone == 'iyi' else 'olumsuz'} haber", txt, tag=f"haber-{s0}", url=url or "/")
-    # Telegram kanalı
+    # Telegram kanalı (şablonlu mesajlar; önemsizler sessiz gelir)
     tags = " ".join("#" + _h(x) for x in it["sym"])
-    icon = {"al": "🟢", "sat": "🔴", "kar": "✅", "zarar": "❌"}.get(tone, "")
     ex = extra or {}
     chart = None
     lines = {"giris": ex.get("e") or ex.get("lvl"), "stop": ex.get("s") or ex.get("stop"),
              "hedef": ex.get("h") or ex.get("tgt")}
     if s0 and k in ("bot", "sinyal", "plan") and (k != "bot" or ex.get("e")):
         chart = {"sym": s0, "title": f"#{s0}  {txt}", "sub": sub, "lines": lines,
-                 "pat": ex.get("pat"), "zone": bool(ex.get("zone"))}
-    rr = rr_satiri(lines, 1 if tone != "sat" else -1) if k in ("plan", "sinyal") else ""
-    body = ex.get("tg_html") or (f"<b>{tags} {_h(txt)}</b>" + (f"\n{_h(sub)}" if sub else "") + rr)
+                 "pat": ex.get("pat"), "zone": bool(ex.get("zone")), "kart": ex.get("kart")}
     tk, tr = ex.get("tgk"), ex.get("tgr")
+    sym1 = s0 or None
     if k in ("bot", "sinyal") and PUSH_PREF["tg_islem"] and (k == "bot" or ex.get("conf", 0) >= TG_MIN_CONF):
-        tg.send(f"{icon} {body}", chart, key=tk, reply=tr, sym=s0 or None)
+        if ex.get("tg_html"):
+            html = ex["tg_html"]
+        else:
+            icon = {"al": "🟢", "sat": "🔴", "kar": "✅", "zarar": "❌", "bilgi": "ℹ️"}.get(tone, "🤖")
+            html = f"{icon} <b>{tags}</b> · {_h(txt)}" + (f"\n<i>{_h(sub)}</i>" if sub else "")
+        loud = k == "bot" and tone in ("al", "sat", "kar", "zarar") or (k == "sinyal" and ex.get("conf", 0) >= 80)
+        tg.send(html, chart, key=tk, reply=tr, sym=sym1, quiet=not loud, haber=ex.get("tg_haber"),
+                durum=ex.get("tg_durum"))
     elif k == "plan" and PUSH_PREF["tg_plan"]:
-        tg.send(f"👀 {body}", chart, sym=s0 or None)
+        html = (f"👀 <b>PLAN · {tags}</b>\n🎯 {_h(txt)}" + seviye_satiri(lines) + rr_satiri(lines, 1 if tone != "sat" else -1)
+                + (f"\n<i>{_h(sub)}</i>" if sub and not lines.get("stop") else ""))
+        tg.send(html, chart, sym=sym1, quiet=True)
     elif k == "haber" and PUSH_PREF["tg_haber"] and tone in ("iyi", "kötü") and ex.get("watched"):
-        link = f'\n<a href="{_h(url)}">Habere git</a>' if url else ""
-        tg.send(f"📰 {tags} <b>{'Olumlu' if tone == 'iyi' else 'Olumsuz'} haber:</b> {_h(txt)}{link}", sym=s0 or None)
+        acik = any(p["sym"] in it["sym"] for p in bot.open_positions())
+        html = (f"📰 <b>{tags} · {'OLUMLU' if tone == 'iyi' else 'OLUMSUZ'} HABER</b>"
+                + (" · 💼 açık pozisyon var" if acik else "") + f"\n{_h(txt)}"
+                + (f'\n<a href="{_h(url)}">Habere git →</a>' if url else ""))
+        tg.send(html, sym=sym1, quiet=not acik, haber=txt)
     elif k == "tara" and PUSH_PREF.get("tg_kosan", 1) and (ex.get("news") or (ex.get("pct") or 0) >= 30):
-        tg.send(f"🚀 <b>{tags} {_h(txt)}</b>" + (f"\n📰 {_h(sub)}" if sub else ""), sym=s0 or None)
+        html = (f"🚀 <b>KOŞAN · {tags} {ex.get('pct') or 0:+.0f}%</b>\n{_h(txt.split(': ', 1)[-1] if '(' in txt else '')}"
+                + (f"\n📰 {_h(sub)}" if sub and sub != "Haber bulunamadı" else "")
+                + (f'\n<a href="{_h(ex["url"])}">Habere git →</a>' if ex.get("url") else ""))
+        tg.send(html, sym=sym1, quiet=not ex.get("news"), haber=sub if sub and sub != "Haber bulunamadı" else None)
     elif k == "rapor" and PUSH_PREF["tg_rapor"]:
-        tg.send(f"📋 <b>{_h(txt)}</b>\n{_h(sub)}", ex.get("chart"))
+        tg.send(f"📋 <b>{_h(txt)}</b>\n{_h(sub)}", ex.get("chart"), quiet=True)
+
+
+def seviye_satiri(lines):
+    e, s_, h = lines.get("giris"), lines.get("stop"), lines.get("hedef")
+    if not (e and s_ and h):
+        return ""
+    return f"\n💵 Giriş <b>{fp_(e)}</b>   🛑 Stop {fp_(s_)}   🎯 Hedef {fp_(h)}"
+
+
+def guven_bar(c):
+    n = max(0, min(10, round((c or 0) / 10)))
+    return "▰" * n + "▱" * (10 - n)
 
 
 TG_MIN_CONF = 70
@@ -1442,8 +1522,7 @@ def rr_satiri(lines, d=1):
     if not (e and s_ and h) or e == s_:
         return ""
     rr = abs(h - e) / abs(e - s_)
-    return (f"\n⚖️ Risk/ödül 1:{rr:.1f} · potansiyel {d * (h / e - 1) * 100:+.1f}% · "
-            f"risk {-abs(e / s_ - 1) * 100:.1f}%")
+    return (f"\n⚖️ R/Ö <b>1:{rr:.1f}</b> · 📈 {d * (h / e - 1) * 100:+.1f}% · 📉 {-abs(e / s_ - 1) * 100:.1f}%")
 
 
 def feed_signal(sig):
@@ -1453,28 +1532,39 @@ def feed_signal(sig):
              sub=f"giriş {fp_(sig['e'])}   stop {fp_(sig['s'])}   hedef {fp_(sig['h'])}   güven {sig['conf']}",
              tone="al" if sig["dir"] > 0 else "sat", t=sig.get("created") or sig["t"], key=f"s:{sig['id']}",
              extra={"conf": sig["conf"], "e": sig["e"], "s": sig["s"], "h": sig["h"], "tgk": f"s:{sig['id']}",
-                    "tg_html": sinyal_tg(sig, d, ad)})
+                    "tg_html": sinyal_tg(sig, d, ad), "tg_durum": "⏳ Takipte", "kart": kart_bilgi(sig, ad),
+                    "tg_haber": ((scanner.runners.get(sig["sym"]) or {}).get("news") or {}).get("headline")})
 
 
 _UYARI = ("risk", "SEC", "manipülasyon", "dikkat", "kayma", "zayıf", "ters", "geç")
 
 
+def kart_bilgi(sig, ad, etiket=None, alt=None):
+    """Telegram resminin üstündeki sinyal kartı."""
+    e, s_, h, d = sig["e"], sig["s"], sig["h"], sig["dir"]
+    n = (scanner.runners.get(sig["sym"]) or {}).get("news") or {}
+    return {"yon": d, "sym": sig["sym"], "ad": ad, "conf": sig.get("conf"), "etiket": etiket,
+            "alt": alt or (n.get("headline") or "")[:70] or ", ".join((sig.get("why") or [])[:1])[:70],
+            "rr": f"1:{abs(h - e) / abs(e - s_):.1f}" if e and s_ and e != s_ else None,
+            "pot": f"{d * (h / e - 1) * 100:+.1f}%" if e and h else None,
+            "risk": f"{-abs(e / s_ - 1) * 100:.1f}%" if e and s_ else None}
+
+
 def sinyal_tg(sig, d, ad):
-    """Telegram için dolu sinyal mesajı: seviyeler, risk/ödül, botun 3 ana sebebi, uyarılar, haber linki."""
+    """Telegram için şablonlu sinyal mesajı."""
     sym = sig["sym"]
-    out = [f"<b>#{_h(sym)} {d} sinyali: {_h(ad)}</b>",
-           f"Giriş <b>{fp_(sig['e'])}</b> · Stop {fp_(sig['s'])} · Hedef {fp_(sig['h'])} · Güven <b>{sig['conf']}</b>"]
+    out = [f"{'🟢' if d == 'AL' else '🔴'} <b>{d} · #{_h(sym)}</b> · {_h(ad)}",
+           f"💵 Giriş <b>{fp_(sig['e'])}</b>   🛑 Stop {fp_(sig['s'])}   🎯 Hedef {fp_(sig['h'])}"]
     out.append(rr_satiri({"giris": sig["e"], "stop": sig["s"], "hedef": sig["h"]}, sig["dir"]).strip())
+    out.append(f"🔥 Güven <b>{sig['conf']}</b> {guven_bar(sig['conf'])}")
     why = [w for w in (sig.get("why") or []) if not w.startswith("Öğren")]
     iyi = [w for w in why if not any(u in w for u in _UYARI)][:3]
     kotu = [w for w in why if any(u in w for u in _UYARI)][:2]
-    if iyi:
-        out.append("Neden:\n" + "\n".join("• " + _h(w[:150]) for w in iyi))
-    if kotu:
-        out.append("\n".join("⚠️ " + _h(w[:150]) for w in kotu))
+    out += ["✅ " + _h(w[:140]) for w in iyi]
+    out += ["⚠️ " + _h(w[:140]) for w in kotu]
     n = (scanner.runners.get(sym) or {}).get("news") or {}
     if n.get("url"):
-        out.append(f'📰 <a href="{_h(n["url"])}">{_h((n.get("headline") or "Habere git")[:90])}</a>')
+        out.append(f'📰 <a href="{_h(n["url"])}">{_h((n.get("headline") or "Habere git")[:110])}</a>')
     return "\n".join(x for x in out if x)
 
 
@@ -1498,9 +1588,21 @@ def feed_bot_note(typ, msg, sym, t):
         side = "Açığa sattım" if pos and pos["dir"] < 0 else "İçerdeyim"
         txt = f"{side}: {fp_(float(m.group(2)))} $'dan {float(m.group(1)):g} adet" if m else f"{side}"
         sub = f"stop {fp_(pos['stop'])}   hedef {fp_(pos['target'])}" if pos else ""
-        feed_add("bot", sym, txt, sub=sub, tone="al" if not pos or pos["dir"] > 0 else "sat", t=t,
-                 extra={"e": pos.get("entry") or pos.get("plan"), "s": pos["stop"], "h": pos["target"],
-                        "tgk": f"p:{pos['id']}", "tgr": f"s:{pos.get('sig')}"} if pos else None)
+        ex = None
+        if pos:
+            e_ = pos.get("entry") or pos.get("plan")
+            cap = bot.capital()
+            ex = {"e": e_, "s": pos["stop"], "h": pos["target"], "tgk": f"p:{pos['id']}", "tgr": f"s:{pos.get('sig')}",
+                  "kart": kart_bilgi({"sym": sym, "e": e_, "s": pos["stop"], "h": pos["target"], "dir": pos["dir"],
+                                      "conf": pos.get("conf")}, sinyal.SETUP_AD.get(pos["setup"], pos["setup"]),
+                                     etiket="BOT", alt=f"Bot içerde: {pos['qty']:g} adet × {fp_(e_)}"),
+                  "tg_html": (f"{'🟢' if pos['dir'] > 0 else '🔴'} <b>{'İÇERDEYİM' if pos['dir'] > 0 else 'AÇIĞA SATTIM'} · "
+                              f"#{_h(sym)}</b> · {_h(sinyal.SETUP_AD.get(pos['setup'], pos['setup']))}\n"
+                              f"💵 {pos['qty']:g} adet × <b>{fp_(e_)}</b> (≈ {abs(pos['qty']) * (e_ or 0):.0f} $)\n"
+                              f"🛑 Stop {fp_(pos['stop'])}   🎯 Hedef {fp_(pos['target'])}"
+                              + rr_satiri({"giris": e_, "stop": pos["stop"], "hedef": pos["target"]}, pos["dir"])
+                              + f"\n💼 Para {cap[0]:.0f} $ · boşta {cap[2]:.0f} $")}
+        feed_add("bot", sym, txt, sub=sub, tone="al" if not pos or pos["dir"] > 0 else "sat", t=t, extra=ex)
     elif typ == "kapandı":
         m = _RX_CLOSE.search(msg)
         if m:
@@ -1513,21 +1615,32 @@ def feed_bot_note(typ, msg, sym, t):
                 dk = int(((pos.get("xt") or t) - (pos.get("et") or pos["opened"])) // 60)
                 sub = (f"giriş {fp_(pos['entry'])} → çıkış {fp_(pos['exit'])}   "
                        f"{(pos['exit'] / pos['entry'] - 1) * 100 * pos['dir']:+.1f}%   {dk} dk sürdü")
+            html = (f"{'✅' if usd > 0 else '❌'} <b>{head.upper()} · #{_h(sym)} {r:+.2f}R</b>\n"
+                    f"💰 <b>{usd:+.2f} $</b>" + (f" · {_h(sub)}" if sub else ""))
+            td = bot.today_closed()
+            html += f"\n📅 Bugün: {len(td)} işlem, {sum(p['pnl'] for p in td):+.2f} $"
+            ex = {"tg_html": html}
+            if pos:
+                ex["tgr"] = f"p:{pos['id']}"
             feed_add("bot", sym, f"{head}: {r:+.2f}R ({usd:+.2f} $)", sub=sub, tone="kar" if usd > 0 else "zarar", t=t,
-                     extra={"tgr": f"p:{pos['id']}"} if pos else None)
+                     extra=ex)
         else:
             feed_add("bot", sym, msg, tone="bilgi", t=t)
     elif typ == "yarım":
         pos = _pos_of(sym, open_=True)
         m = re.search(r"([+-][\d.]+) \$ cebe", msg)
+        ex = {"tg_html": f"💰 <b>YARIM KAPAT · #{_h(sym)}</b>\n{_h(msg)}"}
+        if pos:
+            ex["tgr"] = f"p:{pos['id']}"
         feed_add("bot", sym, f"Yarısını sattım: {m.group(1) if m else ''} $ cebe" if m else "Yarısını sattım",
-                 sub="Kalan kısım için stop girişte; bu işlem artık zarar yazmaz", tone="kar", t=t,
-                 extra={"tgr": f"p:{pos['id']}"} if pos else None)
+                 sub="Kalan kısım için stop girişte; bu işlem artık zarar yazmaz", tone="bilgi", t=t, extra=ex)
     elif typ in ("koruma", "iz"):
         pos = _pos_of(sym, open_=True)
-        feed_add("bot", sym, "Stop girişe çekildi, bu işlem artık zarar yazmaz" if typ == "koruma"
-                 else "Kâr büyüyor, stop arkadan takip ediyor", tone="kar", t=t,
-                 extra={"tgr": f"p:{pos['id']}"} if pos else None)
+        t1 = "Stop girişe çekildi, bu işlem artık zarar yazmaz" if typ == "koruma" else "Kâr büyüyor, stop arkadan takip ediyor"
+        ex = {"tg_html": f"🛡 <b>#{_h(sym)}</b> · {_h(t1)}" + (f"\n🛑 Yeni stop {fp_(pos['stop'])}" if pos else "")}
+        if pos:
+            ex["tgr"] = f"p:{pos['id']}"
+        feed_add("bot", sym, t1, tone="bilgi", t=t, extra=ex)
     elif typ in ("hata", "uyarı"):
         feed_add("bot", sym, msg, tone="zarar", t=t)
 
@@ -1555,10 +1668,17 @@ async def news_loop():
                                      tone=kind, t=_iso_epoch(n.get("created_at", "")), url=n.get("url", ""),
                                      key=f"n:{n.get('id')}",
                                      extra={"word": word, "watched": bool(watched), "ai": ai or None})
+                        # haber düşen izlenmeyen hisse: fiyat tepki verdiyse hemen koşanlara al
+                        try:
+                            yeni = await scanner.haber_tara(items, cal.session(time.time()))
+                            if yeni:
+                                kosan_eklendi(set(yeni))
+                        except Exception as e:
+                            log.debug("Haber taraması hatası: %s", e)
             except Exception as e:
                 log.debug("Haber akışı hatası: %s", e)
             first = False
-            await asyncio.sleep(30 if cal.session(time.time()) != "closed" else 180)
+            await asyncio.sleep(20 if cal.session(time.time()) != "closed" else 180)
 
 
 def _iso_epoch(s):
@@ -1739,22 +1859,31 @@ async def signal_loop():
             log.warning("Sinyal süre kontrolü hatası: %s", e)
 
 
+def kosan_eklendi(new):
+    """Tarayıcıya yeni giren hisseler: akışa / Telegram'a yaz, veri çekmeye başla."""
+    for r in new:
+        info = scanner.runners.get(r)
+        if not info:
+            continue
+        n = info.get("news") or {}
+        src = {"haber": "Haber düştü, fiyat tepki verdi", "seans dışı": "Seans dışı hareket"}.get(info.get("src"), "")
+        feed_add("tara", r, f"Koşan hisseler listesine girdi: {info.get('pct') or 0:+.0f}%" + (f" ({src})" if src else ""),
+                 sub=n.get("headline", "Haber bulunamadı")[:140], tone="iyi" if n else "nötr",
+                 key=f"r:{r}:{datetime.now(ET).date()}",
+                 extra={"news": bool(n) and info.get("news_kind") != "kötü", "pct": info.get("pct") or 0,
+                        "url": n.get("url", "")})
+    engine.runners = scanner.runners
+    for r in scanner.runners:
+        ensure_sym(r)
+
+
 async def scan_loop():
     while True:
         ses = cal.session(time.time())
         if ses != "closed" or not scanner.last_ok:
             before = set(scanner.runners)
-            await scanner.scan(ET)
-            for r in set(scanner.runners) - before:
-                info = scanner.runners[r]
-                n = info.get("news") or {}
-                feed_add("tara", r, f"Koşan hisseler listesine girdi: bugün {info.get('pct') or 0:+.0f}%",
-                         sub=n.get("headline", "Haber bulunamadı")[:140], tone="iyi" if n else "nötr",
-                         key=f"r:{r}:{datetime.now(ET).date()}",
-                         extra={"news": bool(n) and info.get("news_kind") != "kötü", "pct": info.get("pct") or 0})
-            engine.runners = scanner.runners
-            for r in scanner.runners:
-                ensure_sym(r)
+            await scanner.scan(ET, ses)
+            kosan_eklendi(set(scanner.runners) - before)
         await asyncio.sleep(30 if ses != "closed" else 600)
 
 
@@ -2330,7 +2459,7 @@ async def tg_analiz(sym):
     return "\n".join(out), png
 
 
-YARDIM = ("<b>Komutlar</b>\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
+YARDIM = ("<b>Komutlar</b>\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
           "/analiz QNME — 15 dk analiz ve plan (grafikli)\n/alarm QNME 0.90 — fiyat alarmı\n/alarmlar — kurulu alarmlar\n"
           "/alarmsil QNME — alarmı sil\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
           "/basla — yeni işlem açmaya devam\nSadece paper (sanal) hesap.")
@@ -2376,6 +2505,9 @@ async def tg_komut(text, chat):
         send(YARDIM)
     elif cmd == "durum":
         send(tg_durum())
+    elif cmd == "panel":
+        tg.table = {}
+        await tg_panel(force=True)
     elif cmd in ("pozisyon", "pozisyonlar", "poz"):
         send(tg_pozisyon_tablosu())
     elif cmd == "karne":
@@ -2443,12 +2575,7 @@ async def tg_komut_loop():
         return
     try:
         await tg.api("deleteWebhook")
-        await tg.api("setMyCommands", commands=[
-            {"command": c, "description": d} for c, d in (
-                ("durum", "Bot ve para durumu"), ("pozisyon", "Açık pozisyonlar"), ("karne", "Sonuçlar + grafik"),
-                ("analiz", "Hisse analizi: /analiz QNME"), ("alarm", "Fiyat alarmı: /alarm QNME 0.90"),
-                ("alarmlar", "Kurulu alarmlar"), ("rapor", "Gün sonu raporu"), ("dur", "Yeni işlemleri durdur"),
-                ("basla", "Yeni işlemlere devam"), ("yardim", "Komut listesi"))])
+        await tg.api("deleteMyCommands")          # menü botun özelinde değil, kanaldaki panelde
     except Exception:
         pass
     async with httpx.AsyncClient(timeout=40) as c:
@@ -2456,7 +2583,7 @@ async def tg_komut_loop():
             try:
                 r = await c.get(f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates",
                                 params={"offset": tg.offset, "timeout": 25,
-                                        "allowed_updates": json.dumps(["message", "channel_post"])})
+                                        "allowed_updates": json.dumps(["message", "channel_post", "callback_query"])})
                 js = r.json() if r.status_code == 200 else {}
                 if r.status_code == 409:
                     tg.cmd_st = "başka bir yer de bu botu dinliyor (409)"
@@ -2465,6 +2592,12 @@ async def tg_komut_loop():
                 tg.cmd_st = "dinliyor"
                 for u in js.get("result", []):
                     tg.offset = u["update_id"] + 1
+                    if u.get("callback_query"):
+                        try:
+                            await tg_dugme(u["callback_query"])
+                        except Exception as e:
+                            log.warning("Telegram düğme hatası: %s", e)
+                        continue
                     m = u.get("message") or u.get("channel_post") or {}
                     text = m.get("text") or ""
                     if not text.startswith("/"):
@@ -2509,7 +2642,7 @@ async def tg_takip_loop():
                 tg.send(f"{'✅' if r_ > 0 else '❌'} <b>#{_h(sig['sym'])} sinyal sonucu: {ST_TR_[sig['st']]} {r_:+.2f}R</b>"
                         + (f" ({sig.get('pct'):+.1f}%)" if sig.get("pct") is not None else "")
                         + (f"\nBot bu işleme girmedi: {_h(neden[:140])}" if neden else "\nBot bu işleme girmedi."),
-                        reply=key)
+                        reply=key, quiet=True)
                 tg.persist()
             # 2) fiyat alarmları
             hit = []
@@ -2527,35 +2660,209 @@ async def tg_takip_loop():
             if hit:
                 tg.persist()
             # 3) canlı pozisyon tablosu (dakikada bir, seans açıkken)
-            if PUSH_PREF.get("tg_tablo", 1) and tick % 3 == 0 and cal.session(time.time()) != "closed":
-                await tg_tablo_guncelle()
+            # 3) mesaj durumları (⏳ → 🟢 → ✅) ve kontrol paneli
+            await tg_durum_guncelle()
+            ses = cal.session(time.time())
+            if PUSH_PREF.get("tg_tablo", 1) and ((tick % 3 == 0 and ses != "closed") or tick % 30 == 0 or not tg.table.get("panel")):
+                await tg_panel()
         except Exception as e:
             log.warning("Telegram takip hatası: %s", e)
 
 
-async def tg_tablo_guncelle():
-    day = datetime.now(ET).date().isoformat()
-    txt = tg_pozisyon_tablosu()
-    key_txt = re.sub(r"· \d\d:\d\d TR", "", txt)
+# ---- kanal kontrol paneli: başa sabitlenmiş tek mesaj + düğmeler (basınca aynı mesaj güncellenir)
+PANEL_GORUNUM = {"poz": "💼 Pozisyonlar", "durum": "📊 Durum", "karne": "🏁 Karne", "sinyal": "🎯 Sinyaller",
+                 "kosan": "🚀 Koşanlar"}
+
+
+def panel_klavye():
+    dur = BOT_CFG.get("yeni_islem", 1)
+    return {"inline_keyboard": [
+        [{"text": "💼 Pozisyonlar", "callback_data": "p:poz"}, {"text": "📊 Durum", "callback_data": "p:durum"},
+         {"text": "🏁 Karne", "callback_data": "p:karne"}],
+        [{"text": "🎯 Bugünkü sinyaller", "callback_data": "p:sinyal"}, {"text": "🚀 Koşanlar", "callback_data": "p:kosan"}],
+        [{"text": "⏸ Yeni işlemleri durdur" if dur else "▶️ Yeni işlemlere başla",
+          "callback_data": "p:dur" if dur else "p:basla"},
+         {"text": "🔄 Yenile", "callback_data": "p:yenile"}],
+        [{"text": "🌐 Uygulamayı aç", "url": SITE_URL}]]}
+
+
+def panel_sinyaller():
+    today = datetime.now(ET).date().isoformat()
+    sg = [x for x in engine.signals if x.get("day") == today and x["conf"] >= BOT_CFG.get("min_conf", 55)][-12:][::-1]
+    if not sg:
+        return "Bugün henüz sinyal yok."
+    rows = []
+    for x in sg:
+        st = x.get("st")
+        res = (f"✅ {x['r']:+.1f}R" if (x.get("r") or 0) > 0 else f"❌ {x['r']:+.1f}R") if st in ST_TR_ and x.get("r") is not None \
+            else ("🟢 açık" if st == "açık" else "⏳" if st == "bekliyor" else "⏸")
+        rows.append(f"{'🟢' if x['dir'] > 0 else '🔴'} #{_h(x['sym'])} · {_h(sinyal.SETUP_AD.get(x['setup'], x['setup'])[:28])} "
+                    f"· {x['conf']} · {res}")
+    return "\n".join(rows)
+
+
+def panel_kosanlar():
+    rows = scanner.rows()[:12]
+    if not rows:
+        return "Şu an koşan hisse yok."
+    out = []
+    for r in rows:
+        p = r.get("pct_now") if r.get("pct_now") is not None else r.get("pct")
+        nk = r.get("news_kind")
+        out.append(f"🚀 #{_h(r['sym'])} {p or 0:+.0f}%" + (" · 📰 olumlu" if nk == "iyi" else " · ⚠️ olumsuz" if nk == "kötü"
+                                                         else " · 📰" if r.get("news") else ""))
+    return "\n".join(out)
+
+
+def panel_metni(view):
+    now = datetime.now(TR).strftime("%H:%M")
+    head = f"🎛 <b>ABD·BOT KONTROL PANELİ</b> · {now} TR · {SES_TR_.get(cal.session(time.time()), '')}\n"
+    if view == "durum":
+        body = tg_durum()
+    elif view == "karne":
+        body = tg_karne()[0]
+    elif view == "sinyal":
+        body = "🎯 <b>Bugünkü sinyaller</b>\n" + panel_sinyaller()
+    elif view == "kosan":
+        body = "🚀 <b>Koşan hisseler</b>\n" + panel_kosanlar()
+    else:
+        body = tg_pozisyon_tablosu(baslik=False)
+    return head + "\n" + body + f"\n\n<i>Görünüm: {PANEL_GORUNUM.get(view, '')} · Pozisyonlar dakikada bir yenilenir</i>"
+
+
+async def tg_panel(view=None, force=False):
+    """Paneli güncelle; yoksa gönderip sabitle."""
     T = tg.table
-    if T.get("day") == day and T.get("id"):
-        if T.get("txt") == key_txt:
+    now = time.time()
+    if view:
+        T["view"], T["vt"] = view, now
+    v = T.get("view") or "poz"
+    if v != "poz" and now - T.get("vt", 0) > 300:          # 5 dk sonra pozisyonlara dön
+        v = T["view"] = "poz"
+    txt = panel_metni(v)
+    key_txt = re.sub(r"· \d\d:\d\d TR", "", txt) + str(BOT_CFG.get("yeni_islem", 1))
+    if T.get("id") and T.get("panel"):
+        if T.get("txt") == key_txt and not force:
             return
-        js = await tg.api("editMessageText", chat_id=TG_CHAT, message_id=T["id"], text=txt, parse_mode="HTML")
+        js = await tg.api("editMessageText", chat_id=TG_CHAT, message_id=T["id"], text=txt, parse_mode="HTML",
+                          reply_markup=panel_klavye(), disable_web_page_preview=True)
         if js.get("ok") or "not modified" in str(js.get("description", "")):
             T["txt"] = key_txt
             return
-        if "not found" not in str(js.get("description", "")):
+        if "not found" not in str(js.get("description", "")) and "can't be edited" not in str(js.get("description", "")):
             return
-    js = await tg.api("sendMessage", chat_id=TG_CHAT, text=txt, parse_mode="HTML", disable_notification=True)
+    js = await tg.api("sendMessage", chat_id=TG_CHAT, text=txt, parse_mode="HTML", disable_notification=True,
+                      reply_markup=panel_klavye(), disable_web_page_preview=True)
     mid = (js.get("result") or {}).get("message_id")
     if mid:
         if T.get("id"):
             await tg.api("unpinChatMessage", chat_id=TG_CHAT, message_id=T["id"])
         await tg.api("pinChatMessage", chat_id=TG_CHAT, message_id=mid, disable_notification=True)
-        tg.table = {"id": mid, "day": day, "txt": key_txt}
+        tg.table = {"id": mid, "panel": 1, "view": v, "vt": T.get("vt", now), "txt": key_txt}
         tg.persist()
 
+
+async def _admin_mi(uid):
+    uid = str(uid or "")
+    if not uid:
+        return False
+    if TG_ADMIN and uid == TG_ADMIN:
+        return True
+    if time.time() - _TG_ADMINS["t"] > 600:
+        try:
+            js = await tg.api("getChatAdministrators", chat_id=TG_CHAT)
+            _TG_ADMINS["ids"] = {str((m.get("user") or {}).get("id")) for m in js.get("result") or []}
+            _TG_ADMINS["t"] = time.time()
+        except Exception:
+            pass
+    return uid in _TG_ADMINS["ids"]
+
+
+async def tg_dugme(cq):
+    """Paneldeki düğmeye basıldı."""
+    data = cq.get("data") or ""
+    cid = cq.get("id")
+    if not await _admin_mi((cq.get("from") or {}).get("id")):
+        await tg.api("answerCallbackQuery", callback_query_id=cid, text="Bu paneli sadece kanal yöneticileri kullanabilir.",
+                     show_alert=True)
+        return
+    act = data[2:] if data.startswith("p:") else ""
+    msg = ""
+    if act in ("dur", "basla"):
+        BOT_CFG["yeni_islem"] = 0 if act == "dur" else 1
+        _ayar_kaydet()
+        msg = "Bot yeni işlem açmayı durdurdu (açık pozisyonlar yönetiliyor)" if act == "dur" else "Bot yeni işlemlere devam ediyor"
+        await tg_panel(force=True)
+    elif act in PANEL_GORUNUM:
+        await tg_panel(view=act, force=True)
+    else:
+        await tg_panel(force=True)
+        msg = "Yenilendi"
+    await tg.api("answerCallbackQuery", callback_query_id=cid, text=msg[:190])
+
+
+# ---- sinyal mesajının alt satırı (durum) sonuca göre kendini günceller
+def sinyal_durumu(sig):
+    st = sig.get("st")
+    if st == "bekliyor":
+        d = "⏳ Giriş bekleniyor"
+    elif st == "açık":
+        d = f"🟢 Girildi {fp_(sig.get('fill'))} · takipte"
+    elif st in ST_TR_ and sig.get("r") is not None:
+        r_ = sig["r"]
+        d = {"hedef": "✅ Hedef geldi", "stop": "❌ Stop oldu", "süre": "⌛ Süre doldu"}[st] + f" <b>{r_:+.2f}R</b>"
+    elif st == "dolmadı":
+        d = "⏸ Giriş seviyesine gelmedi"
+    else:
+        d = "⏳ Takipte"
+    pos = next((p for p in bot.positions if p.get("sig") == sig["id"] and p["st"] != "iptal"), None)
+    if pos:
+        if pos["st"] == "kapandı" and pos.get("pnl") is not None:
+            d += f"\n🤖 Bot: {pos['pnl']:+.2f} $ ({pos.get('r') or 0:+.2f}R)"
+        elif pos.get("entry"):
+            d += f"\n🤖 Bot içerde: {pos['qty']:g} adet @ {fp_(pos['entry'])}"
+        else:
+            d += "\n🤖 Bot emir verdi"
+    else:
+        neden = next((j["msg"].split("atlandı:", 1)[1].strip() for j in reversed(bot.journal[-400:])
+                      if j.get("sym") == sig["sym"] and j["typ"] == "atla" and "atlandı:" in j["msg"]
+                      and abs(j["t"] - (sig.get("created") or sig["t"])) < 600), "")
+        if neden:
+            d += f"\n🤖 Bot girmedi: {_h(neden[:90])}"
+    return d
+
+
+async def tg_durum_guncelle():
+    for key, m in list(tg.meta.items()):
+        if not key.startswith("s:") or key not in tg.msg or m.get("bitti"):
+            continue
+        sig = engine.by_id.get(key[2:])
+        if not sig:
+            m["bitti"] = 1
+            continue
+        d = sinyal_durumu(sig)
+        if d == m.get("durum"):
+            continue
+        text = m["base"] + "\n\n" + d
+        mk = tg._markup(m.get("sym"))
+        if m.get("photo"):
+            if len(text) > 1024:
+                continue
+            js = await tg.api("editMessageCaption", chat_id=TG_CHAT, message_id=tg.msg[key], caption=text,
+                              parse_mode="HTML", reply_markup=mk)
+        else:
+            js = await tg.api("editMessageText", chat_id=TG_CHAT, message_id=tg.msg[key], text=text,
+                              parse_mode="HTML", reply_markup=mk, disable_web_page_preview=True)
+        if js.get("ok") or "not modified" in str(js.get("description", "")):
+            m["durum"] = d
+            if sig.get("st") in ST_TR_ or sig.get("st") == "dolmadı":
+                pos = next((p for p in bot.positions if p.get("sig") == sig["id"] and p["st"] != "iptal"), None)
+                if not pos or pos["st"] == "kapandı":
+                    m["bitti"] = 1
+            tg.persist()
+        else:
+            m["bitti"] = 1      # silinmiş / düzenlenemiyor
+        await asyncio.sleep(0.5)
 
 
 def bot_dusunce(sym):

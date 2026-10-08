@@ -38,7 +38,9 @@ NEWS_BAD = ("offering", "priced", "pricing of", "registered direct", "private pl
 NEWS_GOOD = ("fda approv", "approval", "approved", "clearance", "cleared", "breakthrough", "contract", "awarded",
              "partnership", "partners with", "agreement", "acquisition", "acquire", "merger", "to be acquired",
              "buyout", "record revenue", "record quarter", "beats", "raises guidance", "raised guidance", "upgrade",
-             "positive", "topline", "patent", "collaboration", "license", "purchase order", "wins", "secures")
+             "positive", "topline", "patent", "collaboration", "license", "purchase order", "wins", "secures",
+             "fast track", "orphan drug", "granted", "clinical trial application", "ind clearance", "receives",
+             "health canada", "launches", "strategic", "record", "expands", "milestone")
 
 
 def haber_turu(headline):
@@ -59,6 +61,8 @@ SEC_SHELF = ("S-3", "S-3/A", "F-3", "F-3/A", "EFFECT", "S-3ASR")
 SEC_TTL = 600        # aynı hisse için bildirimler 10 dk'da bir yeniden okunur
 
 DROP_SEC = 20 * 60   # elenen hisse bu süre sonra (hâlâ yükselenler listesindeyse) tekrar izlenir
+NEWS_MIN_PCT = 8.0   # olumlu haber gelen hisse bu kadar yükselmişse hemen izlemeye alınır
+NEWS_WATCH = 15 * 60 # haber geldikten sonra fiyat tepkisi bu süre boyunca beklenir
 
 AI_PROMPT = """You are a US small-cap day trading news analyst. A stock is up {pct:.0f}% today.
 Latest headline: "{headline}"
@@ -66,6 +70,14 @@ Score how likely this news supports a CONTINUED intraday move UP for {sym} over 
 from -100 (very bearish: offering, dilution, reverse split, bad trial data) to +100 (very bullish: FDA approval,
 large contract, acquisition at premium). Old, vague or promotional news should score near 0.
 Answer ONLY JSON: {{"score": <int>, "reason": "<max 12 words, in Turkish>"}}"""
+
+
+def _ts(s):
+    """Alpaca zaman damgası (nanosaniyeli olabilir) → epoch saniye; okunamazsa 0."""
+    try:
+        return datetime.strptime(str(s)[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+    except Exception:
+        return 0
 
 
 def is_common(sym, name=""):
@@ -102,6 +114,10 @@ class Scanner:
         self.dropped = {}        # sembol -> (zaman, sebep): elenen hisse 20 dk sonra tekrar aday olabilir
         self.keep = lambda sym: False   # açık pozisyonu olan hisse listeden çıkarılmaz (app.py ayarlar)
         self.gainers, self.losers, self.actives = [], [], []
+        self.news_pending = {}   # sembol -> {"item", "until"}: olumlu haber geldi, fiyat tepkisi bekleniyor
+        self.news_seen = set()
+        self.recent_news_syms = {}   # sembol -> zaman (seans dışı taramada aday havuzu)
+        self.ext_status = "—"
 
     def _h(self):
         return {"APCA-API-KEY-ID": self.key, "APCA-API-SECRET-KEY": self.secret}
@@ -121,7 +137,137 @@ class Scanner:
         self._assets[sym] = ok
         return ok
 
-    async def scan(self, et):
+    async def snapshots(self, c, syms):
+        """Alpaca anlık özet (IEX, ücretsiz): {sembol: snapshot}. Seans dışı işlemleri de içerir."""
+        out = {}
+        syms = [x for x in dict.fromkeys(syms) if SYM_RE.match(x)]
+        for i in range(0, len(syms), 50):
+            try:
+                r = await c.get(f"{DATA}/v2/stocks/snapshots", headers=self._h(),
+                                params={"symbols": ",".join(syms[i:i + 50]), "feed": "iex"})
+                if r.status_code == 200:
+                    js = r.json()
+                    out.update(js.get("snapshots", js) if isinstance(js, dict) else {})
+            except Exception:
+                continue
+        return out
+
+    @staticmethod
+    def _move(sn, ses):
+        """(önceki kapanışa göre %, bu seanstaki %, son fiyat, son işlem zamanı)"""
+        if not isinstance(sn, dict):
+            return None
+        lt = sn.get("latestTrade") or {}
+        px = float(lt.get("p") or 0)
+        if px <= 0:
+            return None
+        prev = float((sn.get("prevDailyBar") or {}).get("c") or 0)
+        day = float((sn.get("dailyBar") or {}).get("c") or 0)
+        p_prev = (px / prev - 1) * 100 if prev else None
+        p_ses = (px / day - 1) * 100 if ses == "post" and day else None   # sonrası seans: bugünkü kapanışa göre
+        t = _ts(lt.get("t"))
+        return p_prev, p_ses, px, t
+
+    async def _add(self, c, sym, pct, price, src, news=None):
+        """Aday hisseyi listeye ekle (liste doluysa en zayıfın yerine). True: eklendi."""
+        if sym in self.runners or sym in self.core or not SYM_RE.match(sym) or not is_common(sym):
+            if sym in self.runners:
+                self.runners[sym].update(pct=pct, price=price, seen=time.time())
+            return False
+        if price <= 0 or price < self.min_price:
+            return False
+        dr = self.dropped.get(sym)
+        if dr and time.time() - dr[0] < DROP_SEC:
+            return False
+        if len(self.runners) >= self.max_runners:
+            weak = [r for r in self.runners.values() if not self.keep(r["sym"])]
+            if not weak:
+                return False
+            w = min(weak, key=lambda r: r.get("pct_now") if r.get("pct_now") is not None else (r.get("pct") or 0))
+            wp = w.get("pct_now") if w.get("pct_now") is not None else (w.get("pct") or 0)
+            if pct < wp + (0 if news else 10):        # haberli yeni hisse eşit güçteyse bile öncelikli
+                return False
+            if not await self._asset_ok(c, sym):
+                return False
+            del self.runners[w["sym"]]
+        elif not await self._asset_ok(c, sym):
+            return False
+        info = {"sym": sym, "pct": round(pct, 2), "price": price, "vol": None, "first": time.time(),
+                "seen": time.time(), "news": None, "src": src}
+        if news:
+            info.update(news=news, news_kind=news.get("kind", "nötr"), news_word=news.get("word", ""))
+        self.runners[sym] = info
+        self.ver += 1
+        if self.log:
+            self.log.info("Tarayıcı: %s eklendi (%s, %%%.0f)", sym, src, pct)
+        return True
+
+    async def haber_tara(self, items, ses):
+        """Olumlu haber düşen (izlenmeyen) hisseyi fiyat tepki verdiği an listeye al.
+        items: Alpaca haber kayıtları. Dönüş: eklenen semboller."""
+        if not self.key or ses == "closed":
+            return []
+        now = time.time()
+        for n in items or []:
+            nid = n.get("id")
+            if nid in self.news_seen:
+                continue
+            self.news_seen.add(nid)
+            nt = _ts(n.get("created_at")) or now
+            if now - nt > NEWS_WATCH:
+                continue
+            kind, word = haber_turu(n.get("headline", ""))
+            if kind == "kötü":
+                continue
+            item = {"headline": n.get("headline", ""), "url": n.get("url", ""), "t": n.get("created_at", ""),
+                    "source": n.get("source", ""), "kind": kind, "word": word}
+            for sym in (n.get("symbols") or [])[:4]:
+                if SYM_RE.match(sym) and sym not in self.core:
+                    self.recent_news_syms[sym] = now
+                    if sym not in self.runners:
+                        self.news_pending[sym] = {"item": item, "until": nt + NEWS_WATCH}
+        if len(self.news_seen) > 3000:
+            self.news_seen = set(list(self.news_seen)[-1500:])
+        self.news_pending = {k: v for k, v in self.news_pending.items() if v["until"] > now and k not in self.runners}
+        if not self.news_pending:
+            return []
+        added = []
+        async with httpx.AsyncClient(timeout=15) as c:
+            snaps = await self.snapshots(c, list(self.news_pending))
+            for sym, pend in list(self.news_pending.items()):
+                mv = self._move(snaps.get(sym), ses)
+                if not mv:
+                    continue
+                p_prev, p_ses, px, t = mv
+                pct = max(x for x in (p_prev, p_ses, -999) if x is not None)
+                if pct >= NEWS_MIN_PCT and (not t or now - t < 600):
+                    if await self._add(c, sym, p_prev if p_prev is not None else pct, px, "haber", pend["item"]):
+                        added.append(sym)
+                        self.news_pending.pop(sym, None)
+        return added
+
+    async def ext_scan(self, c, ses):
+        """Öncesi/sonrası seans: en yüksek hacimliler + yükselenler + son haberli hisseler canlı fiyatla taranır."""
+        now = time.time()
+        self.recent_news_syms = {k: v for k, v in self.recent_news_syms.items() if now - v < 4 * 3600}
+        pool = [x.get("symbol") for x in self.actives] + [g.get("symbol") for g in self.gainers] + list(self.recent_news_syms)
+        pool = [x for x in dict.fromkeys(pool) if x and x not in self.core and x not in self.runners][:150]
+        snaps = await self.snapshots(c, pool)
+        n_add = 0
+        for sym, sn in snaps.items():
+            mv = self._move(sn, ses)
+            if not mv:
+                continue
+            p_prev, p_ses, px, t = mv
+            if t and now - t > 900:
+                continue
+            ses_move = p_ses if p_ses is not None else p_prev
+            if (p_prev is not None and p_prev >= self.min_pct) or (ses_move is not None and ses_move >= self.min_pct * 0.8):
+                if await self._add(c, sym, p_prev if p_prev is not None else ses_move, px, "seans dışı"):
+                    n_add += 1
+        self.ext_status = f"{len(snaps)} hisse tarandı, {n_add} eklendi ({datetime.now().strftime('%H:%M')})"
+
+    async def scan(self, et, ses=None):
         if not self.key:
             return
         today = datetime.now(et).date().isoformat()
@@ -186,6 +332,12 @@ class Scanner:
                     self.runners[sym] = {"sym": sym, "pct": pct, "price": price, "vol": vols.get(sym),
                                          "first": time.time(), "seen": time.time(), "news": None}
                     added += 1
+                # öncesi/sonrası seans: canlı fiyatla ek tarama (yükselenler listesi bu saatlerde eksik kalabiliyor)
+                if ses in ("pre", "post"):
+                    try:
+                        await self.ext_scan(c, ses)
+                    except Exception as e:
+                        self.ext_status = f"hata: {str(e)[:60]}"
                 # haberler (son 24 saat)
                 if self.runners:
                     start = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
