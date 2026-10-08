@@ -801,7 +801,7 @@ async def giris(request: Request):
     return resp
 
 
-@app.get("/saglik")
+@app.api_route("/saglik", methods=["GET", "HEAD"])
 async def saglik():
     # Şifresiz, veri içermez. Uyanık tutma servisi (UptimeRobot) bunu yoklar.
     return Response("ok", media_type="text/plain")
