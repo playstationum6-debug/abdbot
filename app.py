@@ -120,6 +120,8 @@ class State:
     yahoo_err = ""
     yahoo_secs = 0.0
     yahoo_t0 = 0.0          # son başarılı Yahoo çekiminin BAŞLADIĞI an (bu andan önce biten mumlar kapanmıştır)
+    xvol_last = 0.0         # öncesi/sonrası hacmi için son başarılı Alpaca IEX mum çekimi
+    xvol_err = ""
     started = time.time()
 
 
@@ -382,6 +384,8 @@ class Store:
         self.snap_ver = {s: 0 for s in SYMBOLS}     # tam yeniden çizim gerektiren değişiklik
         self.dirty = set()
         self.bad_ticks = 0
+        # Öncesi/sonrası seans hacmi: Yahoo bu saatlerde hacmi 0 verir, Alpaca IEX'ten doldurulur.
+        self.xvol = {}                              # sembol -> {ts: hacim}
 
     def load(self):
         since = int(time.time() - MEM_SEC)
@@ -408,6 +412,9 @@ class Store:
                 l = min(l, old[2])
                 if live and ts <= live["t"] < ts + 60:
                     c = live["p"]
+            xv = self.xvol.get(sym, {}).get(ts)
+            if xv is not None:
+                v = xv
             row = [o, h, l, c, v, "yahoo"]
             if old is None or old[:5] != row[:5]:
                 cur[ts] = row
@@ -420,6 +427,31 @@ class Store:
                 self.ver[sym] += 1
             return 1
         return 0
+
+    def set_xvol(self, sym, vols):
+        """Öncesi/sonrası seans mumlarına Alpaca IEX hacmini yaz."""
+        cur = self.xvol.setdefault(sym, {})
+        bars = self.bars.get(sym)
+        changed = False
+        for ts, v in vols.items():
+            if cur.get(ts) == v:
+                continue
+            cur[ts] = v
+            b = bars.get(ts) if bars else None
+            if b is not None and b[4] != v:
+                b[4] = v
+                self.dirty.add((sym, ts))
+                changed = True
+        if changed:
+            self.ver[sym] = self.ver.get(sym, 0) + 1
+            if min(vols) < time.time() - 180:
+                self.snap_ver[sym] = self.snap_ver.get(sym, 0) + 1   # geçmiş mumların hacmi değişti → grafiği yeniden çiz
+
+    def prune_xvol(self):
+        cut = int(time.time() - 2 * 86400)
+        for d in self.xvol.values():
+            for ts in [t for t in d if t < cut]:
+                del d[ts]
 
     def on_trade(self, sym, p, t):
         if sym not in self.bars or p <= 0:
@@ -818,6 +850,52 @@ def yahoo_fetch(symbols, period):
     return out
 
 
+def ses_start(now):
+    """Şu anki seansın başladığı dakika (en fazla 8 saat geriye bakar)."""
+    ses = cal.session(now)
+    t = int(now // 60 * 60)
+    while cal.session(t - 60) == ses and now - t < 8 * 3600:
+        t -= 60
+    return t
+
+
+async def iex_ext_volume(symbols):
+    """Öncesi/sonrası seansta 1 dk hacimleri Alpaca IEX'ten çek ve mumlara yaz.
+    Not: IEX tüm piyasa hacminin küçük bir kısmıdır; sinyal eşikleri buna göre ölçeklenir (sinyal.py)."""
+    if not (ALPACA_KEY and ALPACA_SECRET) or not symbols:
+        return
+    now = time.time()
+    if cal.session(now) not in ("pre", "post"):
+        return
+    start = ses_start(now)
+    if state.xvol_last:
+        start = max(start, int(state.xvol_last) - 600)
+    params = {"symbols": ",".join(symbols), "timeframe": "1Min", "feed": "iex", "limit": 10000,
+              "start": datetime.fromtimestamp(start, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    got = {}
+    async with httpx.AsyncClient(timeout=20) as c:
+        for _ in range(10):
+            r = await c.get("https://data.alpaca.markets/v2/stocks/bars", params=params, headers=alpaca_headers())
+            r.raise_for_status()
+            js = r.json()
+            for sym, rows in (js.get("bars") or {}).items():
+                d = got.setdefault(sym, {})
+                for b in rows or []:
+                    ts = int(parse_ts(b.get("t", "")) // 60 * 60)
+                    if cal.session(ts) in ("pre", "post"):
+                        d[ts] = float(b.get("v") or 0)
+            tok = js.get("next_page_token")
+            if not tok:
+                break
+            params["page_token"] = tok
+    for sym, vols in got.items():
+        if vols:
+            store.set_xvol(sym, vols)
+    store.flush()
+    state.xvol_last = now
+    state.xvol_err = ""
+
+
 async def yahoo_loop():
     first = True
     while True:
@@ -826,6 +904,12 @@ async def yahoo_loop():
             data = await asyncio.to_thread(yahoo_fetch, SYMBOLS, "5d" if first else "1d")
             n = sum(store.merge_yahoo(sym, bars) for sym, bars in data.items())
             store.flush()
+            # Öncesi/sonrası seans: Yahoo hacmi 0 → Alpaca IEX hacmi (sinyaller bu mumlar kapanınca değerlendirilir)
+            try:
+                await iex_ext_volume(all_syms())
+            except Exception as e:
+                state.xvol_err = str(e)[:120]
+                log.warning("IEX hacim hatası: %s", e)
             state.yahoo_ok = time.time()
             state.yahoo_t0 = t0
             state.yahoo_secs = state.yahoo_ok - t0
@@ -1097,6 +1181,7 @@ async def housekeeping():
             if n % 240 == 0:   # saatte bir
                 await cal.refresh()
                 store.prune()
+                store.prune_xvol()
             if backup.enabled and (n * 15) % BACKUP_SEC < 15:
                 await backup.save(engine, bot)
         except Exception as e:

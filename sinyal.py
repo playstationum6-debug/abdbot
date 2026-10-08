@@ -45,6 +45,7 @@ SLIP_RUNNER = {"regular": 0.005, "pre": 0.008, "post": 0.008}
 RUN_MIN_MOVE = 10.0          # önceki kapanışa göre en az %10 yükselmiş olmalı
 RUN_MIN_SES_DV = 1_000_000   # bu seansta en az 1 mn $ işlem hacmi
 RUN_MIN_BAR_DV = 50_000      # sinyal mumunda en az 50 bin $ işlem
+IEX_SHARE = 0.05             # öncesi/sonrası seansta hacim sadece IEX: $ hacim eşikleri bu oranla küçültülür
 COOLDOWN = 10 * 60       # aynı hisse + kurgu + yön için bekleme (sık işlem: 10 dk)
 R_SETUP = {"itki": 1.5, "vwap_sek": 1.5}   # 1 dk scalp kurgularında hedef = 1,5R
 FILL_BARS = 3            # uzatılmış seansta limit emir en fazla 3 mum bekler
@@ -52,9 +53,11 @@ FRESH_SEC = 300          # sadece son 5 dk içinde kapanan mumlar değerlendiril
 MAX_KEEP = 6000          # bellekte tutulan en fazla sinyal
 
 # Uzatılmış seans likidite filtresi (düşük hacimli sahte hareketlere karşı)
-EXT_MIN_SES_VOL = 60_000    # bu seansta toplam hacim
-EXT_MIN_5BAR_VOL = 12_000   # son 5 mum toplam hacim
-EXT_MIN_BAR_VOL = 3_000     # sinyal mumu hacmi
+# Öncesi/sonrası seansta hacim Alpaca IEX'ten gelir (Yahoo bu saatlerde 0 verir).
+# IEX tüm piyasa hacminin yaklaşık %2-5'i olduğu için mutlak eşikler IEX ölçeğindedir.
+EXT_MIN_SES_VOL = 3_000     # bu seansta toplam IEX hacmi
+EXT_MIN_5BAR_VOL = 600      # son 5 mum toplam IEX hacmi
+EXT_MIN_BAR_VOL = 150       # sinyal mumu IEX hacmi
 EXT_MIN_ACTIVE = 5          # son 10 mumun en az 5'inde işlem olmalı
 EXT_MIN_VOLR = 2.0          # sinyal mumu hacmi seans ortalamasının en az 2 katı
 
@@ -400,7 +403,7 @@ class Engine:
         if x["ses_vol"] < EXT_MIN_SES_VOL or x["vol5"] < EXT_MIN_5BAR_VOL or x["v"] < EXT_MIN_BAR_VOL \
                 or x["active10"] < EXT_MIN_ACTIVE or x["volr"] < EXT_MIN_VOLR or (x["h"] - x["l"]) > 3 * atr:
             return out
-        liq = f"Likidite yeterli: seans hacmi {kb(x['ses_vol'])}, son 5 dk {kb(x['vol5'])}, hacim ortalamanın {x['volr']:.1f} katı"
+        liq = f"Likidite yeterli (IEX): seans hacmi {kb(x['ses_vol'])}, son 5 dk {kb(x['vol5'])}, hacim ortalamanın {x['volr']:.1f} katı"
         ref = x["pc"] if x["ses"] == "pre" else x["rc"]
         move = (c / ref - 1) * 100 if ref else 0.0
 
@@ -467,10 +470,12 @@ class Engine:
         if move < RUN_MIN_MOVE:
             return out
         dv_bar = x["v"] * c
-        if x["ses_dv"] < RUN_MIN_SES_DV or dv_bar < RUN_MIN_BAR_DV or x["active10"] < 7 or (x["h"] - x["l"]) > 4 * atr:
-            return out
         ext = x["ses"] != "regular"
-        liq = f"Seans işlem hacmi {usd(x['ses_dv'])}, son mum {usd(dv_bar)}"
+        k_ = IEX_SHARE if ext else 1.0
+        if x["ses_dv"] < RUN_MIN_SES_DV * k_ or dv_bar < RUN_MIN_BAR_DV * k_ or x["active10"] < 7 \
+                or (x["h"] - x["l"]) > 4 * atr:
+            return out
+        liq = f"Seans işlem hacmi {usd(x['ses_dv'])}, son mum {usd(dv_bar)}" + (" (IEX)" if ext else "")
 
         # 1) Tepe kırılımı (gün/seans tepesi), hacimli
         if ext:
