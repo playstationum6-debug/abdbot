@@ -70,6 +70,7 @@ BOT_DIR = "bot"
 # Bot ayarları (Render → Environment'tan değiştirilebilir)
 BOT_CFG = {
     "enabled": os.getenv("BOT_ENABLED", "1") == "1",
+    "capital": float(os.getenv("BOT_CAPITAL", "250")),       # botun toplam parası ($); bağlıysa yeni işlem yok
     "notional": float(os.getenv("BOT_NOTIONAL", "250")),     # işlem başı pozisyon büyüklüğü ($)
     "max_open": int(os.getenv("BOT_MAX_OPEN", "15")),        # aynı anda en fazla açık pozisyon
     "risk_usd": float(os.getenv("BOT_RISK", "5")),           # işlem başı en fazla risk ($), stop mesafesine göre adet
@@ -79,7 +80,7 @@ BOT_CFG = {
 }
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
-RUN_MAX = int(os.getenv("RUN_MAX", "12"))                    # aynı anda izlenecek en fazla koşan hisse
+RUN_MAX = int(os.getenv("RUN_MAX", "25"))                    # aynı anda izlenecek en fazla koşan hisse
 BACKUP_SEC = int(os.getenv("BACKUP_SEC", "600"))
 
 # İlk 30'u IEX ile anlık izlenir (ücretsiz planın sembol sınırı 30).
@@ -503,7 +504,9 @@ engine = sinyal.Engine(store, bar_info, cal, ET)
 learner = ogrenme.Learner()
 engine.learner = learner
 scanner = tarayici.Scanner(ALPACA_KEY, ALPACA_SECRET, SYMBOLS, min_price=RUN_MIN_PRICE, min_pct=RUN_MIN_PCT,
-                           max_runners=RUN_MAX, log=log)
+                           max_runners=RUN_MAX, log=log,
+                           ai_key=os.getenv("GEMINI_API_KEY", ""), ai_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
+scanner.keep = lambda sym: any(p["sym"] == sym for p in bot.open_positions())
 bot = botmod.Bot(engine, learner, store, cal, ET, ALPACA_KEY, ALPACA_SECRET, log, BOT_CFG)
 
 
@@ -757,6 +760,7 @@ def status_payload():
         "rs7": backup.starts_last_7d() if backup.enabled else None,
         "bot": bot.status,
         "scan": scanner.status,
+        "ai": scanner.ai_status,
         "nRun": len(scanner.runners),
         "sigN": len(engine.signals),
         "sigOpen": engine.open_count(),
@@ -1056,7 +1060,7 @@ async def send_bot(cl):
 
 async def send_scan(cl):
     cl.scanv = scanner.ver
-    await cl.send({"type": "scan", "rows": scanner.rows(), "status": scanner.status})
+    await cl.send({"type": "scan", "rows": scanner.rows(), "status": scanner.status, "dropped": scanner.dropped_rows()})
 
 
 async def send_wl(cl, full=False):
@@ -1142,7 +1146,51 @@ async def scan_loop():
             engine.runners = scanner.runners
             for r in scanner.runners:
                 ensure_sym(r)
-        await asyncio.sleep(60 if ses != "closed" else 600)
+        await asyncio.sleep(30 if ses != "closed" else 600)
+
+
+async def fast_loop():
+    """Koşan hisseler: 5 sn'de bir Alpaca anlık fiyatı → tepe kırılımı ŞİMDİ olduysa hemen sinyal + bot."""
+    async with httpx.AsyncClient(timeout=10, headers=alpaca_headers()) as c:
+        while True:
+            await asyncio.sleep(5)
+            now = time.time()
+            runs = [r for r in scanner.runners if r not in IEX_SYMBOLS]
+            if not runs or not (ALPACA_KEY and ALPACA_SECRET) or cal.session(now) == "closed":
+                continue
+            try:
+                r = await c.get("https://data.alpaca.markets/v2/stocks/snapshots",
+                                params={"symbols": ",".join(runs), "feed": "iex"})
+                if r.status_code != 200:
+                    continue
+                snaps = r.json() or {}
+                if "snapshots" in snaps and isinstance(snaps["snapshots"], dict):
+                    snaps = snaps["snapshots"]
+            except Exception as e:
+                log.debug("Anlık fiyat hatası: %s", e)
+                continue
+            for sym, sn in snaps.items():
+                tr = (sn or {}).get("latestTrade") or {}
+                p = float(tr.get("p") or 0)
+                t = parse_ts(tr.get("t", "")) if tr.get("t") else 0
+                if p <= 0 or now - t > 120:
+                    continue                      # fiyat yok ya da 2 dk'dan eski (işlem durmuş olabilir)
+                prev = float(((sn or {}).get("prevDailyBar") or {}).get("c") or 0)
+                info = scanner.runners.get(sym)
+                if info is not None and prev > 0:
+                    info["pct_live"] = round((p / prev - 1) * 100, 2)   # Yahoo gecikirse tarayıcı bunu kullanır
+                    info["live_t"] = now
+                last = store.live.get(sym)
+                if not last or t >= last["t"]:
+                    store.live[sym] = {"p": p, "t": t}
+                try:
+                    sig = engine.fast_check(sym, p, now)
+                    if sig:
+                        log.info("HIZLI SİNYAL %s AL güven=%s giriş=%s stop=%s hedef=%s",
+                                 sym, sig["conf"], sig["e"], sig["s"], sig["h"])
+                        bot.consider(sig, now)
+                except Exception as e:
+                    log.warning("Hızlı kırılım hatası %s: %s", sym, e)
 
 
 async def bot_loop():
@@ -1210,7 +1258,7 @@ async def lifespan(app):
     except Exception as e:
         log.warning("Bot senkron hatası: %s", e)
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
-                                                  scan_loop, bot_loop)]
+                                                  scan_loop, bot_loop, fast_loop)]
     yield
     for t in tasks:
         t.cancel()

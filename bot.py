@@ -3,6 +3,8 @@ Bot: sinyalleri seçer, Alpaca PAPER (sanal) hesabında işlem yapar, pozisyonla
 Gerçek para YOK — sadece paper-api.alpaca.markets kullanılır.
 
 Kurallar:
+- Sermaye: bot sadece BOT_CAPITAL (varsayılan 250 $) + gerçekleşen kâr/zarar kadar parayla çalışır.
+  Para açık pozisyonlarda bağlıysa yeni hisse almak için önce birinin kapanması gerekir.
 - Pozisyon büyüklüğü: işlem başı en fazla BOT_RISK (varsayılan 5 $) risk; pozisyon en fazla BOT_NOTIONAL
   (varsayılan 250 $), uzatılmış seansta yarısı.
 - Normal seans: piyasa emri. Uzatılmış seans: sadece limit emir (3 dk dolmazsa iptal).
@@ -20,6 +22,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+MIN_TRADE_USD = 20.0   # boşta kalan para bundan azsa yeni işlem açılmaz
 BE_R = 1.5   # kâr koruma: bu kadar R kâra ulaşınca stop girişe çekilir (1R çok erkendi)
 
 PAPER = "https://paper-api.alpaca.markets"
@@ -132,6 +135,13 @@ class Bot:
         d = self._day()
         return [p for p in self.positions if p["st"] == "kapandı" and p.get("pnl") is not None and self._day(p["xt"]) == d]
 
+    def capital(self):
+        """(toplam sermaye, açık pozisyonlarda bağlı para, boşta kalan) — $."""
+        total = self.cfg.get("capital", 250.0) + sum(p["pnl"] for p in self.positions
+                                                     if p["st"] == "kapandı" and p.get("pnl") is not None)
+        used = sum(abs(p["qty"]) * (p.get("entry") or p.get("plan") or 0) for p in self.open_positions())
+        return total, used, max(0.0, total - used)
+
     def loss_streak(self):
         """Bugün kapanan işlemlerde sondan geriye üst üste kayıp sayısı."""
         n = 0
@@ -211,6 +221,11 @@ class Bot:
         risk_usd = self.cfg.get("risk_usd", 5.0) * (1 if ses == "regular" else 0.5) * mult
         if px > 0 and risk_px > 0:
             notional = min(notional, risk_usd / risk_px * px)
+        # Sermaye sınırı: elde kalan nakitten fazlasıyla pozisyon açılamaz
+        cap, used, free = self.capital()
+        if free < MIN_TRADE_USD:
+            return skip(f"sermaye dolu: {cap:.0f} $'ın {used:.0f} $'ı açık pozisyonlarda, önce biri kapanmalı")
+        notional = min(notional, free)
         whole = int(math.floor(notional / px)) if px > 0 else 0
         qty = whole
         # Normal seansta alışlarda kesirli adet (pahalı hisseler 250 $ ile de alınabilsin).
@@ -548,6 +563,7 @@ class Bot:
             "dec": dec, "streak": streak, "days": len(by_day),
             "left": round(max(0.0, lim + min(0.0, self.today_pnl())), 2),
             "active": self.active, "status": self.status, "cfg": self.cfg, "account": self.account,
+            "capital": dict(zip(("total", "used", "free"), (round(x, 2) for x in self.capital()))),
             "today": {"pnl": round(sum(p["pnl"] for p in tc), 2), "n": len(tc), "w": sum(1 for p in tc if p["pnl"] > 0)},
             "total": {"pnl": round(sum(p["pnl"] for p in closed), 2), "n": len(closed),
                       "w": sum(1 for p in closed if p["pnl"] > 0),

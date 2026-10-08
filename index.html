@@ -324,7 +324,7 @@ function esc(x){return String(x==null?'':x).replace(/[&<>"]/g,c=>({'&':'&amp;','
 let ws=null,retry=0,symbols=[],iexSet=new Set(),rows={},status={},offset=0;
 let cur=ls('sym')||'SPY',tf=String(ls('tf')||'1'),sortKey=ls('sort')||'hare',raw=[],info=null,prevLine=null,lastPx={};
 let sigList=[],sigStats=[],mine=[],learn=null,sigFilter=ls('sigf')||'hepsi',sigShow=15,knownIds=null,sigLines=[],openIds=new Set();
-let botD=null,knownJ=null,runRows=[],runStatus='',tab=ls('tab')||'piyasa';
+let botD=null,knownJ=null,runRows=[],runDrop=[],runStatus='',tab=ls('tab')||'piyasa';
 let LV={lv:[],sup:null,res:null},lvLines=[],srLines=[],vpLines=[],srKey='',vpKey='',VP=null,daily={};
 let opt={sr:1,vp:1,vol:1,vwap:1,ema:0,kl:0,mk:1};
 try{Object.assign(opt,JSON.parse(ls('opt2')||'{}'))}catch(e){}
@@ -600,8 +600,8 @@ function posCard(p){const al=p.dir>0,live=p.st==='açık'||p.st==='çıkış';
   <div class="bot"><span class="meta">${live&&p.ur!=null?fR(p.ur)+' · ':''}${esc(p.why||'')}</span><span class="go" data-sym="${esc(p.sym)}">Grafik →</span></div></div>`}
 function renderBot(){const d=botD;if(!d)return;
   $('bst').textContent=d.status;$('bst').className='pill '+(d.status==='çalışıyor'?'regular':'');
-  const c=d.cfg;$('bcfg').innerHTML=[`${c.notional.toFixed(0)} $ / işlem`,`öncesi/sonrası ${(c.notional/2).toFixed(0)} $ + limit`,`en fazla ${c.max_open} açık`,`günlük limit −${c.daily_loss.toFixed(0)} $`,`güven ≥ ${c.min_conf} (uzatılmış ${c.min_conf_ext!=null?c.min_conf_ext:c.min_conf})`].map(x=>`<span class="chip">${x}</span>`).join('');
-  const a=d.account||{};$('bacct').textContent=a.equity?`Alpaca paper hesabı: ${(+a.equity).toLocaleString('tr-TR',{maximumFractionDigits:0})} $`+(d.left!=null?` · bugün kalan zarar hakkı ${d.left.toFixed(0)} $`:''):'';
+  const c=d.cfg;$('bcfg').innerHTML=[`sermaye ${(c.capital||250).toFixed(0)} $`,`${c.notional.toFixed(0)} $ / işlem`,`öncesi/sonrası ${(c.notional/2).toFixed(0)} $ + limit`,`en fazla ${c.max_open} açık`,`günlük limit −${c.daily_loss.toFixed(0)} $`,`güven ≥ ${c.min_conf} (uzatılmış ${c.min_conf_ext!=null?c.min_conf_ext:c.min_conf})`].map(x=>`<span class="chip">${x}</span>`).join('');
+  const a=d.account||{},k=d.capital;$('bacct').textContent=(k?`Botun parası: ${k.total.toFixed(2)} $ · pozisyonlarda ${k.used.toFixed(2)} $ · boşta ${k.free.toFixed(2)} $`:'')+(d.left!=null?` · bugün kalan zarar hakkı ${d.left.toFixed(0)} $`:'')+(a.equity?` (Alpaca sanal hesap: ${(+a.equity).toLocaleString('tr-TR',{maximumFractionDigits:0})} $)`:'');
   $('blim').style.display=d.limit_hit?'block':'none';$('blim').textContent='Günlük zarar limiti doldu — bot bugün yeni işlem açmıyor.';
   $('kT').textContent=fusd(d.today.pnl);$('kT').className='big '+cls(d.today.pnl);$('kTn').textContent=`${d.today.n} işlem · ${d.today.w} kazanç`;
   $('kA').textContent=fusd(d.total.pnl);$('kA').className=cls(d.total.pnl);$('kAn').textContent=d.total.n;$('kR').textContent=fR(d.total.avg_r);
@@ -624,10 +624,11 @@ $('t-bot').addEventListener('click',e=>{const g=e.target.closest('.go');if(g)sel
 
 // ---------------- tarayıcı
 function renderRuns(){$('scst').textContent='Durum: '+(runStatus||'—');nb('nbR',runRows.length);
-  $('runs').innerHTML=runRows.length?runRows.map(r=>{const pc=r.pct_now!=null?r.pct_now:r.pct;return `<div class="run"><div class="top"><span class="sn">${esc(r.sym)}</span><span class="meta">${fp(r.price)} $ · hacim ${fvol(r.vol)}</span><span class="pct ${cls(pc)}">${fch(pc)}</span></div>
-    ${r.news?`<a class="news" href="${esc(r.news.url)}" target="_blank" rel="noopener">${esc(r.news.headline)}<br><span class="meta">${esc(r.news.source||'')}${r.news.t?' · '+tTR(Date.parse(r.news.t)/1000):''}</span></a>`:'<div class="nonews">Haber bulunamadı — hareketin sebebi belirsiz</div>'}
+  $('runs').innerHTML=(runRows.length?runRows.map(r=>{const pc=r.pct_now!=null?r.pct_now:r.pct;return `<div class="run"><div class="top"><span class="sn">${esc(r.sym)}</span><span class="meta">${fp(r.price)} $ · hacim ${fvol(r.vol)}</span><span class="pct ${cls(pc)}">${fch(pc)}</span></div>
+    ${r.news?`<div class="meta" style="margin:6px 0 2px;font-weight:600;color:${r.news_kind==='iyi'?'var(--up,#22c55e)':r.news_kind==='kötü'?'var(--dn,#ef4444)':'inherit'}">${r.news_kind==='iyi'?'Olumlu haber — bot alış yapabilir':r.news_kind==='kötü'?'Olumsuz haber (ihraç/seyreltme) — bot ALIŞ YAPMAZ':'Nötr haber'}${r.news_word?' · '+esc(r.news_word):''}${r.ai?` · YZ puanı <b>${r.ai.skor>0?'+':''}${r.ai.skor}</b> (${esc(r.ai.neden)})`:''}</div><a class="news" href="${esc(r.news.url)}" target="_blank" rel="noopener">${esc(r.news.headline)}<br><span class="meta">${esc(r.news.source||'')}${r.news.t?' · '+tTR(Date.parse(r.news.t)/1000):''}</span></a>`:'<div class="nonews">Haber bulunamadı — hareketin sebebi belirsiz</div>'}
     <div class="bot"><span class="meta">${r.price<1?'1 $ altı · ':''}ilk görülme ${tTR(r.first)}</span><span class="go" data-sym="${esc(r.sym)}">Grafik →</span></div></div>`}).join('')
-    :empty('Şu an kriterlere uyan koşan hisse yok. Tarayıcı seans içinde her dakika yeniler.')}
+    :empty('Şu an kriterlere uyan koşan hisse yok. Tarayıcı seans içinde 30 sn\'de bir yeniler.'))
+    +(runDrop.length?`<div class="meta" style="margin:14px 2px 6px;font-weight:600">Listeden çıkarılanlar</div>`+runDrop.map(d=>`<div class="meta" style="padding:4px 2px"><b>${esc(d.sym)}</b> · ${tTR(d.t)} · ${esc(d.why)}${d.back>0?` · ${Math.ceil(d.back/60)} dk sonra tekrar aday`:' · tekrar aday'}</div>`).join(''):'')}
 $('runs').addEventListener('click',e=>{const g=e.target.closest('.go');if(g)select(g.dataset.sym)});
 
 // ---------------- öğrenme
@@ -647,7 +648,7 @@ function renderStatus(){const s=status.ses||'closed',b=$('ses');b.textContent=SE
   if(p)t+=`<b>${p.today?'Bugün':p.d}</b> (TR): Öncesi ${p.pre} · Açılış ${p.open} · Kapanış ${p.close}${p.early?' (erken kapanış)':''} · Sonrası biter ${p.post}<br>`;
   t+=`IEX canlı akış: ${esc(status.iex||'—')} (${status.iexN||0} sembol)<br>`;
   t+=`Yahoo son çekim: ${status.yAge==null?'henüz yok':fage(nowS()-status.yAge)+' önce'}${status.yErr?' · '+esc(status.yErr):''}<br>`;
-  t+=`Takvim: ${status.cal==='alpaca'?'Alpaca (tatiller dahil)':'hafta içi kuralı'} · Bot: ${esc(status.bot||'—')} · Tarayıcı: ${esc(status.scan||'—')}<br>`;
+  t+=`Takvim: ${status.cal==='alpaca'?'Alpaca (tatiller dahil)':'hafta içi kuralı'} · Bot: ${esc(status.bot||'—')} · Tarayıcı: ${esc(status.scan||'—')} · Yapay zeka: ${esc(status.ai||'—')}<br>`;
   t+=`Sunucu açık: ${status.up!=null?fage(nowS()-status.up):'—'}${status.rs7!=null?' · 7 günde yeniden başlama: '+status.rs7:''} · GitHub yedeği: ${esc(status.bk||'—')}`;
   $('foot').innerHTML=t;nb('nbS',status.sigOpen||0)}
 
@@ -675,7 +676,7 @@ function connect(){if(document.hidden||ws)return;
           toast(`<b>Yeni sinyal: ${esc(s.sym)} ${al?'AL':'SAT'}</b> · güven ${s.conf}<br><span class="meta">${SETUP[s.setup]||s.setup} · Giriş ${fp(s.e)} · Stop ${fp(s.s)} · Hedef ${fp(s.h)}</span>`,al?'':'sat',()=>select(s.sym))}}
       renderSigs();renderLearn();drawSignals();renderOv()}
     else if(m.type==='bot'){botD=m.d;renderBot();renderOv();if(tab==='sinyal')renderSigs()}
-    else if(m.type==='scan'){runRows=m.rows||[];runStatus=m.status;renderRuns();renderOv()}};
+    else if(m.type==='scan'){runRows=m.rows||[];runDrop=m.dropped||[];runStatus=m.status;renderRuns();renderOv()}};
   ws.onclose=()=>{ws=null;setConn(false);if(document.hidden)return;retry++;
     if(retry===5)toast('<b>Bağlantı yok</b><br><span class="meta">Dokun: sayfayı yenile</span>','sat',()=>location.reload());
     setTimeout(connect,Math.min(15000,1000*retry))}}

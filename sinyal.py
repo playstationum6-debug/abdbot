@@ -29,6 +29,7 @@ SETUP_AD = {
     "geri": "Momentum ilk geri çekilme",
     "itki": "Hacimli itki (1 dk scalp)",
     "vwap_sek": "VWAP sekmesi (1 dk scalp)",
+    "hizli": "Haberli hızlı kırılım (anlık)",
 }
 SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa sonrası"}
 SES_NAME = {0: "pre", 1: "regular", 2: "post", 3: "closed"}
@@ -105,6 +106,7 @@ class Engine:
         self.ver = 0
         self.dirty_days = set()
         self.seen = {}             # sembol -> (ver, snap_ver)
+        self._fast_px = {}         # koşan hisse -> son anlık fiyat (kırılımın "şimdi" olduğunu anlamak için)
         self.runners = {}          # tarayıcının bulduğu koşan hisseler: sembol -> bilgi (yüzde, haber)
         self.learner = None        # öğrenme modülü (güven ayarı + not)
 
@@ -466,6 +468,8 @@ class Engine:
         """Haberle/yüksek hacimle koşan küçük hisseler — sadece alış yönü."""
         out = []
         info = self.runners.get(sym, {})
+        if info.get("news_kind") == "kötü":
+            return out   # hisse ihracı / ters bölünme / seyreltme haberi: genelde tuzak, alış yok
         T, c, atr = x["T"], x["c"], x["atr"]
         ref = x["pc"]
         move = (c / ref - 1) * 100 if ref else float(info.get("pct") or 0)
@@ -521,10 +525,17 @@ class Engine:
                     out.append(["geri", 1, c, c - risk, risk, 55, why])
 
         news = info.get("news")
+        ai = info.get("ai")
         for o in out:
+            if ai:
+                o[6].append(f"Yapay zeka haber puanı {ai['skor']:+d} ({ai['neden']}) — şimdilik sadece ölçülüyor")
             if news:
                 o[6].insert(0, f"Haber: {news.get('headline', '')[:100]}")
-                o[5] += 10
+                if info.get("news_kind") == "iyi":
+                    o[6].insert(1, f"Haber olumlu ('{info.get('news_word', '')}'): gerçek bir sebep var")
+                    o[5] += 15
+                else:
+                    o[5] += 5
             else:
                 o[6].append("Haber bulunamadı — hareketin sebebi belirsiz (risk yüksek)")
                 o[5] -= 10
@@ -533,6 +544,82 @@ class Engine:
                 o[5] -= 5
             o[6].append("Küçük/koşan hisse: kayma yüksek varsayıldı" + (", limit emir ve yarım lot" if ext else ""))
         return [tuple(o) for o in out]
+
+    # ------------------------------------------------------------ anlık kırılım (koşan hisseler)
+    def fast_check(self, sym, px, now):
+        """Koşan hissede canlı fiyat gün/seans tepesini ŞİMDİ kırdıysa mum kapanmasını beklemeden sinyal üret.
+        Dönüş: yeni sinyal ya da None."""
+        info = self.runners.get(sym)
+        if not info or not px or px <= 0:
+            return None
+        prev = self._fast_px.get(sym)
+        self._fast_px[sym] = px
+        if prev is None or info.get("news_kind") == "kötü":
+            return None
+        bars = self.store.bars.get(sym) or {}
+        lim = int(now // 60 * 60) - 60           # son KAPANMIŞ mum
+        tss = sorted(t for t in bars if lim - 6 * 86400 <= t <= lim)
+        if len(tss) < 30:
+            return None
+        T = tss[-1]
+        if now - T > 300 or self.bar_info(T)[0] != datetime.fromtimestamp(now, self.ET).date():
+            return None                          # veri eski ya da bugünün verisi yok
+        x = self._ctx(tss, bars, len(tss) - 1)
+        if not x or x["sc"] == 3:
+            return None
+        ext = x["ses"] != "regular"
+        atr = x["atr"]
+        # Kırılacak seviye: seansın/günün o ana kadarki tepesi (öncesi tepesi dahil)
+        if ext:
+            lvl = max(v for v in (x["sh"], x["h"]) if v)
+        else:
+            lvl = max(v for v in (x["hod"], x["pmh"], x["h"]) if v)
+        trig = lvl * 1.002
+        if not (prev < trig <= px) or px > lvl * 1.03:
+            return None                          # kırılım şimdi olmadı ya da fiyat çok kaçtı
+        ref = x["pc"]
+        move = (px / ref - 1) * 100 if ref else float(info.get("pct") or 0)
+        if move < RUN_MIN_MOVE:
+            return None
+        k_ = IEX_SHARE if ext else 1.0
+        if x["ses_dv"] < RUN_MIN_SES_DV * k_ or x["active10"] < 6:
+            return None                          # likidite yok
+        recent_vol = max(x["volr"], (x["vol5"] / 5 / x["avgv"]) if x.get("avgv") else 0)
+        if recent_vol < 1.5:
+            return None                          # kırılımda hacim yok
+        if not self._ready(sym, "hizli", 1, T):
+            return None
+        low3 = min(r[2] for r in x["recent"][-3:]) if x["recent"] else x["l"]
+        stop, risk = self._clamp(px, min(low3, lvl - 0.5 * atr), 1, atr, 1.0, 3.0)
+        risk = max(risk, px * 0.01, px * MIN_STOP_PCT, atr * MIN_STOP_ATR)
+        stop = px - risk
+        news = info.get("news")
+        kind = info.get("news_kind") or ("nötr" if news else None)
+        why = [f"ANLIK kırılım: {'seans' if ext else 'gün'} tepesi ({f2(lvl)}) şimdi {f2(px)} ile geçildi, mum kapanışı beklenmedi",
+               f"Günün yükseleni: önceki kapanışa göre {move:+.0f}%",
+               f"Son mumlarda hacim ortalamanın {recent_vol:.1f} katı · seans işlem hacmi {usd(x['ses_dv'])}"
+               + (" (IEX)" if ext else "")]
+        x2 = dict(x)
+        x2["c"] = px
+        conf = self._score(x2, 1, 58, why, risk, sym)
+        if kind == "iyi":
+            why.insert(0, f"Haber olumlu ('{info.get('news_word', '')}'): {news.get('headline', '')[:90]}")
+            conf += 15
+        elif news:
+            why.insert(0, f"Haber: {news.get('headline', '')[:100]}")
+        else:
+            why.append("Haber bulunamadı — hareketin sebebi belirsiz (risk yüksek)")
+            conf -= 10
+        if px < 1:
+            why.append("1 $ altı hisse: manipülasyon ve işlem durdurma riski çok yüksek")
+            conf -= 5
+        if info.get("ai"):
+            why.append(f"Yapay zeka haber puanı {info['ai']['skor']:+d} ({info['ai']['neden']}) — şimdilik sadece ölçülüyor")
+        why.append("Hızlı giriş: kayma yüksek varsayıldı" + (", limit emir ve yarım lot" if ext else ""))
+        conf = int(max(0, min(100, conf)))
+        before = len(self.signals)
+        self._create(sym, x2, "hizli", 1, px, stop, risk, conf, why)
+        return self.signals[-1] if len(self.signals) > before else None
 
     # ------------------------------------------------------------ ana döngü
     def process(self, sym, complete_until, now):
@@ -615,7 +702,11 @@ class Engine:
         f["obv"] = "lehte" if ob >= 0.25 else ("aleyhte" if ob <= -0.25 else "nötr")
         f["tip"] = "koşan küçük hisse" if sym in self.runners else "ana liste"
         if sym in self.runners:
-            f["haber"] = "var" if self.runners[sym].get("news") else "yok"
+            ri = self.runners[sym]
+            f["haber"] = (ri.get("news_kind") or "nötr") if ri.get("news") else "yok"   # iyi / nötr / kötü / yok
+            ai = (ri.get("ai") or {}).get("skor")
+            f["ai"] = "yok" if ai is None else ("+70 ve üstü" if ai >= 70 else "+30…+69" if ai >= 30
+                                               else "−29…+29" if ai > -30 else "−30 ve altı")
         return f
 
     def _create(self, sym, x, setup, d, entry, stop, risk, conf, why):
