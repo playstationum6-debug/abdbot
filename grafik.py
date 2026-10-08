@@ -128,7 +128,7 @@ def _dash(d, x0, y0, x1, y1, col, w=2, on=9, off=7):
         s += on + off
 
 
-def ciz(bars, fx=None, title="", sub="", lines=None, pat=None, zone=None, max_bars=130):
+def ciz(bars, fx=None, title="", sub="", lines=None, pat=None, zone=None, max_bars=130, tf="5 dk"):
     """
     bars: [(t, o, h, l, c, v)] 5 dk mumlar (eskiden yeniye)
     fx: formasyon.analyze çıktısı (lv, pat, zones)
@@ -297,8 +297,54 @@ def ciz(bars, fx=None, title="", sub="", lines=None, pat=None, zone=None, max_ba
     d.rectangle([0, 0, W, PAD_T - 14], fill=(18, 22, 36))
     d.text((PAD_L, 14), _t(title[:70]), fill=TXT, font=font(26, True))
     d.text((PAD_L, 50), _t(sub[:110]), fill=MUT, font=f14)
-    d.text((W - 150, 18), _t("ABD·BOT · 5 dk"), fill=MUT, font=f12)
+    d.text((W - 150, 18), _t(f"ABD·BOT · {tf}"), fill=MUT, font=f12)
 
+    buf = io.BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+def ciz_karne(eq, spy, cap0, title="", sub=""):
+    """Sermaye eğrisi (bot) + aynı parayla SPY tutsaydın eğrisi. eq/spy: [[t, değer], ...]"""
+    if not eq or len(eq) < 2:
+        return None
+    spy = spy if spy and len(spy) == len(eq) else None
+    vals = [v for _, v in eq] + [cap0] + ([v for _, v in spy] if spy else [])
+    hi, lo = max(vals), min(vals)
+    rng = (hi - lo) or 1
+    hi += rng * 0.08
+    lo -= rng * 0.08
+    img = Image.new("RGB", (W, 560), BG)
+    d = ImageDraw.Draw(img, "RGBA")
+    x0, x1, y0, y1 = PAD_L + 6, W - PAD_R, PAD_T + 10, 560 - 50
+    n = len(eq)
+    X = lambda i: x0 + i / (n - 1) * (x1 - x0)
+    Y = lambda v: y1 - (v - lo) / (hi - lo) * (y1 - y0)
+    f12 = font(15)
+    for k in range(5):
+        v = lo + (hi - lo) * k / 4
+        d.line([(x0, Y(v)), (x1, Y(v))], fill=GRID, width=1)
+        d.text((x1 + 8, Y(v) - 9), f"{v:.0f} $", fill=MUT, font=f12)
+    _dash(d, x0, Y(cap0), x1, Y(cap0), MUT + (160,), w=1, on=5, off=5)
+    last = eq[-1][1]
+    col = UP if last >= cap0 else DN
+    pts = [(X(i), Y(v)) for i, (_, v) in enumerate(eq)]
+    d.polygon(pts + [(x1, y1), (x0, y1)], fill=col + (30,))
+    if spy:
+        sp = [(X(i), Y(v)) for i, (_, v) in enumerate(spy)]
+        for i in range(len(sp) - 1):
+            _dash(d, sp[i][0], sp[i][1], sp[i + 1][0], sp[i + 1][1], PUR, w=2, on=6, off=4)
+    d.line(pts, fill=col, width=4, joint="curve")
+    for i in range(0, n, max(1, n // 6)):
+        d.text((X(i) - 18, y1 + 12), datetime.fromtimestamp(eq[i][0], TR).strftime("%d.%m"), fill=MUT, font=f12)
+    bp = (last / cap0 - 1) * 100
+    leg = f"Bot {bp:+.1f}%"
+    if spy:
+        leg += f"     SPY tutsaydın {(spy[-1][1] / cap0 - 1) * 100:+.1f}%"
+    d.rectangle([0, 0, W, PAD_T - 14], fill=(18, 22, 36))
+    d.text((PAD_L, 14), _t(title[:70]), fill=TXT, font=font(26, True))
+    d.text((PAD_L, 50), _t(sub[:110]), fill=MUT, font=font(17))
+    d.text((x0 + 4, y0 - 4), _t(leg), fill=TXT, font=font(17, True))
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
     return buf.getvalue()

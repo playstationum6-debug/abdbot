@@ -484,10 +484,13 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
     <div class="fld"><label>Bot işlemleri ve güçlü sinyaller<small>Güven 70 ve üstü sinyaller</small></label><button class="tg" data-p="tg_islem"></button></div>
     <div class="fld"><label>Planlar</label><button class="tg" data-p="tg_plan"></button></div>
     <div class="fld"><label>Haberler</label><button class="tg" data-p="tg_haber"></button></div>
-    <div class="fld"><label>Sabah listesi ve gün sonu raporu</label><button class="tg" data-p="tg_rapor"></button></div>
+    <div class="fld"><label>Sabah listesi, gün sonu ve haftalık rapor</label><button class="tg" data-p="tg_rapor"></button></div>
+    <div class="fld"><label>Koşan hisse uyarısı<small>Haberli ya da +%30 üstü hisse listeye girince 🚀</small></label><button class="tg" data-p="tg_kosan"></button></div>
+    <div class="fld"><label>Canlı pozisyon tablosu<small>Kanalın başına sabitlenir, dakikada bir güncellenir (bot yönetici olmalı)</small></label><button class="tg" data-p="tg_tablo"></button></div>
     <div class="fld" style="border:0"><label>Mesajlara grafik resmi ekle<small>Plan, sinyal ve işlemlerde çizgili grafik: giriş, stop, hedef, formasyon</small></label><button class="tg" data-p="tg_grafik"></button></div>
   </div>
   <button class="btnw sec" id="tgTest">Telegram'a deneme mesajı gönder</button>
+  <div class="note">Kanala ya da bota özelden komut yazabilirsin: <b>/durum</b>, <b>/pozisyon</b>, <b>/karne</b>, <b>/analiz QNME</b>, <b>/alarm QNME 0.90</b>, <b>/alarmlar</b>, <b>/rapor</b>, <b>/dur</b>, <b>/basla</b>. Sadece kanalın yöneticileri kullanabilir.</div>
   <div class="note" id="tgch" style="display:none"></div>
   <div class="note">iPhone'da bildirim için siteyi Safari'de Paylaş → Ana Ekrana Ekle ile ekleyip uygulamayı ana ekrandan açman gerekir.</div>
 </section>
@@ -553,7 +556,8 @@ function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorag
 function esc(x){return String(x==null?'':x).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 
 let ws=null,retry=0,symbols=[],iexSet=new Set(),rows={},status={},offset=0;
-let cur=ls('sym')||'SPY',tf=String(ls('tf')||'1'),sortKey=ls('sort')||'hare',raw=[],info=null,prevLine=null,lastPx={};
+const QS=(()=>{try{const q=new URLSearchParams(location.search).get('s');return q?q.toUpperCase().replace(/[^A-Z.\-]/g,'').slice(0,8):''}catch(e){return''}})();
+let cur=QS||ls('sym')||'SPY',tf=String(ls('tf')||'1'),sortKey=ls('sort')||'hare',raw=[],info=null,prevLine=null,lastPx={};
 let sigList=[],sigStats=[],mine=[],learn=null,sigFilter=ls('sigf')||'hepsi',sigShow=15,knownIds=null,sigLines=[],openIds=new Set();
 let botD=null,knownJ=null,runRows=[],runDrop=[],runPats=[],runStatus='',tab=ls('v2')?(ls('tab')||'akis'):'akis';ls('v2','1');
 let LV={lv:[],sup:null,res:null},lvLines=[],srLines=[],vpLines=[],srKey='',vpKey='',VP=null,daily={};
@@ -1183,7 +1187,7 @@ function renderAyar(){const c=(botD&&botD.cfg)||{};
   $('ayf').querySelector('[data-k=yeni_islem]').classList.toggle('on',c.yeni_islem!==0);
   const P=status.push||{},pref=P.pref||{};
   for(const b of document.querySelectorAll('[data-p]'))b.classList.toggle('on',!!pref[b.dataset.p]);
-  const G=status.tg||{};$('tgst').textContent=(G.ok?'Telegram bağlı: '+(G.st||''):'Telegram kapalı: '+(G.st||"Render'da TG_TOKEN ve TG_CHAT girilmemiş"))+(G.grafik?' · grafik: '+G.grafik:'');
+  const G=status.tg||{};$('tgst').textContent=(G.ok?'Telegram bağlı: '+(G.st||''):'Telegram kapalı: '+(G.st||"Render'da TG_TOKEN ve TG_CHAT girilmemiş"))+(G.grafik?' · grafik: '+G.grafik:'')+(G.komut?' · komutlar: '+G.komut:'')+(G.alarm?' · '+G.alarm+' alarm':'');
   $('pst').textContent=!P.ok?'Sunucuda bildirim kapalı: '+(P.st||'—'):`${P.n||0} cihaz kayıtlı · ${P.st||''}`+
     (typeof Notification!=='undefined'?' · bu cihaz: '+({granted:'izin verildi',denied:'izin reddedildi',default:'izin istenmedi'}[Notification.permission]||''):' · bu tarayıcı bildirim desteklemiyor')}
 async function postJSON(url,body){const r=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
@@ -1253,7 +1257,7 @@ setInterval(()=>{const d=new Date(nowS()*1000);
   $('clk').textContent='TR '+d.toLocaleTimeString('tr-TR',{timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit'})+' · NY '+d.toLocaleTimeString('tr-TR',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit'});
   $('nx').textContent=status.nx?`${status.nx.ad}: ${fdur(status.nx.t-nowS())}`:'';
   if(info||rows[cur])$('sAge').textContent=fage((rows[cur]||info).t)},1000);
-$('qsym').textContent=cur;if(tab==='daha')tab='akis';showTab(tab);renderFeed();renderKarne();renderSigs();renderRuns();renderLearn();render(true);connect();
+$('qsym').textContent=cur;if(tab==='daha')tab='akis';if(QS){tab='piyasa';ls('sym',QS);try{history.replaceState(null,'',location.pathname)}catch(e){}}showTab(tab);renderFeed();renderKarne();renderSigs();renderRuns();renderLearn();render(true);connect();
 setTimeout(()=>{$('splt').textContent='Sunucu uyanıyor olabilir, 1 dk sürebilir…'},6000);
 setTimeout(()=>$('splash').classList.add('gone'),15000);
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
