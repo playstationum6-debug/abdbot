@@ -35,6 +35,7 @@ import yfinance as yf
 
 import analiz
 import bot as botmod
+import geriye
 import formasyon
 import sektor
 import ikon
@@ -776,6 +777,7 @@ def status_payload():
         "bot": bot.status,
         "scan": scanner.status,
         "ai": scanner.ai_status,
+        "hava": {k: HAVA.get(k) for k in ("etiket", "puan", "neden", "vix", "genislik")},
         "push": {"ok": push.ok, "n": len(push.subs), "st": push.status, "pref": PUSH_PREF},
         "sec": scanner.sec_status,
         "nRun": len(scanner.runners),
@@ -1320,7 +1322,9 @@ async def send_sig(cl):
     cl.sigv = engine.ver
     await cl.send({"type": "sig", "list": engine.recent(60), "stats": engine.stats(),
                    "mine": engine.for_symbol(cl.sym, time.time() - 4 * 86400) if cl.sym else [],
-                   "learn": {"ins": learner.insights(), "groups": learner.group_rows(), "cmp": compare_rows()}})
+                   "learn": {"ins": learner.insights(), "groups": learner.group_rows(), "cmp": compare_rows(),
+                             "saat": saat_tablosu(),
+                             "bt": {k: BT[k] for k in ("sum", "t", "running", "bekliyor", "prog", "hata")}}})
 
 
 async def send_bot(cl):
@@ -1373,7 +1377,8 @@ async def broadcaster():
                         await cl.send({"type": "bar", "sym": sym,
                                        "bars": [bar_out(ts, bars[ts]) for ts in last],
                                        "i": summary(sym), "lv": levels(sym)})
-                if cl.sigv != engine.ver:
+                if cl.sigv != engine.ver or getattr(cl, "btv", -1) != _bt_ver[0]:
+                    cl.btv = _bt_ver[0]
                     await send_sig(cl)
                 if cl.botv != bot.ver or (tick % 3 == 0 and bot.open_positions()):
                     await send_bot(cl)
@@ -1396,7 +1401,7 @@ async def signal_loop():
         cu = state.yahoo_t0
         engine.runners = scanner.runners
         try:
-            learner.rebuild(engine.signals)
+            learner.rebuild(engine.signals + BT["sigs"])
         except Exception as e:
             log.warning("Öğrenme hatası: %s", e)
         syms = all_syms()
@@ -1571,11 +1576,180 @@ async def market_loop():
                     act = [{"s": x["symbol"], "v": x.get("volume"), "p": (q.get(x["symbol"]) or {}).get("p"),
                             "ch": (q.get(x["symbol"]) or {}).get("ch"), "sek": sektor.sektor_of(x["symbol"])}
                            for x in scanner.actives]
-                    MARKET.update(sek=sek, gain=mv(scanner.gainers), lose=mv(scanner.losers), act=act, t=int(time.time()))
+                    for extra in ("SPY", "^VIX"):
+                        await get_daily(extra)
+                    hava_hesapla(q)
+                    MARKET.update(sek=sek, gain=mv(scanner.gainers), lose=mv(scanner.losers), act=act, t=int(time.time()),
+                                  hava=dict(HAVA), bil={k: v for k, v in ((x, bilanco_durum(x)) for x in EARN) if v})
                     _mkt_ver[0] += 1
             except Exception as e:
                 log.warning("Piyasa özeti hatası: %s", e)
             await asyncio.sleep(60 if cal.session(time.time()) != "closed" else 900)
+
+
+# ----------------------------------------------------------------- piyasa havası + bilanço takvimi
+HAVA = {"etiket": "bilinmiyor", "puan": 0, "neden": [], "t": 0}
+EARN = {}          # sembol -> [bilanço tarihleri (YYYY-MM-DD)]
+
+
+def hava_hesapla(q):
+    """SPY trendi + VIX + piyasa genişliği → Güçlü / Normal / Riskli."""
+    puan, neden = 0, []
+    try:
+        spy = _daily_cache.get("SPY", (0, []))[1]
+        vix = _daily_cache.get("^VIX", (0, []))[1]
+        if len(spy) >= 21:
+            closes = [x[4] for x in spy]
+            e20 = analiz.ema(closes, 20)[-1]
+            last = (q.get("SPY") or {}).get("p") or closes[-1]
+            if last > e20:
+                puan += 1
+                neden.append("SPY 20 günlük ortalamanın üstünde")
+            else:
+                puan -= 1
+                neden.append("SPY 20 günlük ortalamanın altında")
+        sch = (q.get("SPY") or {}).get("ch")
+        if sch is not None:
+            if sch >= 0.3:
+                puan += 1
+            elif sch <= -0.5:
+                puan -= 1
+            neden.append(f"SPY bugün {sch:+.2f}%")
+        if vix:
+            v = vix[-1][4]
+            neden.append(f"VIX {v:.1f}")
+            puan += 1 if v < 15 else (-2 if v > 25 else (-1 if v > 20 else 0))
+            HAVA["vix"] = round(v, 1)
+        ups = [x["ch"] for x in q.values() if x.get("ch") is not None]
+        if len(ups) > 30:
+            g = round(100 * sum(1 for x in ups if x > 0) / len(ups))
+            HAVA["genislik"] = g
+            neden.append(f"hisselerin %{g}'i yükselişte")
+            puan += 1 if g >= 60 else (-1 if g <= 40 else 0)
+    except Exception as e:
+        log.debug("Hava hesabı hatası: %s", e)
+    HAVA.update(puan=puan, etiket="Güçlü" if puan >= 2 else ("Riskli" if puan <= -2 else "Normal"), neden=neden,
+                t=int(time.time()))
+
+
+def bilanco_durum(sym):
+    ds = EARN.get(sym)
+    if not ds:
+        return None
+    today = datetime.now(ET).date()
+    for k, off in (("bugün", 0), ("dün", -1), ("yarın", 1)):
+        if (today + timedelta(days=off)).isoformat() in ds:
+            return k
+    return None
+
+
+def extra_mult(sig):
+    m, notes = 1.0, []
+    b = bilanco_durum(sig["sym"])
+    if b in ("bugün", "dün"):
+        m *= 0.5
+        notes.append(f"bilanço {b}: oynaklık yüksek, lot yarıya")
+    if HAVA["etiket"] == "Riskli":
+        m *= 0.6
+        notes.append("piyasa havası riskli, lot küçültüldü")
+    return m, ", ".join(notes)
+
+
+def earn_fetch(sym):
+    try:
+        cal_ = yf.Ticker(sym).calendar
+        ds = cal_.get("Earnings Date") if isinstance(cal_, dict) else None
+        return [d.isoformat() if hasattr(d, "isoformat") else str(d)[:10] for d in (ds or [])]
+    except Exception:
+        return None
+
+
+async def earnings_loop():
+    """Günde iki kez: izlenen hisselerin bilanço tarihleri (Yahoo)."""
+    await asyncio.sleep(30)
+    while True:
+        for sym in list(dict.fromkeys(SYMBOLS + UNIVERSE)):
+            if sym in ("SPY", "QQQ", "IWM", "DIA", "TQQQ", "SQQQ", "SOXL", "XLF", "XLE", "TLT", "GLD", "SLV"):
+                continue
+            ds = await asyncio.to_thread(earn_fetch, sym)
+            if ds is not None:
+                EARN[sym] = ds
+            await asyncio.sleep(1.5)
+        _mkt_ver[0] += 1
+        await asyncio.sleep(12 * 3600)
+
+
+# ----------------------------------------------------------------- geçmiş test
+BT = {"sigs": [], "sum": None, "t": 0, "running": False, "bekliyor": None, "prog": "", "hata": ""}
+_bt_ver = [0]
+BT_PATH = "gecmis/test.json"
+
+
+async def bt_load():
+    if not backup.enabled:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=60) as c:
+            d = await backup._get(c, BT_PATH)
+        if isinstance(d, dict):
+            BT.update(sigs=d.get("sigs") or [], sum=d.get("sum"), t=d.get("t") or 0)
+    except Exception as e:
+        log.warning("Geçmiş test yüklenemedi: %s", e)
+
+
+async def bt_run(n_days):
+    BT.update(running=True, bekliyor=None, prog="başlıyor…", hata="")
+    _bt_ver[0] += 1
+    syms = [x for x in SYMBOLS]
+
+    def prog(i, n, k, secs):
+        BT["prog"] = f"{i}/{n} hisse · {k} sinyal · {int(secs // 60)} dk"
+        _bt_ver[0] += 1
+    try:
+        sigs, summ = await asyncio.to_thread(geriye.run, ALPACA_KEY, ALPACA_SECRET, syms, n_days, ET, prog,
+                                             lambda: cal.session(time.time()) == "regular")
+        if sigs:
+            BT.update(sigs=sigs, sum=summ, t=int(time.time()))
+            learner._sig = None
+            learner.rebuild(engine.signals + BT["sigs"])
+            feed_add("bot", "", f"Geçmiş test bitti: {summ['gun']} günde {summ['tum']['n']} sinyal, ortalama "
+                     f"{summ['tum'].get('avg', 0):+.2f}R", sub="Öğren sekmesinde sonuçlar. Bot artık bu verilerle de öğreniyor.",
+                     tone="bilgi")
+            if backup.enabled:
+                async with httpx.AsyncClient(timeout=60) as c:
+                    await backup._put(c, BT_PATH, {"sigs": sigs, "sum": summ, "t": BT["t"]})
+        else:
+            BT["hata"] = (summ or {}).get("hata") or "sinyal çıkmadı"
+    except Exception as e:
+        BT["hata"] = str(e)[:160]
+        log.warning("Geçmiş test hatası: %s", e)
+    BT.update(running=False, prog="")
+    _bt_ver[0] += 1
+
+
+async def bt_loop():
+    """İstenen test, piyasa normal seansı kapalıyken başlatılır."""
+    while True:
+        await asyncio.sleep(30)
+        if BT["bekliyor"] and not BT["running"] and cal.session(time.time()) != "regular":
+            await bt_run(BT["bekliyor"])
+
+
+def saat_tablosu():
+    """Saatlere göre (TR) sinyal sonuçları: canlı (yeni kurallar) + geçmiş test."""
+    rows = {}
+    for s_ in list(engine.signals) + BT["sigs"]:
+        r = s_.get("r")
+        if r is None or s_.get("st") not in ("hedef", "stop", "süre"):
+            continue
+        if not s_.get("bt") and (s_.get("t") or 0) < ogrenme.LEARN_SINCE:
+            continue
+        h = datetime.fromtimestamp(s_["t"], TR).hour
+        x = rows.setdefault(h, [0, 0.0, 0])
+        x[0] += 1
+        x[1] += r
+        x[2] += 1 if r > 0 else 0
+    return [{"h": h, "n": v[0], "avg": round(v[1] / v[0], 3), "wr": round(100 * v[2] / v[0])} for h, v in sorted(rows.items())]
 
 
 VIEWED = {}        # listede olmayan ama uygulamada açılan hisseler: 30 dk boyunca dakikalık veri çekilir
@@ -1714,11 +1888,15 @@ async def lifespan(app):
     sigs, botdays = await backup.restore()
     engine.load(sigs)
     bot.load(botdays)
-    learner.rebuild(engine.signals)
+    await bt_load()
+    learner.rebuild(engine.signals + BT["sigs"])
     apply_ayar(backup.data.get("ayar"))
     push.load(backup.data)
     feed_seed()
     bot.on_note = feed_bot_note
+    bot.extra_mult = extra_mult
+    engine.bilanco = bilanco_durum
+    engine.hava = lambda: HAVA["etiket"]
     backup.record_start()
     await backup.save(engine, bot)
     try:
@@ -1727,7 +1905,7 @@ async def lifespan(app):
         log.warning("Bot senkron hatası: %s", e)
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
-                                                  market_loop, push.loop)]
+                                                  market_loop, push.loop, earnings_loop, bt_loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -1890,6 +2068,23 @@ async def ayar_kaydet(request: Request):
     bot.ver += 1
     asyncio.create_task(backup.save(engine, bot))
     return JSONResponse({"ok": 1, "cfg": BOT_CFG, "push": PUSH_PREF})
+
+
+@app.post("/api/gecmis")
+async def gecmis_baslat(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    try:
+        d = await request.json()
+    except Exception:
+        d = {}
+    n = int(min(25, max(3, int(d.get("gun") or 15))))
+    if BT["running"]:
+        return JSONResponse({"ok": 0, "durum": "zaten çalışıyor"})
+    BT["bekliyor"] = n
+    _bt_ver[0] += 1
+    acik = cal.session(time.time()) == "regular"
+    return JSONResponse({"ok": 1, "durum": "seans kapanınca başlayacak" if acik else "birkaç saniye içinde başlıyor"})
 
 
 @app.get("/push/key")

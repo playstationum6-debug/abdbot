@@ -59,6 +59,7 @@ class Bot:
         self.positions = []
         self.journal = []
         self.on_note = None      # app.py: canlı akışa mesaj düşürmek için
+        self.extra_mult = None   # app.py: piyasa havası / bilanço günü lot çarpanı → (çarpan, not)
         self.ver = 0
         self.dirty_days = set()
         self.seen = set()
@@ -218,6 +219,14 @@ class Bot:
             mult, mwhy = self.learner.size_mult(sig["setup"], ses, conf, sig.get("f"))
         except Exception:
             mult, mwhy = 1.0, ""
+        if self.extra_mult:
+            try:
+                em, enote = self.extra_mult(sig)
+                if em != 1.0:
+                    mult *= em
+                    mwhy = (mwhy + ", " if mwhy else "") + enote
+            except Exception:
+                pass
         streak = self.loss_streak()
         if streak >= 3:
             mult *= 0.5

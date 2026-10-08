@@ -36,7 +36,8 @@ SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa so
 FEAT_AD = {"volr": "Hacim katı", "vwap": "VWAP", "trend": "Kısa trend", "spy": "SPY yönü", "room": "Hedefe yer",
            "tod": "Zaman", "fiyat": "Fiyat", "tip": "Hisse tipi", "haber": "Haber", "obv": "OBV hacim akışı",
            "ai": "Yapay zeka haber puanı", "sec": "SEC bildirimi", "formasyon": "Formasyon",
-           "talep": "Alıcı bölgesi"}
+           "talep": "Alıcı bölgesi",
+           "bilanco": "Bilanço", "hava": "Piyasa havası"}
 
 
 def _shr(n, s):
@@ -63,7 +64,7 @@ class Learner:
         groups, feats, total = {}, {}, [0.0, 0.0, 0.0, 0, 0.0]
         done = [s for s in signals
                 if s.get("r") is not None and s.get("st") in ("hedef", "stop", "süre")
-                and (s.get("t") or 0) >= LEARN_SINCE]
+                and ((s.get("t") or 0) >= LEARN_SINCE or s.get("bt"))]   # geçmiş test bugünkü kurallarla yapıldı
         done.sort(key=lambda s: s.get("xt") or s.get("t") or 0)
         m = len(done)
         # Her kova: [n (ağırlıklı), toplam R (ağırlıklı), kazanç (ağırlıklı), ham adet, ham toplam R]

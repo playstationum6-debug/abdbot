@@ -835,6 +835,12 @@ class Engine:
         f["formasyon"] = same[0]["ad"] + " (lehte)" if same else (opp[0]["ad"] + " (aleyhte)" if opp else "yok")
         zs = fx.get("zones") or []
         f["talep"] = "alıcı bölgesine yakın" if zs and x["c"] - zs[0]["hi"] <= x["atr"] * 3 else "uzak / yok"
+        bil = getattr(self, "bilanco", None)
+        if bil:
+            f["bilanco"] = bil(sym) or "yok"
+        hv = getattr(self, "hava", None)
+        if hv:
+            f["hava"] = hv() or "bilinmiyor"
         if sym in self.runners:
             ri = self.runners[sym]
             f["haber"] = (ri.get("news_kind") or "nötr") if ri.get("news") else "yok"   # iyi / nötr / kötü / yok
