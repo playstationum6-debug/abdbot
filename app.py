@@ -71,9 +71,9 @@ BOT_DIR = "bot"
 BOT_CFG = {
     "enabled": os.getenv("BOT_ENABLED", "1") == "1",
     "notional": float(os.getenv("BOT_NOTIONAL", "250")),     # işlem başı pozisyon büyüklüğü ($)
-    "max_open": int(os.getenv("BOT_MAX_OPEN", "5")),         # aynı anda en fazla açık pozisyon
+    "max_open": int(os.getenv("BOT_MAX_OPEN", "8")),         # aynı anda en fazla açık pozisyon
     "daily_loss": float(os.getenv("BOT_DAILY_LOSS", "50")),  # günlük zarar limiti ($)
-    "min_conf": int(os.getenv("BOT_MIN_CONF", "60")),        # botun alacağı en düşük güven puanı (normal seans)
+    "min_conf": int(os.getenv("BOT_MIN_CONF", "55")),        # botun alacağı en düşük güven puanı (normal seans)
     "min_conf_ext": int(os.getenv("BOT_MIN_CONF_EXT", "50")),# piyasa öncesi/sonrası için eşik (yarım lot + limit emir)
 }
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
@@ -732,6 +732,49 @@ def status_payload():
 
 
 # ----------------------------------------------------------------- Yahoo
+_daily_cache = {}   # sembol -> (zaman, mumlar)
+
+
+def daily_fetch(sym):
+    """Günlük grafik için 1 yıllık günlük mumlar (Yahoo)."""
+    df = yf.download(sym, period="1y", interval="1d", auto_adjust=False, progress=False, threads=False)
+    if df is None or df.empty:
+        return []
+    if isinstance(df.columns, pd.MultiIndex):
+        lv0 = df.columns.get_level_values(0)
+        if sym in lv0:
+            df = df[sym]
+        else:
+            df = df.xs(sym, axis=1, level=1) if sym in df.columns.get_level_values(1) else df.droplevel(1, axis=1)
+    out = []
+    for idx, r in df.iterrows():
+        try:
+            o, h, l, c = float(r["Open"]), float(r["High"]), float(r["Low"]), float(r["Close"])
+            v = float(r["Volume"]) if r["Volume"] == r["Volume"] else 0.0
+        except Exception:
+            continue
+        if c != c or o != o:
+            continue
+        out.append([idx.strftime("%Y-%m-%d"), round(o, 4), round(h, 4), round(l, 4), round(c, 4), int(v)])
+    return out
+
+
+async def get_daily(sym):
+    hit = _daily_cache.get(sym)
+    if hit and time.time() - hit[0] < 1800:
+        return hit[1]
+    try:
+        bars = await asyncio.to_thread(daily_fetch, sym)
+    except Exception as e:
+        log.warning("Günlük veri hatası %s: %s", sym, e)
+        bars = hit[1] if hit else []
+    if bars:
+        _daily_cache[sym] = (time.time(), bars)
+        if len(_daily_cache) > 80:
+            _daily_cache.pop(min(_daily_cache, key=lambda k: _daily_cache[k][0]), None)
+    return bars
+
+
 def yahoo_fetch(symbols, period):
     df = yf.download(
         tickers=" ".join(symbols), period=period, interval="1m", prepost=True,
@@ -1110,22 +1153,22 @@ def ask_login():
 
 
 LOGIN_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#ffffff">
-<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0a0e17">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ABD·BOT"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/ikon-192.png">
-<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
-<title>abdbot · Giriş</title><style>
-body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fff;color:#3c3c3c;font:700 16px Nunito,-apple-system,sans-serif}
-form{width:100%;max-width:360px;margin:16px;text-align:center}
-img{width:92px;height:92px;border-radius:26px;margin-bottom:14px;box-shadow:0 6px 0 #58a700}
-h1{margin:0 0 4px;font-size:30px;font-weight:900;color:#58cc02;letter-spacing:-.5px}p{margin:0 0 22px;color:#777}
-input{width:100%;box-sizing:border-box;font:700 17px Nunito,sans-serif;padding:14px 16px;border-radius:16px;border:2px solid #e5e5e5;background:#f7f7f7;color:#3c3c3c;margin-bottom:14px;outline:none}
-input:focus{border-color:#1cb0f6;background:#fff}
-button{width:100%;font:900 16px Nunito,sans-serif;letter-spacing:.6px;text-transform:uppercase;padding:14px;border:0;border-radius:16px;background:#58cc02;color:#fff;box-shadow:0 5px 0 #58a700;cursor:pointer}
-button:active{transform:translateY(5px);box-shadow:none}
-.err{color:#ea2b2b;background:#ffdfe0;border-radius:12px;padding:9px;font-size:14px;margin:0 0 14px}</style></head><body>
-<form method="post" action="/giris"><img src="/ikon-192.png" alt=""><h1>abdbot</h1><p>Tekrar hoş geldin! Şifreni gir.</p>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<title>ABD·BOT · Giriş</title><style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 80% at 50% 0%,#16213a 0%,#0a0e17 60%);color:#e6ebf5;font:500 16px Inter,-apple-system,sans-serif}
+form{width:100%;max-width:360px;margin:16px;padding:28px 22px;text-align:center;background:rgba(20,27,42,.75);border:1px solid #222c40;border-radius:24px;backdrop-filter:blur(12px)}
+img{width:76px;height:76px;border-radius:20px;margin-bottom:14px;box-shadow:0 10px 30px rgba(56,189,248,.25)}
+h1{margin:0 0 4px;font-size:26px;font-weight:800;letter-spacing:-.5px}p{margin:0 0 22px;color:#8b95a9;font-size:14px}
+input{width:100%;box-sizing:border-box;font:600 16px Inter,sans-serif;padding:14px 16px;border-radius:14px;border:1px solid #2a3550;background:#0f1522;color:#e6ebf5;margin-bottom:12px;outline:none}
+input:focus{border-color:#38bdf8}
+button{width:100%;font:700 16px Inter,sans-serif;padding:14px;border:0;border-radius:14px;background:linear-gradient(135deg,#38bdf8,#6366f1);color:#fff;cursor:pointer}
+button:active{opacity:.85}
+.err{color:#fca5a5;background:rgba(239,68,68,.12);border-radius:12px;padding:9px;font-size:14px;margin:0 0 12px}</style></head><body>
+<form method="post" action="/giris"><img src="/ikon-192.png" alt=""><h1>ABD·BOT</h1><p>Canlı sinyal ve sanal işlem botu</p>
 __ERR__<input type="password" name="sifre" placeholder="Şifre" autocomplete="current-password" autofocus required>
 <button type="submit">Giriş yap</button></form></body></html>"""
 
@@ -1175,7 +1218,7 @@ async def giris(request: Request):
 MANIFEST = {
     "name": "ABD·BOT", "short_name": "ABD·BOT", "description": "ABD borsası canlı sinyal ve sanal işlem botu",
     "start_url": "/", "scope": "/", "display": "standalone", "orientation": "portrait",
-    "background_color": "#58cc02", "theme_color": "#ffffff", "lang": "tr",
+    "background_color": "#0a0e17", "theme_color": "#0a0e17", "lang": "tr",
     "icons": [
         {"src": "/ikon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
         {"src": "/ikon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
@@ -1245,6 +1288,11 @@ async def ws_endpoint(ws: WebSocket):
         await send_scan(cl)
         while True:
             msg = json.loads(await ws.receive_text())
+            if msg.get("daily"):
+                dsym = str(msg["daily"]).upper()[:8]
+                if dsym in store.bars:
+                    await cl.send({"type": "daily", "sym": dsym, "bars": await get_daily(dsym)})
+                continue
             sym = str(msg.get("sub", "")).upper()
             if sym in store.bars:
                 cl.sym = sym

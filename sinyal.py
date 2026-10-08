@@ -27,6 +27,8 @@ SETUP_AD = {
     "uz_vwap": "Seans VWAP geri alma (uzatılmış)",
     "kosu": "Haberli momentum kırılımı",
     "geri": "Momentum ilk geri çekilme",
+    "itki": "Hacimli itki (1 dk scalp)",
+    "vwap_sek": "VWAP sekmesi (1 dk scalp)",
 }
 SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa sonrası"}
 SES_NAME = {0: "pre", 1: "regular", 2: "post", 3: "closed"}
@@ -43,7 +45,8 @@ SLIP_RUNNER = {"regular": 0.005, "pre": 0.008, "post": 0.008}
 RUN_MIN_MOVE = 10.0          # önceki kapanışa göre en az %10 yükselmiş olmalı
 RUN_MIN_SES_DV = 1_000_000   # bu seansta en az 1 mn $ işlem hacmi
 RUN_MIN_BAR_DV = 50_000      # sinyal mumunda en az 50 bin $ işlem
-COOLDOWN = 30 * 60       # aynı hisse + kurgu + yön için bekleme
+COOLDOWN = 10 * 60       # aynı hisse + kurgu + yön için bekleme (sık işlem: 10 dk)
+R_SETUP = {"itki": 1.5, "vwap_sek": 1.5}   # 1 dk scalp kurgularında hedef = 1,5R
 FILL_BARS = 3            # uzatılmış seansta limit emir en fazla 3 mum bekler
 FRESH_SEC = 300          # sadece son 5 dk içinde kapanan mumlar değerlendirilir
 MAX_KEEP = 6000          # bellekte tutulan en fazla sinyal
@@ -224,6 +227,17 @@ class Engine:
         x["ses_mins"] = (T - start) / 60
         x["recent"] = [tuple(bars[t][:5]) for t in ses_today[-12:]]
         x["mins"] = (T - b["open"]) / 60
+        # OBV eğimi (son 10 mum): hacim alıcı mı satıcı mı tarafta? (-1 … +1)
+        seg = ses_today[-11:]
+        num = den = 0.0
+        for i in range(1, len(seg)):
+            pc_, (bc_, bv_) = bars[seg[i - 1]][3], (bars[seg[i]][3], bars[seg[i]][4])
+            num += bv_ if bc_ > pc_ else (-bv_ if bc_ < pc_ else 0)
+            den += bv_
+        x["obv"] = num / den if den > 0 else 0.0
+        prev5 = x["recent"][-6:-1]
+        x["ph5"] = max((r[1] for r in prev5), default=None)
+        x["pl5"] = min((r[2] for r in prev5), default=None)
         return x
 
     # ------------------------------------------------------------ puan / gerekçe
@@ -245,6 +259,13 @@ class Engine:
         else:
             s -= 7
             why.append("Kısa trend ters (EMA9/EMA21)")
+        ob = x.get("obv", 0.0) * d
+        if ob >= 0.25:
+            s += 5
+            why.append(f"OBV {'alıcı' if d > 0 else 'satıcı'} tarafta (son 10 mum hacim akışı %{abs(x['obv']) * 100:.0f})")
+        elif ob <= -0.25:
+            s -= 6
+            why.append("OBV ters: hacim akışı karşı yönde (dikkat)")
         m = self.mkt.get("dir")
         if sym not in ("SPY", "QQQ") and sym not in self.runners and m is not None and x["ses"] == "regular":
             if m == d:
@@ -339,6 +360,37 @@ class Engine:
                     why = [f"{'Yükselen' if d > 0 else 'Düşen'} trendde EMA21'e geri çekilme sonrası dönüş mumu",
                            f"Hacim ortalamanın {x['volr']:.1f} katı"]
                     out.append(("trend", d, c, stop, risk, 50, why))
+
+        # E) 1 dk SCALP — hacimli itki: güçlü gövdeli, hacim patlamalı mum son 5 mumun tepesini/dibini kırar
+        rng = x["h"] - x["l"]
+        if 3 <= mins <= 385 and x["volr"] >= 2.5 and rng > 0 and rng <= 3 * atr and x["ph5"] is not None:
+            body = abs(c - o)
+            for d in (1, -1):
+                lvl = x["ph5"] if d > 0 else x["pl5"]
+                near_end = (c - x["l"]) / rng >= 0.75 if d > 0 else (x["h"] - c) / rng >= 0.75
+                if (c - o) * d > 0 and body >= 0.6 * rng and near_end and (c - lvl) * d > 0 \
+                        and (x["vwap"] is None or (c - x["vwap"]) * d > 0) and (x["ema9"] - x["ema21"]) * d > 0 \
+                        and self._ready(sym, "itki", d, T):
+                    base_stop = (x["l"] if d > 0 else x["h"]) - d * 0.1 * atr
+                    stop, risk = self._clamp(c, base_stop, d, atr, 0.5, 2.0)
+                    why = [f"1 dk hacimli itki: hacim ortalamanın {x['volr']:.1f} katı, güçlü {'yeşil' if d > 0 else 'kırmızı'} gövde",
+                           f"Son 5 mumun {'tepesi' if d > 0 else 'dibi'} ({f2(lvl)}) kırıldı",
+                           "Scalp: hedef 1,5R, hızlı çıkış"]
+                    out.append(("itki", d, c, stop, risk, 52, why))
+
+        # F) 1 dk SCALP — VWAP sekmesi: trend yönünde VWAP'a değip hacimle geri dönüş
+        vw = x["vwap"]
+        if vw and 20 <= mins <= 380 and x["volr"] >= 1.3 and rng_ok and len(x["closes4"]) >= 3:
+            for d in (1, -1):
+                trend = (x["ema9"] - x["ema21"]) * d > 0 and all((pc_ - vw) * d > 0 for pc_ in x["closes4"][-3:])
+                touch = (x["l"] <= vw * 1.0008) if d > 0 else (x["h"] >= vw * 0.9992)
+                if trend and touch and (c - vw) * d > 0 and (c - o) * d > 0 and self._ready(sym, "vwap_sek", d, T):
+                    base_stop = (min(x["l"], vw) if d > 0 else max(x["h"], vw)) - d * 0.15 * atr
+                    stop, risk = self._clamp(c, base_stop, d, atr, 0.5, 2.0)
+                    why = [f"{'Yükselen' if d > 0 else 'Düşen'} trendde VWAP'a ({f2(vw)}) değip hacimle geri döndü",
+                           f"Hacim ortalamanın {x['volr']:.1f} katı",
+                           "Scalp: hedef 1,5R, hızlı çıkış"]
+                    out.append(("vwap_sek", d, c, stop, risk, 50, why))
         return out
 
     def _extended(self, sym, x):
@@ -547,6 +599,8 @@ class Engine:
             f["tod"] = SES_AD[x["ses"]]
         c = x["c"]
         f["fiyat"] = "<1$" if c < 1 else "1-5$" if c < 5 else "5-20$" if c < 20 else "20$+"
+        ob = x.get("obv", 0.0) * d
+        f["obv"] = "lehte" if ob >= 0.25 else ("aleyhte" if ob <= -0.25 else "nötr")
         f["tip"] = "koşan küçük hisse" if sym in self.runners else "ana liste"
         if sym in self.runners:
             f["haber"] = "var" if self.runners[sym].get("news") else "yok"
@@ -559,7 +613,7 @@ class Engine:
         if sid in self.by_id:
             return
         runner = sym in self.runners
-        tgt = entry + d * (R_RUNNER if runner else R_MULT) * risk
+        tgt = entry + d * (R_RUNNER if runner else R_SETUP.get(setup, R_MULT)) * risk
         feats = self._features(sym, x, d)
         conf0 = conf
         if self.learner:

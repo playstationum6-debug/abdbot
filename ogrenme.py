@@ -23,10 +23,11 @@ SETUP_AD = {
     "trend": "Trend geri çekilme", "gap": "Boşluk devamı", "uz_seviye": "Seviye kırılımı (uzatılmış)",
     "uz_kirilim": "Seans aralığı kırılımı (uzatılmış)", "uz_vwap": "Seans VWAP geri alma (uzatılmış)",
     "kosu": "Haberli momentum kırılımı", "geri": "Momentum ilk geri çekilme",
+    "itki": "Hacimli itki (1 dk scalp)", "vwap_sek": "VWAP sekmesi (1 dk scalp)",
 }
 SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa sonrası"}
 FEAT_AD = {"volr": "Hacim katı", "vwap": "VWAP", "trend": "Kısa trend", "spy": "SPY yönü", "room": "Hedefe yer",
-           "tod": "Zaman", "fiyat": "Fiyat", "tip": "Hisse tipi", "haber": "Haber"}
+           "tod": "Zaman", "fiyat": "Fiyat", "tip": "Hisse tipi", "haber": "Haber", "obv": "OBV hacim akışı"}
 
 
 def _shr(n, s):
