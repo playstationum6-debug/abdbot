@@ -53,6 +53,37 @@ h3{margin:16px 2px 8px;font-size:15px;display:flex;align-items:center;gap:8px}
 .fu{animation:fu .7s}.fd{animation:fd .7s}
 @keyframes fu{from{background:rgba(34,197,94,.22)}}@keyframes fd{from{background:rgba(239,68,68,.22)}}
 footer{color:var(--mut);font-size:12px;margin-top:16px;line-height:1.7}
+.sig{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:6px;cursor:pointer}
+.sig .top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.sig .sn{font-weight:800}
+.dirb{font-weight:800;padding:2px 8px;border-radius:6px;font-size:12px}
+.dirb.al{background:rgba(34,197,94,.15);color:var(--up)}.dirb.sat{background:rgba(239,68,68,.15);color:var(--dn)}
+.sig .meta{font-size:12px;color:var(--mut)}
+.conf{margin-left:auto;font-weight:800;font-variant-numeric:tabular-nums;font-size:13px;padding:2px 8px;border-radius:6px;background:#0b1220}
+.conf.hi{color:var(--up)}.conf.mid{color:var(--warn)}.conf.lo{color:var(--mut)}
+.sig .lv{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:7px 0 5px;font-size:11px;color:var(--mut)}
+.sig .lv b{display:block;color:var(--txt);font-size:13px;font-variant-numeric:tabular-nums}
+.sig .bot{display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap}
+.sig ul{margin:7px 0 0;padding-left:18px;font-size:12.5px;color:#c3cbd8;display:none;line-height:1.5}
+.sig.open ul{display:block}
+.sig .go{margin-left:auto;color:var(--acc);font-weight:600}
+.stt{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--mut)}
+.stt.win{color:var(--up);border-color:#14532d}.stt.loss{color:var(--dn);border-color:#7f1d1d}.stt.live{color:var(--acc);border-color:#0c4a6e}
+.rr{font-weight:700;font-variant-numeric:tabular-nums}
+.morebtn{width:100%;background:var(--panel);color:var(--mut);border:1px solid var(--line);border-radius:10px;padding:9px;font-weight:600;margin-top:2px;display:none}
+.empty{color:var(--mut);font-size:13px;padding:14px;text-align:center;background:var(--panel);border:1px dashed var(--line);border-radius:12px}
+.tw{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+table.res{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+table.res th,table.res td{padding:8px 7px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+table.res th{color:var(--mut);font-weight:600;font-size:11.5px}
+table.res th:first-child,table.res td:first-child{text-align:left;white-space:normal}
+table.res tr.main td{font-weight:700}
+table.res tr:last-child td{border-bottom:0}
+.note{font-size:12px;color:var(--mut);margin:7px 2px;line-height:1.5}
+.note.w{color:#fcd34d}
+.toast{position:fixed;left:12px;right:12px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:20;max-width:560px;margin:0 auto;background:#0f2a1c;border:1px solid #166534;color:var(--txt);padding:12px 14px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.45);transform:translateY(160%);transition:transform .35s;cursor:pointer}
+.toast.sat{background:#2a0f12;border-color:#7f1d1d}
+.toast.on{transform:none}
 </style>
 </head>
 <body>
@@ -73,7 +104,7 @@ footer{color:var(--mut);font-size:12px;margin-top:16px;line-height:1.7}
   </div>
   <div class="warn" id="warn"></div>
   <div id="chart"></div>
-  <div class="legend">Soluk mumlar: piyasa öncesi/sonrası · Kesikli çizgi: önceki kapanış · Saatler Türkiye saati</div>
+  <div class="legend">Soluk mumlar: piyasa öncesi/sonrası · Turuncu çizgi: VWAP · Oklar: sinyaller · Saatler Türkiye saati</div>
   <div class="stats">
     <div class="stat"><b>Önceki kapanış</b><span id="sPc">—</span></div>
     <div class="stat"><b>Gün tepe / dip</b><span id="sHl">—</span></div>
@@ -82,10 +113,18 @@ footer{color:var(--mut);font-size:12px;margin-top:16px;line-height:1.7}
     <div class="stat"><b>Son veri</b><span id="sAge">—</span></div>
     <div class="stat"><b>Veri günü (NY)</b><span id="sDay">—</span></div>
   </div>
+  <h3>Sinyaller <div class="seg" id="sigf"><button data-k="hepsi">Hepsi</button><button data-k="bu">Bu hisse</button><button data-k="acik">Açık</button></div></h3>
+  <div id="sigs"><div class="empty">Henüz sinyal yok. Sinyaller sadece seans içinde, kapanan ve hacmi teyitli mumlarda üretilir.</div></div>
+  <button class="morebtn" id="more">Daha fazla göster</button>
+  <h3>Sonuçlar · gölge takip</h3>
+  <div class="note w" id="resnote"></div>
+  <div class="tw"><table class="res" id="res"></table></div>
+  <div class="note">Net sonuçlarda kayma (normal seans %0,03, uzatılmış seans %0,10, her yön için) ve masraf payı var. R = planlanan risk birimi (giriş–stop mesafesi). Normal seansta giriş bir sonraki mumun açılışından piyasa emriyle; uzatılmış seansta sinyal fiyatından limit emirle yapılır, 3 mumda dolmazsa "dolmadı" sayılır. Aynı mumda hem stop hem hedef görülürse stop sayılır. Seans biterse pozisyon son fiyattan kapatılır.</div>
   <h3>Hisseler <div class="seg" id="sort"><button data-k="hare">En çok hareket</button><button data-k="liste">Liste</button></div></h3>
   <div class="list" id="list"></div>
   <footer id="foot"></footer>
 </main>
+<div class="toast" id="toast"></div>
 <script>
 const TR_OFF=3*3600;
 const SES_TR={pre:'Piyasa öncesi',regular:'Normal seans',post:'Piyasa sonrası',closed:'Kapalı'};
@@ -95,6 +134,11 @@ function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorag
 let ws=null,retry=0,symbols=[],iexSet=new Set(),rows={},status={},offset=0;
 let cur=ls('sym')||'SPY',tf=+(ls('tf')||1),sortKey=ls('sort')||'hare',raw=[],info=null,prevLine=null,lastPx={};
 if(![1,5,15].includes(tf))tf=1;
+const SETUP={orb:'Açılış aralığı kırılımı',vwap:'VWAP geri alma',hacim:'Hacimli seviye kırılımı',trend:'Trend geri çekilme',gap:'Boşluk devamı',uz_seviye:'Seviye kırılımı'};
+const SETUP_K={orb:'ORB',vwap:'VWAP',hacim:'Hacim',trend:'Trend',gap:'Boşluk',uz_seviye:'Seviye'};
+const SES_K={pre:'Öncesi',regular:'Normal',post:'Sonrası'};
+const ST_TR={bekliyor:'Emir bekliyor','açık':'Açık',hedef:'Hedef ✓',stop:'Stop ✗','süre':'Süre doldu','dolmadı':'Dolmadı'};
+let sigList=[],sigStats=[],mine=[],sigFilter=ls('sigf')||'hepsi',sigShow=15,knownIds=null,sigLines=[],openIds=new Set();
 
 // ---------- grafik
 const chart=LightweightCharts.createChart($('chart'),{autoSize:true,
@@ -107,6 +151,13 @@ const cs=chart.addCandlestickSeries({upColor:'#22c55e',downColor:'#ef4444',borde
 cs.priceScale().applyOptions({scaleMargins:{top:.06,bottom:.24}});
 const vs=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'v',lastValueVisible:false,priceLineVisible:false});
 chart.priceScale('v').applyOptions({scaleMargins:{top:.8,bottom:0}});
+const vw=chart.addLineSeries({color:'#f59e0b',lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+function vwapData(){const out=new Map();let pv=0,vv=0,lastReg=null;
+  for(const b of raw){const bt=Math.floor(b[0]/(tf*60))*tf*60+TR_OFF;
+    if(b[6]===1){if(lastReg===null||b[0]-lastReg>3*3600){pv=0;vv=0}lastReg=b[0];pv+=(b[2]+b[3]+b[4])/3*b[5];vv+=b[5];
+      if(vv>0)out.set(bt,{time:bt,value:pv/vv})}
+    else if(!out.has(bt))out.set(bt,{time:bt})}
+  return [...out.values()]}
 
 function agg(b,m){if(m===1)return b;const o=[];let c=null;
   for(const x of b){const t=Math.floor(x[0]/(m*60))*m*60;
@@ -116,7 +167,7 @@ function agg(b,m){if(m===1)return b;const o=[];let c=null;
 function col(up,ext){return up?(ext?'rgba(34,197,94,.42)':'#22c55e'):(ext?'rgba(239,68,68,.42)':'#ef4444')}
 function toC(x){const c=col(x[4]>=x[1],x[6]!==1);return{time:x[0]+TR_OFF,open:x[1],high:x[2],low:x[3],close:x[4],color:c,wickColor:c,borderColor:c}}
 function toV(x){const up=x[4]>=x[1],ext=x[6]!==1;return{time:x[0]+TR_OFF,value:x[5],color:up?(ext?'rgba(34,197,94,.18)':'rgba(34,197,94,.45)'):(ext?'rgba(239,68,68,.18)':'rgba(239,68,68,.45)')}}
-function render(reset){const a=agg(raw,tf);cs.setData(a.map(toC));vs.setData(a.map(toV));
+function render(reset){const a=agg(raw,tf);cs.setData(a.map(toC));vs.setData(a.map(toV));vw.setData(vwapData());drawSignals();
   if(reset&&a.length){const n=a.length,show=tf===1?150:tf===5?110:70;chart.timeScale().setVisibleLogicalRange({from:Math.max(0,n-show),to:n+4})}}
 function applyBars(bs){let minT=Infinity;
   for(const b of bs){let i=raw.length-1;while(i>=0&&raw[i][0]>b[0])i--;
@@ -125,8 +176,53 @@ function applyBars(bs){let minT=Infinity;
   if(minT===Infinity)return;
   const a=agg(raw,tf);if(!a.length)return;const last=a[a.length-1];
   const bucket=Math.floor(minT/(tf*60))*tf*60;
-  if(bucket>=last[0]){try{cs.update(toC(last));vs.update(toV(last));return}catch(e){}}
+  if(bucket>=last[0]){try{cs.update(toC(last));vs.update(toV(last));vw.setData(vwapData());return}catch(e){}}
   render(false)}
+function bk(t){return Math.floor(t/(tf*60))*tf*60+TR_OFF}
+function drawSignals(){
+  const first=raw.length?raw[0][0]:0,last=raw.length?raw[raw.length-1][0]:0,mk=[];
+  for(const s of mine){if(s.t<first||s.t>last+60)continue;const al=s.dir>0;
+    mk.push({time:bk(s.t),position:al?'belowBar':'aboveBar',shape:al?'arrowUp':'arrowDown',color:al?'#22c55e':'#ef4444',text:SETUP_K[s.setup]+' '+s.conf});
+    if(s.xt&&s.r!=null&&s.xt<=last+60)mk.push({time:bk(s.xt),position:al?'aboveBar':'belowBar',shape:'circle',color:s.r>0?'#22c55e':'#ef4444',text:(s.r>0?'+':'')+s.r.toFixed(2)+'R'})}
+  mk.sort((a,b)=>a.time-b.time);try{cs.setMarkers(mk)}catch(e){}
+  for(const l of sigLines){try{cs.removePriceLine(l)}catch(e){}}sigLines=[];
+  const act=mine.filter(s=>s.st==='bekliyor'||s.st==='açık').sort((a,b)=>b.t-a.t)[0];
+  if(act){const al=act.dir>0,ent=act.fill||act.e;
+    sigLines.push(cs.createPriceLine({price:ent,color:'#38bdf8',lineWidth:1,lineStyle:0,axisLabelVisible:true,title:(al?'AL ':'SAT ')+'giriş'}));
+    sigLines.push(cs.createPriceLine({price:act.s,color:'#ef4444',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'stop'}));
+    sigLines.push(cs.createPriceLine({price:act.h,color:'#22c55e',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'hedef'}))}}
+function tTR(t){const d=new Date(t*1000),today=new Date(nowS()*1000);
+  const o={timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit'};
+  const same=d.toLocaleDateString('tr-TR',{timeZone:'Europe/Istanbul'})===today.toLocaleDateString('tr-TR',{timeZone:'Europe/Istanbul'});
+  return (same?'':d.toLocaleDateString('tr-TR',{timeZone:'Europe/Istanbul',day:'2-digit',month:'2-digit'})+' ')+d.toLocaleTimeString('tr-TR',o)}
+function esc(x){return String(x).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function sigCard(s){const al=s.dir>0,c=s.conf>=70?'hi':s.conf>=55?'mid':'lo';
+  const done=['hedef','stop','süre'].includes(s.st),cls=done?(s.r>0?'win':'loss'):(s.st==='dolmadı'?'':'live');
+  const res=done?`<span class="rr ${s.r>0?'up':'dn'}">${s.r>0?'+':''}${s.r.toFixed(2)}R · ${s.pct>0?'+':''}${s.pct.toFixed(2)}%</span>`:'';
+  const fill=s.fill?` · dolum ${fp(s.fill)}`:'';
+  return `<div class="sig${openIds.has(s.id)?' open':''}" data-id="${esc(s.id)}"><div class="top"><span class="sn">${esc(s.sym)}</span><span class="dirb ${al?'al':'sat'}">${al?'AL':'SAT'}</span><span class="meta">${SETUP[s.setup]||s.setup} · ${SES_K[s.ses]||s.ses} · ${tTR(s.t+60)}</span><span class="conf ${c}">${s.conf}</span></div>
+  <div class="lv"><div>Giriş ${s.typ==='limit'?'(limit)':'(piyasa)'}<b>${fp(s.e)}</b></div><div>Stop<b class="dn">${fp(s.s)}</b></div><div>Hedef<b class="up">${fp(s.h)}</b></div></div>
+  <div class="bot"><span class="stt ${cls}">${ST_TR[s.st]||s.st}</span>${res}<span class="meta">${fill}</span><span class="go" data-sym="${esc(s.sym)}">Grafik →</span></div>
+  <ul>${(s.why||[]).map(w=>'<li>'+esc(w)+'</li>').join('')}</ul></div>`}
+function renderSigs(){let L;
+  if(sigFilter==='bu')L=mine.slice().sort((a,b)=>b.t-a.t);
+  else L=sigList.filter(s=>sigFilter!=='acik'||s.st==='bekliyor'||s.st==='açık');
+  const box=$('sigs');
+  if(!L.length){box.innerHTML='<div class="empty">'+(sigFilter==='acik'?'Şu an açık sinyal yok.':sigFilter==='bu'?'Bu hissede son günlerde sinyal yok.':'Henüz sinyal yok. Sinyaller sadece seans içinde, kapanan ve hacmi teyitli mumlarda üretilir.')+'</div>';$('more').style.display='none';return}
+  box.innerHTML=L.slice(0,sigShow).map(sigCard).join('');$('more').style.display=L.length>sigShow?'block':'none'}
+function renderStats(){const T=sigStats.find(r=>r.k==='Tümü');
+  const n=T?T.n:0;$('resnote').textContent=n<100?`Henüz ${n}/100 sonuçlanmış işlem var. En az 100 işlem görmeden bu tablodan sonuç çıkarma.`:'';
+  if(!sigStats.length){$('res').innerHTML='<tr><td>Henüz sonuçlanmış sinyal yok.</td></tr>';return}
+  const main=new Set(['Tümü','Piyasa öncesi','Normal seans','Piyasa sonrası','Güven ≥ 70','Güven < 70']);
+  const f=(x,d=2,sfx='')=>x==null?'—':(x>0&&sfx==='R'?'+':'')+x.toFixed(d)+sfx;
+  $('res').innerHTML='<tr><th>Grup</th><th>Adet</th><th>Kazanma</th><th>Ort. R</th><th>Toplam R</th><th>Dolmadı</th><th>Açık</th></tr>'+
+    sigStats.map(r=>`<tr class="${main.has(r.k)?'main':''}"><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr.toFixed(0)+'%'}</td><td class="${r.avg>0?'up':r.avg<0?'dn':''}">${f(r.avg,2,'R')}</td><td class="${r.tot>0?'up':r.tot<0?'dn':''}">${f(r.tot,1,'R')}</td><td>${r.nf}</td><td>${r.open}</td></tr>`).join('')}
+let toastT=null;
+function toast(s){const t=$('toast'),al=s.dir>0;t.className='toast on'+(al?'':' sat');
+  t.innerHTML=`<b>Yeni sinyal: ${esc(s.sym)} ${al?'AL':'SAT'}</b> · ${SETUP[s.setup]||s.setup} · güven ${s.conf}<br><span class="meta">Giriş ${fp(s.e)} · Stop ${fp(s.s)} · Hedef ${fp(s.h)}</span>`;
+  t.onclick=()=>{t.className='toast';select(s.sym);window.scrollTo({top:0,behavior:'smooth'})};
+  try{navigator.vibrate&&navigator.vibrate(120)}catch(e){}
+  clearTimeout(toastT);toastT=setTimeout(()=>{t.className='toast'+(al?'':' sat')},9000)}
 function setPrevLine(){if(prevLine){cs.removePriceLine(prevLine);prevLine=null}
   if(info&&info.pc)prevLine=cs.createPriceLine({price:info.pc,color:'#94a3b8',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Önc. kapanış'})}
 
@@ -178,10 +274,11 @@ function renderStatus(){
   t+=`Yahoo son çekim: ${status.yAge==null?'henüz yok':fage(nowS()-status.yAge)+' önce'}${status.ySec?' · '+status.ySec+' sn sürdü':''}${status.yErr?' · ⚠ '+status.yErr:''}<br>`;
   t+=`Takvim: ${status.cal==='alpaca'?'Alpaca (tatiller dahil)':'hafta içi kuralı (tatiller hariç değil)'} · Elenen hatalı tick: ${status.bad||0}<br>`;
   t+=`Sunucu açık: ${status.up!=null?fage(nowS()-status.up):'—'}${status.rs7!=null?' · Son 7 günde yeniden başlama: '+status.rs7:''}<br>`;
-  t+=`GitHub yedeği: ${status.bk||'—'}${status.bkAge!=null?' · son kayıt '+fage(nowS()-status.bkAge)+' önce':''}`;
+  t+=`GitHub yedeği: ${status.bk||'—'}${status.bkAge!=null?' · son kayıt '+fage(nowS()-status.bkAge)+' önce':''}<br>`;
+  t+=`Sinyaller: ${status.sigN||0} (açık ${status.sigOpen||0}) · Piyasa yönü (SPY/VWAP): ${status.mkt==1?'yukarı':status.mkt==-1?'aşağı':'—'}`;
   $('foot').innerHTML=t}
 
-function select(sym){cur=sym;ls('sym',sym);raw=[];info=null;render(true);setPrevLine();updateQuote();renderList();
+function select(sym){cur=sym;ls('sym',sym);raw=[];info=null;mine=[];render(true);setPrevLine();updateQuote();renderList();
   if(ws&&ws.readyState===1)ws.send(JSON.stringify({sub:sym}))}
 
 $('list').addEventListener('click',e=>{const it=e.target.closest('.it');if(it){select(it.dataset.s);window.scrollTo({top:0,behavior:'smooth'})}});
@@ -190,6 +287,12 @@ function markBtns(){for(const b of $('tf').children)b.classList.toggle('on',+b.d
 $('tf').addEventListener('click',e=>{const m=+e.target.dataset.m;if(!m)return;tf=m;ls('tf',m);markBtns();render(true)});
 $('sort').addEventListener('click',e=>{const k=e.target.dataset.k;if(!k)return;sortKey=k;ls('sort',k);markBtns();renderList()});
 markBtns();
+function markSigf(){for(const b of $('sigf').children)b.classList.toggle('on',b.dataset.k===sigFilter)}
+$('sigf').addEventListener('click',e=>{const k=e.target.dataset.k;if(!k)return;sigFilter=k;ls('sigf',k);sigShow=15;markSigf();renderSigs()});
+markSigf();
+$('more').onclick=()=>{sigShow+=20;renderSigs()};
+$('sigs').addEventListener('click',e=>{const g=e.target.closest('.go');if(g){select(g.dataset.sym);window.scrollTo({top:0,behavior:'smooth'});return}
+  const c=e.target.closest('.sig');if(!c)return;const id=c.dataset.id;openIds.has(id)?openIds.delete(id):openIds.add(id);c.classList.toggle('open')});
 
 // ---------- bağlantı
 function connect(){if(document.hidden||ws)return;
@@ -199,7 +302,11 @@ function connect(){if(document.hidden||ws)return;
   ws.onmessage=e=>{const m=JSON.parse(e.data);
     if(m.type==='hello'){symbols=m.symbols;iexSet=new Set(m.iex);if(!symbols.includes(cur)){cur=symbols[0];ws.send(JSON.stringify({sub:cur}))}}
     else if(m.type==='wl'){Object.assign(rows,m.rows);status=m.status;offset=status.now-Date.now()/1000;renderList();renderStatus();updateQuote()}
-    else if(m.type==='snap'&&m.sym===cur){raw=m.bars;info=m.i;render(true);setPrevLine();updateQuote()}
+    else if(m.type==='snap'&&m.sym===cur){raw=m.bars;info=m.i;mine=m.sigs||[];render(true);setPrevLine();updateQuote();if(sigFilter==='bu')renderSigs()}
+    else if(m.type==='sig'){sigList=m.list||[];sigStats=m.stats||[];if(m.mine)mine=m.mine;
+      if(knownIds===null)knownIds=new Set(sigList.map(s=>s.id));
+      else for(const s of sigList.slice().reverse())if(!knownIds.has(s.id)){knownIds.add(s.id);if(s.st==='bekliyor'&&nowS()-s.t<600)toast(s)}
+      renderSigs();renderStats();drawSignals()}
     else if(m.type==='bar'&&m.sym===cur){const pc=info&&info.pc;info=m.i;applyBars(m.bars);if(info&&info.pc!==pc)setPrevLine();updateQuote()}};
   ws.onclose=()=>{ws=null;if(document.hidden){setConn('beklemede');return}
     retry++;setConn(retry>4?'bağlantı yok · dokun = yenile':'yeniden bağlanıyor…','bad');

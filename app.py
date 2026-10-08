@@ -30,6 +30,8 @@ import httpx
 import pandas as pd
 import websockets
 import yfinance as yf
+
+import sinyal
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
@@ -58,6 +60,7 @@ SITE_PASSWORD = os.getenv("SITE_PASSWORD", "")
 GH_TOKEN = os.getenv("GH_TOKEN", "")
 GH_REPO = os.getenv("GH_REPO", "")            # ör. kullaniciadi/abdbot-veri
 GH_PATH = os.getenv("GH_PATH", "durum/state.json")
+SIG_DIR = "sinyaller"
 BACKUP_SEC = int(os.getenv("BACKUP_SEC", "600"))
 
 # İlk 30'u IEX ile anlık izlenir (ücretsiz planın sembol sınırı 30).
@@ -98,6 +101,7 @@ class State:
     yahoo_ok = 0.0
     yahoo_err = ""
     yahoo_secs = 0.0
+    yahoo_t0 = 0.0          # son başarılı Yahoo çekiminin BAŞLADIĞI an (bu andan önce biten mumlar kapanmıştır)
     started = time.time()
 
 
@@ -106,11 +110,12 @@ state = State()
 
 # ----------------------------------------------------------------- GitHub yedeği
 class Backup:
-    """Küçük kalıcı durum: açılış kayıtları, ileride işlemler ve sinyaller."""
+    """GitHub'a kalıcı kayıt: durum dosyası + günlük sinyal dosyaları (sinyaller/YYYY-MM-DD.json).
+    Kod reposundan AYRI bir repo kullanın; yoksa her yedek Render'da yeniden kurulum tetikler."""
 
     def __init__(self):
         self.data = {"starts": []}
-        self.sha = None
+        self.shas = {}
         self.status = "kapalı (GH_TOKEN/GH_REPO yok)" if not (GH_TOKEN and GH_REPO) else "başlıyor"
         self.last_ok = 0.0
         self.dirty = False
@@ -119,53 +124,83 @@ class Backup:
     def enabled(self):
         return bool(GH_TOKEN and GH_REPO)
 
-    def _url(self):
-        return f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH}"
+    def _url(self, path):
+        return f"https://api.github.com/repos/{GH_REPO}/contents/{path}"
 
-    def _headers(self):
-        return {"Authorization": f"Bearer {GH_TOKEN}", "Accept": "application/vnd.github+json",
+    def _headers(self, raw=False):
+        return {"Authorization": f"Bearer {GH_TOKEN}",
+                "Accept": "application/vnd.github.raw+json" if raw else "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28"}
+
+    async def _get(self, c, path):
+        r = await c.get(self._url(path), headers=self._headers())
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        j = r.json()
+        self.shas[path] = j.get("sha")
+        content = j.get("content") or ""
+        if content.strip():
+            raw = base64.b64decode(content)
+        else:   # 1 MB üstü dosyalarda içerik ayrı istenir
+            rr = await c.get(self._url(path), headers=self._headers(raw=True))
+            rr.raise_for_status()
+            raw = rr.content
+        return json.loads(raw.decode("utf-8") or "null")
+
+    async def _put(self, c, path, obj):
+        body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        payload = {"message": f"{path} {datetime.now(TR):%Y-%m-%d %H:%M}", "content": base64.b64encode(body).decode()}
+        if self.shas.get(path):
+            payload["sha"] = self.shas[path]
+        r = await c.put(self._url(path), headers=self._headers(), json=payload)
+        if r.status_code in (409, 422):   # sha eskimiş ya da eksik: güncelini al, tekrar dene
+            g = await c.get(self._url(path), headers=self._headers())
+            if g.status_code == 200:
+                payload["sha"] = g.json().get("sha")
+                r = await c.put(self._url(path), headers=self._headers(), json=payload)
+        r.raise_for_status()
+        self.shas[path] = r.json()["content"]["sha"]
 
     async def restore(self):
         if not self.enabled:
-            return
+            return []
+        sigs = []
         try:
-            async with httpx.AsyncClient(timeout=20) as c:
-                r = await c.get(self._url(), headers=self._headers())
-            if r.status_code == 404:
-                self.status = "yeni (dosya yoktu)"
-                return
-            r.raise_for_status()
-            j = r.json()
-            self.sha = j.get("sha")
-            self.data = json.loads(base64.b64decode(j.get("content", "")).decode("utf-8") or "{}")
-            self.data.setdefault("starts", [])
-            self.status = "geri yüklendi"
+            async with httpx.AsyncClient(timeout=30) as c:
+                d = await self._get(c, GH_PATH)
+                if isinstance(d, dict):
+                    self.data = d
+                self.data.setdefault("starts", [])
+                r = await c.get(self._url(SIG_DIR), headers=self._headers())
+                if r.status_code == 200:
+                    files = sorted(x["path"] for x in r.json() if x.get("type") == "file" and x["path"].endswith(".json"))
+                    for p in files[-120:]:
+                        part = await self._get(c, p)
+                        if isinstance(part, list):
+                            sigs.extend(part)
+            self.status = f"geri yüklendi ({len(sigs)} sinyal)"
             self.last_ok = time.time()
         except Exception as e:
             self.status = f"okuma hatası: {str(e)[:80]}"
             log.warning("GitHub yedeği okunamadı: %s", e)
+        return sigs
 
-    async def save(self):
+    async def save(self, engine=None):
         if not self.enabled:
             return
-        body = json.dumps(self.data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        payload = {"message": f"durum {datetime.now(TR):%Y-%m-%d %H:%M}",
-                   "content": base64.b64encode(body).decode()}
-        if self.sha:
-            payload["sha"] = self.sha
+        days = set(engine.dirty_days) if engine else set()
+        if not self.dirty and not days:
+            return
         try:
-            async with httpx.AsyncClient(timeout=20) as c:
-                r = await c.put(self._url(), headers=self._headers(), json=payload)
-                if r.status_code == 409 or r.status_code == 422:   # sha eskimiş: güncelini al, tekrar dene
-                    g = await c.get(self._url(), headers=self._headers())
-                    if g.status_code == 200:
-                        payload["sha"] = g.json().get("sha")
-                        r = await c.put(self._url(), headers=self._headers(), json=payload)
-            r.raise_for_status()
-            self.sha = r.json()["content"]["sha"]
+            async with httpx.AsyncClient(timeout=30) as c:
+                if self.dirty:
+                    await self._put(c, GH_PATH, self.data)
+                    self.dirty = False
+                for day in sorted(days):
+                    await self._put(c, f"{SIG_DIR}/{day}.json", engine.day_list(day))
+                    engine.dirty_days.discard(day)
             self.last_ok = time.time()
-            self.dirty = False
             self.status = "tamam"
         except Exception as e:
             self.status = f"yazma hatası: {str(e)[:80]}"
@@ -385,6 +420,7 @@ class Store:
 
 
 store = Store()
+engine = sinyal.Engine(store, bar_info, cal, ET)
 
 
 # ----------------------------------------------------------------- özetler
@@ -493,6 +529,9 @@ def status_payload():
         "bk": backup.status,
         "bkAge": int(now - backup.last_ok) if backup.last_ok else None,
         "rs7": backup.starts_last_7d() if backup.enabled else None,
+        "sigN": len(engine.signals),
+        "sigOpen": engine.open_count(),
+        "mkt": engine.mkt.get("dir"),
     }
 
 
@@ -549,6 +588,7 @@ async def yahoo_loop():
             n = sum(store.merge_yahoo(sym, bars) for sym, bars in data.items())
             store.flush()
             state.yahoo_ok = time.time()
+            state.yahoo_t0 = t0
             state.yahoo_secs = state.yahoo_ok - t0
             state.yahoo_err = ""
             if first:
@@ -635,6 +675,7 @@ class Client:
         self.ver = -1
         self.snap = -1
         self.wl = {}
+        self.sigv = -1
         self.lock = asyncio.Lock()
 
     async def send(self, obj):
@@ -649,7 +690,16 @@ async def send_snap(cl):
     sym = cl.sym
     cl.ver = store.ver.get(sym, 0)
     cl.snap = store.snap_ver.get(sym, 0)
-    await cl.send({"type": "snap", "sym": sym, "bars": snapshot_bars(sym), "i": summary(sym)})
+    bars = snapshot_bars(sym)
+    since = bars[0][0] if bars else 0
+    await cl.send({"type": "snap", "sym": sym, "bars": bars, "i": summary(sym),
+                   "sigs": engine.for_symbol(sym, since)})
+
+
+async def send_sig(cl):
+    cl.sigv = engine.ver
+    await cl.send({"type": "sig", "list": engine.recent(40), "stats": engine.stats(),
+                   "mine": engine.for_symbol(cl.sym, time.time() - 4 * 86400) if cl.sym else []})
 
 
 async def send_wl(cl, full=False):
@@ -680,10 +730,38 @@ async def broadcaster():
                         await cl.send({"type": "bar", "sym": sym,
                                        "bars": [bar_out(ts, bars[ts]) for ts in last],
                                        "i": summary(sym)})
+                if cl.sigv != engine.ver:
+                    await send_sig(cl)
                 if tick % 3 == 0:
                     await send_wl(cl)
             except Exception:
                 clients.discard(cl)
+
+
+async def signal_loop():
+    """Her 5 sn: yeni kapanan mumlarda sinyal ara, açık sinyalleri gölgede takip et."""
+    order = (["SPY"] if "SPY" in SYMBOLS else []) + [s for s in SYMBOLS if s != "SPY"]
+    while True:
+        await asyncio.sleep(5)
+        now = time.time()
+        cu = state.yahoo_t0
+        for sym in order:
+            key = (store.ver.get(sym, 0), store.snap_ver.get(sym, 0), int(cu))
+            if engine.seen.get(sym) == key:
+                continue
+            engine.seen[sym] = key
+            try:
+                before = len(engine.signals)
+                engine.process(sym, cu, now)
+                for sig in engine.signals[before:]:
+                    log.info("SİNYAL %s %s %s güven=%s giriş=%s stop=%s hedef=%s", sig["sym"],
+                             "AL" if sig["dir"] > 0 else "SAT", sig["setup"], sig["conf"], sig["e"], sig["s"], sig["h"])
+            except Exception as e:
+                log.warning("Sinyal hatası %s: %s", sym, e)
+        try:
+            engine.tick(now)
+        except Exception as e:
+            log.warning("Sinyal süre kontrolü hatası: %s", e)
 
 
 async def housekeeping():
@@ -696,8 +774,8 @@ async def housekeeping():
             if n % 240 == 0:   # saatte bir
                 await cal.refresh()
                 store.prune()
-            if backup.enabled and backup.dirty and (n * 15) % BACKUP_SEC < 15:
-                await backup.save()
+            if backup.enabled and (n * 15) % BACKUP_SEC < 15:
+                await backup.save(engine)
         except Exception as e:
             log.warning("Bakım hatası: %s", e)
 
@@ -709,16 +787,15 @@ async def lifespan(app):
         log.warning("SITE_PASSWORD boş: site şifresiz açık!")
     store.load()
     await cal.refresh(force=True)
-    await backup.restore()
+    engine.load(await backup.restore())
     backup.record_start()
-    await backup.save()
-    tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, housekeeping)]
+    await backup.save(engine)
+    tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping)]
     yield
     for t in tasks:
         t.cancel()
     store.flush()
-    if backup.dirty:
-        await backup.save()
+    await backup.save(engine)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -826,6 +903,7 @@ async def ws_endpoint(ws: WebSocket):
     try:
         await cl.send({"type": "hello", "symbols": SYMBOLS, "iex": IEX_SYMBOLS})
         await send_wl(cl, full=True)
+        await send_sig(cl)
         while True:
             msg = json.loads(await ws.receive_text())
             sym = str(msg.get("sub", "")).upper()
