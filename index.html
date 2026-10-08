@@ -966,7 +966,7 @@ function renderStatus(){const s=status.ses||'closed',b=$('ses');b.textContent=SE
   if(p)t+=`<b>${p.today?'Bugün':p.d}</b> (TR): Öncesi ${p.pre} · Açılış ${p.open} · Kapanış ${p.close}${p.early?' (erken kapanış)':''} · Sonrası biter ${p.post}<br>`;
   t+=`IEX canlı akış: ${esc(status.iex||'—')} (${status.iexN||0} sembol)<br>`;
   t+=`Yahoo son çekim: ${status.yAge==null?'henüz yok':fage(nowS()-status.yAge)+' önce'}${status.yErr?' · '+esc(status.yErr):''}<br>`;
-  t+=`Takvim: ${status.cal==='alpaca'?'Alpaca (tatiller dahil)':'hafta içi kuralı'} · Bot: ${esc(status.bot||'—')} · Tarayıcı: ${esc(status.scan||'—')} · Yapay zeka: ${esc(status.ai||'—')} · SEC: ${esc(status.sec||'—')}<br>`;
+  t+=`Takvim: ${status.cal==='alpaca'?'Alpaca (tatiller dahil)':'hafta içi kuralı'} · Bot: ${esc(status.bot||'—')} · Tarayıcı: ${esc(status.scan||'—')} · Yapay zeka: ${esc(status.ai||'—')} · SEC: ${esc(status.sec||'—')} · Bilanço takvimi: ${esc(status.bil||'—')}<br>`;
   t+=`Sunucu açık: ${status.up!=null?fage(nowS()-status.up):'—'}${status.rs7!=null?' · 7 günde yeniden başlama: '+status.rs7:''} · GitHub yedeği: ${esc(status.bk||'—')}${status.tg?' · Telegram: '+esc(status.tg.ok?'açık':(status.tg.st||'kapalı')):''}`;
   $('foot').innerHTML=t;nb('nbS',status.sigOpen||0)}
 
@@ -1039,11 +1039,11 @@ function renderKesfet(){for(const b of $('kseg').children)b.classList.toggle('on
     $('kList').innerHTML=`<div class="note" style="margin:0 2px 8px">${kTab==='act'?'Bugün bütün ABD piyasasında en çok işlem gören hisseler.':'Bütün ABD piyasası (küçük hisseler dahil). Dokununca grafiği ve analizi açılır.'}</div>`+
       (L.length?L.map((x,i)=>mrow(x,i,kTab==='act')).join(''):empty('Liste seans içinde dolar.'))}}
 function renderBil(){const L=MKT.bilhafta||[];
-  if(!L.length){$('kBil').innerHTML=empty('Bu hafta takip edilen hisselerde bilanço görünmüyor. Takvim seans içinde güncellenir.');return}
+  if(!L.length){$('kBil').innerHTML=empty('Bu hafta takip edilen hisselerde bilanço görünmüyor.'+(status.bil&&!/^tamam/.test(status.bil)?' Takvim durumu: '+esc(status.bil):''));return}
   const by={};for(const x of L)(by[x.d]=by[x.d]||[]).push(x);
   const gun=d=>{const dt=new Date(d+'T12:00:00Z');return dt.toLocaleDateString('tr-TR',{weekday:'long',day:'numeric',month:'long',timeZone:'UTC'})};
   const row=x=>{const r=rows[x.s]||{},q=(MKT.sek||[]).flatMap(g=>g.h).find(h=>h.s===x.s)||{};const ch=r.ch!=null?r.ch:q.ch;
-    return `<div class="mrow" data-s="${esc(x.s)}"><span class="rk">B</span><span class="nm"><b>${esc(x.s)}</b><small>${esc(x.sek||'')}</small></span>
+    return `<div class="mrow" data-s="${esc(x.s)}"><span class="rk">B</span><span class="nm"><b>${esc(x.s)}</b><small>${esc([x.z==='önce'?'açılıştan önce':x.z==='sonra'?'kapanıştan sonra':'',x.sek||''].filter(Boolean).join(' · '))}</small></span>
     <span class="pr">${r.p!=null?fp(r.p):q.p!=null?fp(q.p):'—'}</span><span class="pc ${cls(ch)}">${ch!=null?fch(ch):'—'}</span></div>`};
   $('kBil').innerHTML=`<div class="note" style="margin:0 2px 10px">Bilanço günü fiyat sert oynar; bot o gün ve ertesi gün lotu yarıya indirir. Açıklama genelde açılıştan önce ya da kapanıştan sonradır.</div>`+
     Object.keys(by).sort().map(d=>{const bg=by[d][0].bugun;return `<div class="bilg"><h4 class="${bg?'bg':''}">${bg?'BUGÜN · ':''}${esc(gun(d))} · ${by[d].length} hisse</h4>${by[d].map(row).join('')}</div>`}).join('')}

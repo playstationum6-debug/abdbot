@@ -118,6 +118,7 @@ SES_CODE = {"pre": 0, "regular": 1, "post": 2, "closed": 3}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("abdbot")
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)   # Yahoo'nun "Invalid Crumb" gürültüsü hata kaydını doldurmasın
 
 
 class _HataKaydi(logging.Handler):
@@ -795,6 +796,7 @@ def status_payload():
         "bad": store.bad_ticks,
         "up": int(now - state.started),
         "bk": backup.status,
+        "bil": EARN_ST[0],
         "bkAge": int(now - backup.last_ok) if backup.last_ok else None,
         "rs7": backup.starts_last_7d() if backup.enabled else None,
         "bot": bot.status,
@@ -1690,7 +1692,7 @@ async def market_loop():
                         await get_daily(extra)
                     hava_hesapla(q)
                     MARKET.update(sek=sek, gain=mv(scanner.gainers), lose=mv(scanner.losers), act=act, t=int(time.time()),
-                                  hava=dict(HAVA), bil={k: v for k, v in ((x, bilanco_durum(x)) for x in EARN) if v},
+                                  hava=dict(HAVA), bil={k: v for k, v in ((x, bilanco_durum(x)) for x in (set(EARN) & izlenen())) if v},
                                   bilhafta=bilanco_hafta())
                     _mkt_ver[0] += 1
             except Exception as e:
@@ -1700,7 +1702,8 @@ async def market_loop():
 
 # ----------------------------------------------------------------- piyasa havası + bilanço takvimi
 HAVA = {"etiket": "bilinmiyor", "puan": 0, "neden": [], "t": 0}
-EARN = {}          # sembol -> [bilanço tarihleri (YYYY-MM-DD)]
+EARN = {}          # sembol -> {"YYYY-MM-DD": "önce" | "sonra" | ""}  (Nasdaq bilanço takvimi, bütün ABD)
+EARN_ST = ["henüz çekilmedi"]
 
 
 def hava_hesapla(q):
@@ -1766,28 +1769,59 @@ def extra_mult(sig):
     return m, ", ".join(notes)
 
 
-def earn_fetch(sym):
-    try:
-        cal_ = yf.Ticker(sym).calendar
-        ds = cal_.get("Earnings Date") if isinstance(cal_, dict) else None
-        return [d.isoformat() if hasattr(d, "isoformat") else str(d)[:10] for d in (ds or [])]
-    except Exception:
-        return None
+def izlenen():
+    """Bilanço listesinde gösterilecek hisseler: izleme listesi, sektör listesi, koşanlar, açılanlar."""
+    return set(SYMBOLS) | set(UNIVERSE) | set(scanner.runners) | set(VIEWED)
+
+
+NASDAQ_HDR = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/124.0 Safari/537.36",
+              "Accept": "application/json, text/plain, */*", "Origin": "https://www.nasdaq.com",
+              "Referer": "https://www.nasdaq.com/"}
+
+
+async def earn_day(c, d):
+    """Nasdaq bilanço takvimi: o gün açıklayan bütün ABD hisseleri."""
+    r = await c.get("https://api.nasdaq.com/api/calendar/earnings", params={"date": d.isoformat()}, headers=NASDAQ_HDR)
+    r.raise_for_status()
+    rows = ((r.json() or {}).get("data") or {}).get("rows") or []
+    out = {}
+    for x in rows:
+        sym = str(x.get("symbol") or "").strip().upper()
+        if not sym:
+            continue
+        t = str(x.get("time") or "")
+        out[sym] = "önce" if "pre" in t else ("sonra" if "after" in t else "")
+    return out
 
 
 async def earnings_loop():
-    """Günde iki kez: izlenen hisselerin bilanço tarihleri (Yahoo)."""
-    await asyncio.sleep(30)
+    """6 saatte bir: dünden 7 gün sonrasına bilanço takvimi (Nasdaq, ücretsiz, anahtarsız)."""
+    await asyncio.sleep(20)
     while True:
-        for sym in list(dict.fromkeys(SYMBOLS + UNIVERSE)):
-            if sym in ("SPY", "QQQ", "IWM", "DIA", "TQQQ", "SQQQ", "SOXL", "XLF", "XLE", "TLT", "GLD", "SLV"):
-                continue
-            ds = await asyncio.to_thread(earn_fetch, sym)
-            if ds is not None:
-                EARN[sym] = ds
-            await asyncio.sleep(1.5)
-        _mkt_ver[0] += 1
-        await asyncio.sleep(12 * 3600)
+        today = datetime.now(ET).date()
+        new, ok, err = {}, 0, ""
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
+            for i in range(-1, 8):
+                d = today + timedelta(days=i)
+                if d.weekday() >= 5:
+                    continue
+                try:
+                    for sym, z in (await earn_day(c, d)).items():
+                        new.setdefault(sym, {})[d.isoformat()] = z
+                    ok += 1
+                except Exception as e:
+                    err = str(e)[:120]
+                await asyncio.sleep(1.5)
+        if ok:
+            EARN.clear()
+            EARN.update(new)
+            EARN_ST[0] = f"tamam ({len(new)} hisse, {datetime.now(TR).strftime('%H:%M')})"
+            _mkt_ver[0] += 1
+        else:
+            EARN_ST[0] = "alınamadı: " + err
+            log.warning("Bilanço takvimi alınamadı: %s", err)
+        await asyncio.sleep(6 * 3600 if ok else 1800)
 
 
 # ----------------------------------------------------------------- geçmiş test
@@ -1866,14 +1900,17 @@ def saat_tablosu():
 def bilanco_hafta():
     today = datetime.now(ET).date()
     out = []
+    w = izlenen()
     for sym, ds in EARN.items():
-        for d in ds or []:
+        if sym not in w:
+            continue
+        for d, z in (ds or {}).items():
             try:
                 dd = date.fromisoformat(d[:10])
             except Exception:
                 continue
             if 0 <= (dd - today).days <= 6:
-                out.append({"s": sym, "d": dd.isoformat(), "sek": sektor.sektor_of(sym), "bugun": dd == today})
+                out.append({"s": sym, "d": dd.isoformat(), "sek": sektor.sektor_of(sym), "bugun": dd == today, "z": z})
     out.sort(key=lambda x: (x["d"], x["s"]))
     return out
 
