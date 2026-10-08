@@ -505,7 +505,7 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
   <button data-t="daha"><span class="ib"><svg><use href="#i-more"/></svg></span>Daha<i class="nb" id="nbS"></i></button>
 </nav>
 <div class="toast" id="toast"></div>
-<div class="sheet" id="more"><div class="in"><button class="x" data-close>×</button><div class="lt" style="margin-top:4px">Daha</div>
+<div class="sheet" id="dmenu"><div class="in"><button class="x" data-close>×</button><div class="lt" style="margin-top:4px">Daha</div>
   <button class="mitem" data-go="sinyal"><svg><use href="#i-bolt"/></svg><span>Sinyaller<small>Bütün sinyaller, sonuçları ve gerekçeleri</small></span></button>
   <button class="mitem" data-go="ogren"><svg><use href="#i-learn"/></svg><span>Öğrenme<small>Hangi kurgu ve koşul işe yarıyor</small></span></button>
   <button class="mitem" data-go="rehber"><svg><use href="#i-learn"/></svg><span>Nasıl çalışır<small>R, VWAP, RSI, formasyonlar ve botun kuralları, sade Türkçe</small></span></button>
@@ -542,8 +542,8 @@ const TT=t=>t+(isD()?0:TR_OFF);
 // ---------------- sekmeler
 const TABS=['akis','piyasa','tara','bot','sinyal','ogren','ayar','rehber'];
 const NAVOF={sinyal:'daha',ogren:'daha',ayar:'daha',rehber:'daha'};
-function showTab(t){if(t==='daha'){$('more').classList.add('on');return}
-  if(!$('t-'+t))t='akis';$('more').classList.remove('on');const dir=TABS.indexOf(t)-TABS.indexOf(tab);tab=t;ls('tab',t);
+function showTab(t){if(t==='daha'){$('dmenu').classList.add('on');return}
+  if(!$('t-'+t))t='akis';$('dmenu').classList.remove('on');const dir=TABS.indexOf(t)-TABS.indexOf(tab);tab=t;ls('tab',t);
   for(const s of document.querySelectorAll('.tab')){const on=s.id==='t-'+t;s.classList.toggle('on',on);s.classList.toggle('fr',on&&dir>0);s.classList.toggle('fl',on&&dir<0)}
   for(const b of $('nav').children)b.classList.toggle('on',b.dataset.t===(NAVOF[t]||t));window.scrollTo({top:0});
   if(t==='ayar')renderAyar();if(t==='tara')renderKesfet();if(t==='piyasa')reqAnaliz();
@@ -1107,7 +1107,7 @@ function renderReplay(m){RPM=m;if(m.hata){$('rph').innerHTML=`<div class="meta">
     if(p.target)rpLines.push(rpSeries.createPriceLine({price:p.target,color:C.up,lineWidth:1,lineStyle:2,title:'hedef'}));
     rpChart.timeScale().fitContent()}catch(e){}}
 for(const sh of document.querySelectorAll('.sheet'))sh.addEventListener('click',e=>{if(e.target===sh||e.target.closest('[data-close]'))sh.classList.remove('on')});
-$('more').addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b)showTab(b.dataset.go)});
+$('dmenu').addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b)showTab(b.dataset.go)});
 $('bKarne').addEventListener('click',e=>{const r=e.target.closest('[data-rp]');if(r)openReplay(r.dataset.rp)});
 
 // ---------------- ayarlar + bildirimler
