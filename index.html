@@ -291,6 +291,7 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
 .bilg{margin-bottom:12px}.bilg h4{margin:0 2px 6px;font-size:13px;color:var(--mut)}.bilg h4.bg{color:var(--wa)}
 .fi.k-rapor{--rail:var(--ac2)}.fi.k-rapor .bd{background:linear-gradient(90deg,color-mix(in srgb,var(--ac2) 10%,transparent),transparent 70%);padding-top:6px;padding-bottom:7px;border-radius:2px 10px 10px 2px}
 .leg{display:flex;gap:14px;font-size:11.5px;color:var(--mut);margin-top:6px}.leg i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.kd.dr{font-weight:800;letter-spacing:.3px}.dr-ap{background:#26a69a;color:#fff}.dr-a{background:rgba(38,166,154,.25);color:#5eead4}.dr-b{background:rgba(255,184,77,.18);color:#ffb547}.dr-c{background:rgba(142,142,153,.18);color:#a1a1aa}
 </style>
 </head>
 <body>
@@ -466,6 +467,7 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
     <div class="fld"><label>Yarım kapat<small>Kâr belirlenen R'ye gelince pozisyonun yarısını sat, kalan için stop girişe</small></label><button class="tg" data-k="yarim_kapat"></button></div>
     <div class="fld"><label>Yarım kapat seviyesi (R)<small>Örn. 1 = risk kadar kâr gelince</small></label><input type="number" inputmode="decimal" step="0.1" data-k="yarim_r"></div>
     <div class="fld"><label>Kalan kısmın hedefi (R)<small>Yarım kapattıktan sonra; örn. 3 = 3R hedef</small></label><input type="number" inputmode="decimal" step="0.5" data-k="kalan_r"></div>
+    <div class="fld"><label>Telegram'a gidecek en düşük güven<small>85 = sadece A+, 75 = A ve üstü, 65 = B ve üstü</small></label><input type="number" inputmode="numeric" data-k="tg_min_guven"></div>
     <div class="fld"><label>Aynı sektörde en fazla işlem<small>Örn. 2: üç yarı iletken hissesine birden girmez. 0 = sınır yok</small></label><input type="number" inputmode="numeric" data-k="sektor_max"></div>
     <div class="fld"><label>Günlük zarar limiti ($)<small>Dolunca bot o gün yeni işlem açmaz</small></label><input type="number" inputmode="decimal" data-k="daily_loss"></div>
     <div class="fld"><label>Güven eşiği, normal seans</label><input type="number" inputmode="numeric" data-k="min_conf"></div>
@@ -485,7 +487,7 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
   <h3>Telegram kanalı</h3>
   <div class="card" style="padding:2px 14px">
     <div class="note" id="tgst" style="margin:10px 0"></div>
-    <div class="fld"><label>Bot işlemleri ve güçlü sinyaller<small>Güven 70 ve üstü sinyaller</small></label><button class="tg" data-p="tg_islem"></button></div>
+    <div class="fld"><label>Bot işlemleri ve güçlü sinyaller<small>Aşağıdaki güvenin üstündeki sinyaller (A+ 85, A 75, B 65)</small></label><button class="tg" data-p="tg_islem"></button></div>
     <div class="fld"><label>Planlar</label><button class="tg" data-p="tg_plan"></button></div>
     <div class="fld"><label>Haberler</label><button class="tg" data-p="tg_haber"></button></div>
     <div class="fld"><label>Sabah listesi, gün sonu ve haftalık rapor</label><button class="tg" data-p="tg_rapor"></button></div>
@@ -902,12 +904,14 @@ function renderOv(){const mk=status.mkt;$('ovM').textContent=mk==1?'▲ Yukarı'
 $('ov').addEventListener('click',e=>{const c=e.target.closest('.ovi');if(!c)return;if(c.dataset.sym)select(c.dataset.sym);else showTab(c.dataset.go)});
 
 // ---------------- sinyaller
+function DR(c){return c>=85?'A+':c>=75?'A':c>=65?'B':'C'}
+function DRC(c){return c>=85?'ap':c>=75?'a':c>=65?'b':'c'}
 function sigCard(s){const al=s.dir>0,c=s.conf>=70?'hi':s.conf>=55?'mid':'lo';
   const done=['hedef','stop','süre'].includes(s.st),k=done?(s.r>0?'win':'loss'):(s.st==='dolmadı'?'':'live');
   const res=done?`<span class="rr ${cls(s.r)}">${fR(s.r)} · ${fch(s.pct)}</span>`:'';
   const adj=(s.conf0!=null&&s.conf0!==s.conf)?` <span class="meta">(ham ${s.conf0})</span>`:'';
   const taken=botD&&(botD.open.concat(botD.recent)).some(p=>p.sig===s.id&&p.st!=='iptal');
-  return `<div class="sig${openIds.has(s.id)?' open':''}" data-id="${esc(s.id)}"><div class="top"><span class="sn">${esc(s.sym)}</span><span class="dirb ${al?'al':'sat'}">${al?'AL':'SAT'}</span>${s.runner?'<span class="tag run">koşan</span>':''}${taken?'<span class="tag">BOT</span>':''}<span class="conf ${c}">${s.conf}</span></div>
+  return `<div class="sig${openIds.has(s.id)?' open':''}" data-id="${esc(s.id)}"><div class="top"><span class="sn">${esc(s.sym)}</span><span class="dirb ${al?'al':'sat'}">${al?'AL':'SAT'}</span>${s.runner?'<span class="tag run">koşan</span>':''}${taken?'<span class="tag">BOT</span>':''}<span class="kd dr dr-${DRC(s.conf)}" style="margin-left:auto">${DR(s.conf)}</span><span class="conf ${c}" style="margin-left:6px">${s.conf}</span></div>
   <div class="meta" style="margin-top:4px">${SETUP[s.setup]||s.setup} · ${SES_K[s.ses]||s.ses} · ${tTR(s.t+60)}</div>
   <div class="lv"><div>Giriş<b>${fp(s.e)}</b></div><div>Stop<b class="dn">${fp(s.s)}</b></div><div>Hedef<b class="up">${fp(s.h)}</b></div></div>
   <div class="bot"><span class="stt ${k}">${ST_TR[s.st]||s.st}</span>${res}${adj}<span class="go" data-sym="${esc(s.sym)}">Grafik →</span></div>
@@ -1030,7 +1034,7 @@ function feedItem(it,isNew){const big=it.k!=='haber';
   let kd='';
   if(it.k==='haber'){if(it.tone==='iyi')kd+=`<span class="kd iyi">olumlu${it.word?': '+esc(it.word):''}</span>`;else if(it.tone==='kötü')kd+=`<span class="kd kötü">olumsuz${it.word?': '+esc(it.word):''}</span>`;
     if(it.ai&&it.ai.skor!=null)kd+=`<span class="kd ai">YZ ${it.ai.skor>0?'+':''}${it.ai.skor}</span>`}
-  if(it.k==='sinyal'&&it.conf!=null)kd+=`<span class="kd">güven ${it.conf}</span>`;
+  if(it.k==='sinyal'&&it.conf!=null)kd+=`<span class="kd dr dr-${DRC(it.conf)}">${DR(it.conf)}</span><span class="kd">güven ${it.conf}</span>`;
   if(it.k==='plan')kd+='<span class="kd">izlemede</span>';
   if(it.k==='rapor')kd+=`<span class="kd">${/^Gün sonu/.test(it.txt)?'gün sonu raporu':'sabah hazırlığı'}</span>`;
   const src=it.k==='haber'?`<div class="src">${esc(it.sub||'')}${it.url?' — habere git':''}</div>`:(it.sub?`<div class="sb">${esc(it.sub)}</div>`:'');

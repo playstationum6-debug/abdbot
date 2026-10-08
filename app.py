@@ -93,6 +93,7 @@ BOT_CFG = {
     "yarim_kapat": 1,                                         # +yarim_r R'de pozisyonun yarısını sat, stop girişe
     "yarim_r": 1.0,
     "kalan_r": 3.0,                                           # yarım kapattıktan sonra kalan kısmın hedefi (R)
+    "tg_min_guven": 70,                                       # Telegram'a gidecek sinyallerde en düşük güven
 }
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
@@ -1072,7 +1073,8 @@ async def alpaca_loop():
 AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd": (float, 0.1, 1e5),
             "max_open": (int, 1, 50), "daily_loss": (float, 1, 1e6), "min_conf": (int, 0, 100),
             "min_conf_ext": (int, 0, 100), "yeni_islem": (int, 0, 1), "sektor_max": (int, 0, 20),
-            "yarim_kapat": (int, 0, 1), "yarim_r": (float, 0.5, 3), "kalan_r": (float, 1, 8)}
+            "yarim_kapat": (int, 0, 1), "yarim_r": (float, 0.5, 3), "kalan_r": (float, 1, 8),
+            "tg_min_guven": (int, 0, 100)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1,
              "tg_kosan": 1, "tg_tablo": 1, "tg_uyari": 1}
@@ -1197,7 +1199,7 @@ class Telegram:
             return None
         tss = sorted(bars)[-1100:]
         rows = [(t, *bars[t][:5]) for t in tss if bar_info(t)[1] != 3]
-        b5 = formasyon.to5m(rows)[-260:]
+        b5 = [(*x, bar_info(x[0])[1]) for x in formasyon.to5m(rows)[-260:]]     # 7. alan: seans (gölgelendirme)
         fx = (levels(sym) or {}).get("fx") or {}
         return b5, fx
 
@@ -1207,9 +1209,9 @@ class Telegram:
         data = self._chart_data(ch)
         if not data:
             return None
-        return await asyncio.to_thread(grafik.ciz, data[0], data[1], ch.get("title", ""), ch.get("sub", ""),
-                                       ch.get("lines"), ch.get("pat"), ch.get("zone"), 130, ch.get("tf", "5 dk"),
-                                       ch.get("kart"))
+        return await asyncio.to_thread(lambda: grafik.ciz(
+            data[0], data[1], ch.get("title", ""), ch.get("sub", ""), ch.get("lines"), ch.get("pat"), ch.get("zone"),
+            tf=ch.get("tf", "5 dk"), kart=ch.get("kart"), odak=ch.get("odak"), sig_t=ch.get("sig_t")))
 
     async def _post(self, c, item):
         chat = item.get("chat") or TG_CHAT
@@ -1495,10 +1497,19 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
              "hedef": ex.get("h") or ex.get("tgt")}
     if s0 and k in ("bot", "sinyal", "plan") and (k != "bot" or ex.get("e")):
         chart = {"sym": s0, "title": f"#{s0}  {txt}", "sub": sub, "lines": lines,
-                 "pat": ex.get("pat"), "zone": bool(ex.get("zone")), "kart": ex.get("kart")}
+                 "pat": ex.get("pat"), "zone": bool(ex.get("zone")), "kart": ex.get("kart"),
+                 "odak": ODAK.get(ex.get("setup")), "sig_t": ex.get("sig_t")}
     tk, tr = ex.get("tgk"), ex.get("tgr")
     sym1 = s0 or None
-    if k in ("bot", "sinyal") and PUSH_PREF["tg_islem"] and (k == "bot" or ex.get("conf", 0) >= TG_MIN_CONF):
+    # kalabalık önleme: aynı hisseye 10 dk içinde ikinci sinyal / 15 dk içinde ikinci plan Telegram'a gitmez
+    tekrar = False
+    if s0 and k in ("sinyal", "plan"):
+        kk = (k, s0)
+        tekrar = time.time() - _TG_SON.get(kk, 0) < (600 if k == "sinyal" else 900)
+    if k in ("bot", "sinyal") and PUSH_PREF["tg_islem"] and not (k == "sinyal" and tekrar) and \
+            (k == "bot" or ex.get("conf", 0) >= BOT_CFG.get("tg_min_guven", TG_MIN_CONF)):
+        if k == "sinyal":
+            _TG_SON[("sinyal", s0)] = time.time()
         if ex.get("tg_html"):
             html = ex["tg_html"]
         else:
@@ -1507,7 +1518,8 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
         loud = k == "bot" and tone in ("al", "sat", "kar", "zarar") or (k == "sinyal" and ex.get("conf", 0) >= 80)
         tg.send(html, chart, key=tk, reply=tr, sym=sym1, quiet=not loud, haber=ex.get("tg_haber"),
                 durum=ex.get("tg_durum"), konu="sinyal" if k == "sinyal" else "bot")
-    elif k == "plan" and PUSH_PREF["tg_plan"]:
+    elif k == "plan" and PUSH_PREF["tg_plan"] and not tekrar:
+        _TG_SON[("plan", s0)] = time.time()
         html = (f"👀 <b>PLAN · {tags}</b>\n🎯 {_h(txt)}" + seviye_satiri(lines) + rr_satiri(lines, 1 if tone != "sat" else -1)
                 + (f"\n<i>{_h(sub)}</i>" if sub and not lines.get("stop") else ""))
         tg.send(html, chart, sym=sym1, quiet=True, konu="plan")
@@ -1533,6 +1545,9 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
         tg.send(f"📋 <b>{_h(txt)}</b>\n{_h(sub)}", ex.get("chart"), quiet=True, konu="rapor")
 
 
+ODAK = {"formasyon": "formasyon", "talep": "talep", "fvg": "fvg", "kanal": "kanal", "fib": "fib", "yapi": "yapi"}
+
+
 def seviye_satiri(lines):
     e, s_, h = lines.get("giris"), lines.get("stop"), lines.get("hedef")
     if not (e and s_ and h):
@@ -1546,6 +1561,13 @@ def guven_bar(c):
 
 
 TG_MIN_CONF = 70
+_TG_SON = {}
+
+
+def derece(c):
+    """Sinyal derecesi: A+ (85+), A (75+), B (65+), C."""
+    c = c or 0
+    return "A+" if c >= 85 else "A" if c >= 75 else "B" if c >= 65 else "C"
 
 
 def rr_satiri(lines, d=1):
@@ -1565,6 +1587,7 @@ def feed_signal(sig):
              tone="al" if sig["dir"] > 0 else "sat", t=sig.get("created") or sig["t"], key=f"s:{sig['id']}",
              extra={"conf": sig["conf"], "e": sig["e"], "s": sig["s"], "h": sig["h"], "tgk": f"s:{sig['id']}",
                     "tg_html": sinyal_tg(sig, d, ad), "tg_durum": "⏳ Takipte", "kart": kart_bilgi(sig, ad),
+                    "setup": sig["setup"], "sig_t": sig["t"],
                     "tg_haber": ((scanner.runners.get(sig["sym"]) or {}).get("news") or {}).get("headline")})
 
 
@@ -1588,7 +1611,7 @@ def sinyal_tg(sig, d, ad):
     out = [f"{'🟢' if d == 'AL' else '🔴'} <b>{d} · #{_h(sym)}</b> · {_h(ad)}",
            f"💵 Giriş <b>{fp_(sig['e'])}</b>   🛑 Stop {fp_(sig['s'])}   🎯 Hedef {fp_(sig['h'])}"]
     out.append(rr_satiri({"giris": sig["e"], "stop": sig["s"], "hedef": sig["h"]}, sig["dir"]).strip())
-    out.append(f"🔥 Güven <b>{sig['conf']}</b> {guven_bar(sig['conf'])}")
+    out.append(f"🔥 Güven <b>{sig['conf']}</b> {guven_bar(sig['conf'])} · Derece <b>{derece(sig['conf'])}</b>")
     why = [w for w in (sig.get("why") or []) if not w.startswith("Öğren")]
     iyi = [w for w in why if not any(u in w for u in _UYARI)][:3]
     kotu = [w for w in why if any(u in w for u in _UYARI)][:2]
@@ -1625,6 +1648,7 @@ def feed_bot_note(typ, msg, sym, t):
             e_ = pos.get("entry") or pos.get("plan")
             cap = bot.capital()
             ex = {"e": e_, "s": pos["stop"], "h": pos["target"], "tgk": f"p:{pos['id']}", "tgr": f"s:{pos.get('sig')}",
+                  "setup": pos["setup"], "sig_t": pos.get("et") or pos.get("opened"),
                   "kart": kart_bilgi({"sym": sym, "e": e_, "s": pos["stop"], "h": pos["target"], "dir": pos["dir"],
                                       "conf": pos.get("conf")}, sinyal.SETUP_AD.get(pos["setup"], pos["setup"]),
                                      etiket="BOT", alt=f"Bot içerde: {pos['qty']:g} adet × {fp_(e_)}"),
@@ -2584,7 +2608,16 @@ async def piyasa_uyari_loop():
                         _uyari(f"halt-{sym}", f"⛔ <b>#{_h(sym)} işlemi durdurulmuş olabilir</b>\n5 dakikadır işlem gelmiyor "
                                               f"(son fiyat {fp_(lv['p'])}). Sert hareketlerden sonra borsa geçici durdurma yapar.",
                                cooldown=600, sym=sym)
-            # 5) açık pozisyonda bilanço
+            # 5) günlük zarar limiti yaklaşıyor / doldu
+            lim = float(BOT_CFG.get("daily_loss") or 0)
+            tp = bot.today_pnl()
+            if lim > 0 and tp <= -0.7 * lim:
+                dolu = tp <= -lim
+                _uyari(f"limit{'d' if dolu else 'y'}-{gun}",
+                       (f"🛑 <b>Günlük zarar limiti doldu</b> ({tp:+.2f} $ / -{lim:.0f} $)\nBot bugün yeni işlem açmayacak."
+                        if dolu else f"⚠️ <b>Günlük zarar limitine yaklaşıldı</b> ({tp:+.2f} $ / -{lim:.0f} $)\n"
+                                     "Limit dolarsa bot bugün yeni işlem açmaz."), cooldown=86400)
+            # 6) açık pozisyonda bilanço
             for q in bot.open_positions():
                 b = bilanco_durum(q["sym"])
                 k = (q["sym"], str(gun))
