@@ -1323,6 +1323,9 @@ def fp_(x):
     return f"{x:.4f}" if x < 1 else f"{x:.2f}"
 
 
+_SEEDING = [False]
+
+
 def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None):
     """k: haber | plan | sinyal | bot | tara. tone: iyi | kötü | nötr | al | sat | kar | zarar | bilgi."""
     if key:
@@ -1339,6 +1342,9 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
         it.update(extra)
     FEED.append(it)
     feed_pending.append(it)
+    # Yeniden başlamada akış eski kayıtlardan yeniden kurulur: onlar telefona / Telegram'a TEKRAR gitmesin.
+    if _SEEDING[0] or time.time() - it["t"] > 300:
+        return
     # telefon bildirimi (Ayarlar'daki tercihlere göre)
     s0 = it["sym"][0] if it["sym"] else ""
     if k == "bot" and PUSH_PREF["push_islem"] and tone in ("al", "sat", "kar", "zarar"):
@@ -1451,11 +1457,15 @@ def feed_seed():
     for j in bot.journal[-600:]:
         if j.get("day") == today and j.get("typ") in ("dolum", "kapandı", "koruma", "iz"):
             evs.append((j["t"], "b", j))
-    for t, kind, o in sorted(evs, key=lambda e: e[0])[-150:]:
-        if kind == "s":
-            feed_signal(o)
-        else:
-            feed_bot_note(o["typ"], o["msg"], o["sym"], o["t"])
+    _SEEDING[0] = True
+    try:
+        for t, kind, o in sorted(evs, key=lambda e: e[0])[-150:]:
+            if kind == "s":
+                feed_signal(o)
+            else:
+                feed_bot_note(o["typ"], o["msg"], o["sym"], o["t"])
+    finally:
+        _SEEDING[0] = False
     feed_pending.clear()
 
 
