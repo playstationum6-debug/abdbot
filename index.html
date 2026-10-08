@@ -484,7 +484,8 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
     <div class="fld"><label>Bot işlemleri ve güçlü sinyaller<small>Güven 70 ve üstü sinyaller</small></label><button class="tg" data-p="tg_islem"></button></div>
     <div class="fld"><label>Planlar</label><button class="tg" data-p="tg_plan"></button></div>
     <div class="fld"><label>Haberler</label><button class="tg" data-p="tg_haber"></button></div>
-    <div class="fld" style="border:0"><label>Sabah listesi ve gün sonu raporu</label><button class="tg" data-p="tg_rapor"></button></div>
+    <div class="fld"><label>Sabah listesi ve gün sonu raporu</label><button class="tg" data-p="tg_rapor"></button></div>
+    <div class="fld" style="border:0"><label>Mesajlara grafik resmi ekle<small>Plan, sinyal ve işlemlerde çizgili grafik: giriş, stop, hedef, formasyon</small></label><button class="tg" data-p="tg_grafik"></button></div>
   </div>
   <button class="btnw sec" id="tgTest">Telegram'a deneme mesajı gönder</button>
   <div class="note" id="tgch" style="display:none"></div>
@@ -1182,7 +1183,7 @@ function renderAyar(){const c=(botD&&botD.cfg)||{};
   $('ayf').querySelector('[data-k=yeni_islem]').classList.toggle('on',c.yeni_islem!==0);
   const P=status.push||{},pref=P.pref||{};
   for(const b of document.querySelectorAll('[data-p]'))b.classList.toggle('on',!!pref[b.dataset.p]);
-  const G=status.tg||{};$('tgst').textContent=G.ok?'Telegram bağlı: '+(G.st||''):'Telegram kapalı: '+(G.st||"Render'da TG_TOKEN ve TG_CHAT girilmemiş");
+  const G=status.tg||{};$('tgst').textContent=(G.ok?'Telegram bağlı: '+(G.st||''):'Telegram kapalı: '+(G.st||"Render'da TG_TOKEN ve TG_CHAT girilmemiş"))+(G.grafik?' · grafik: '+G.grafik:'');
   $('pst').textContent=!P.ok?'Sunucuda bildirim kapalı: '+(P.st||'—'):`${P.n||0} cihaz kayıtlı · ${P.st||''}`+
     (typeof Notification!=='undefined'?' · bu cihaz: '+({granted:'izin verildi',denied:'izin reddedildi',default:'izin istenmedi'}[Notification.permission]||''):' · bu tarayıcı bildirim desteklemiyor')}
 async function postJSON(url,body){const r=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});

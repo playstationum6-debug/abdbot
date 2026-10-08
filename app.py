@@ -37,6 +37,10 @@ import analiz
 import bot as botmod
 import geriye
 import formasyon
+try:
+    import grafik                  # Telegram mesajlarına grafik resmi (Pillow)
+except Exception:
+    grafik = None
 import sektor
 import ikon
 import ogrenme
@@ -802,7 +806,7 @@ def status_payload():
         "bot": bot.status,
         "scan": scanner.status,
         "ai": scanner.ai_status,
-        "tg": {"ok": tg.ok, "st": tg.status},
+        "tg": {"ok": tg.ok, "st": tg.status, "grafik": GRAFIK_ST[0]},
         "hava": {k: HAVA.get(k) for k in ("etiket", "puan", "neden", "vix", "genislik")},
         "push": {"ok": push.ok, "n": len(push.subs), "st": push.status, "pref": PUSH_PREF},
         "sec": scanner.sec_status,
@@ -1065,14 +1069,15 @@ AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd"
             "max_open": (int, 1, 50), "daily_loss": (float, 1, 1e6), "min_conf": (int, 0, 100),
             "min_conf_ext": (int, 0, 100), "yeni_islem": (int, 0, 1), "sektor_max": (int, 0, 20)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
-             "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1}
+             "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1}
 
 TG_TOKEN = os.getenv("TG_TOKEN", "")
 TG_CHAT = os.getenv("TG_CHAT", "")
 
 
 class Telegram:
-    """Akış mesajlarını kendi Telegram kanalına/grubuna gönderir (Telegram Bot API, ücretsiz)."""
+    """Akış mesajlarını kendi Telegram kanalına/grubuna gönderir (Telegram Bot API, ücretsiz).
+    Plan, sinyal ve işlem mesajlarına o anki grafiğin resmi eklenir (çizgiler, formasyon, giriş/stop/hedef)."""
 
     def __init__(self):
         self.queue = []
@@ -1082,25 +1087,71 @@ class Telegram:
     def ok(self):
         return bool(TG_TOKEN and TG_CHAT)
 
-    def send(self, html):
+    def send(self, html, chart=None):
         if self.ok:
-            self.queue.append(html[:3900])
+            self.queue.append({"html": html[:3900], "chart": chart})
             del self.queue[:-30]
 
+    def _chart_data(self, ch):
+        """Ana döngüde (veri değişmeden) grafik için 5 dk mumları ve çizimleri topla."""
+        sym = ch["sym"]
+        bars = store.bars.get(sym) or {}
+        if len(bars) < 60:
+            return None
+        tss = sorted(bars)[-1100:]
+        rows = [(t, *bars[t][:5]) for t in tss if bar_info(t)[1] != 3]
+        b5 = formasyon.to5m(rows)[-260:]
+        fx = (levels(sym) or {}).get("fx") or {}
+        return b5, fx
+
+    async def _photo(self, c, item):
+        ch = item["chart"]
+        data = self._chart_data(ch)
+        if not data:
+            return False
+        png = await asyncio.to_thread(grafik.ciz, data[0], data[1], ch.get("title", ""), ch.get("sub", ""),
+                                      ch.get("lines"), ch.get("pat"), ch.get("zone"))
+        if not png:
+            return False
+        cap = item["html"]
+        if len(cap) > 1000:
+            cap = cap[:1000] + "…"
+        r = await c.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto",
+                         data={"chat_id": TG_CHAT, "caption": cap, "parse_mode": "HTML"},
+                         files={"photo": ("grafik.png", png, "image/png")})
+        return r
+
     async def loop(self):
-        async with httpx.AsyncClient(timeout=15) as c:
+        async with httpx.AsyncClient(timeout=30) as c:
             while True:
                 await asyncio.sleep(3)
                 if not self.queue:
                     continue
                 batch, self.queue = self.queue[:], []
-                if len(batch) > 6:   # sel gibi mesaj gelirse birleştir (Telegram sınırı ~20/dk)
-                    batch = ["\n\n".join(batch[i:i + 6]) for i in range(0, len(batch), 6)]
-                for m in batch:
+                use_chart = bool(grafik) and PUSH_PREF.get("tg_grafik", 1)
+                charts = [x for x in batch if x.get("chart") and use_chart][:5]       # sel gelirse en fazla 5 resim
+                texts = [x["html"] for x in batch if x not in charts]
+                if len(texts) > 6:     # Telegram sınırı ~20 mesaj/dk: düz metinleri birleştir
+                    texts = ["\n\n".join(texts[i:i + 6]) for i in range(0, len(texts), 6)]
+                jobs = [("p", x) for x in charts] + [("t", m) for m in texts]
+                for kind, m in jobs:
                     try:
-                        r = await c.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                                         json={"chat_id": TG_CHAT, "text": m, "parse_mode": "HTML",
-                                               "disable_web_page_preview": True})
+                        r = None
+                        if kind == "p":
+                            try:
+                                r = await self._photo(c, m)
+                            except Exception as e:
+                                log.warning("Telegram grafiği çizilemedi: %s", e)
+                                r = None
+                            if r in (None, False) or r.status_code != 200:
+                                if r not in (None, False):
+                                    log.warning("Telegram resmi gönderilemedi: %s", r.text[:160])
+                                m = m["html"]          # resim olmazsa düz metin gönder
+                                r = None
+                        if r is None:
+                            r = await c.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+                                             json={"chat_id": TG_CHAT, "text": m, "parse_mode": "HTML",
+                                                   "disable_web_page_preview": True})
                         if r.status_code == 200:
                             self.status = "çalışıyor"
                         else:
@@ -1110,7 +1161,7 @@ class Telegram:
                             await asyncio.sleep(20)
                     except Exception as e:
                         self.status = f"hata: {str(e)[:80]}"
-                    await asyncio.sleep(1.2)
+                    await asyncio.sleep(1.5)
 
     async def find_chats(self):
         """Bota yazılmış son mesajlardan sohbet kimliklerini bul (kurulum yardımı)."""
@@ -1127,6 +1178,16 @@ class Telegram:
 
 
 tg = Telegram()
+GRAFIK_ST = ["Pillow kurulu değil" if grafik is None else "hazırlanıyor"]
+
+
+async def font_task():
+    if grafik is None:
+        return
+    try:
+        GRAFIK_ST[0] = await asyncio.to_thread(grafik.indir)
+    except Exception as e:
+        GRAFIK_ST[0] = f"hata: {str(e)[:60]}"
 
 
 def _h(x):
@@ -1289,10 +1350,17 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
     # Telegram kanalı
     tags = " ".join("#" + _h(x) for x in it["sym"])
     icon = {"al": "🟢", "sat": "🔴", "kar": "✅", "zarar": "❌"}.get(tone, "")
-    if k in ("bot", "sinyal") and PUSH_PREF["tg_islem"] and (k == "bot" or (extra or {}).get("conf", 0) >= 70):
-        tg.send(f"{icon} <b>{tags} {_h(txt)}</b>" + (f"\n{_h(sub)}" if sub else ""))
+    ex = extra or {}
+    chart = None
+    if s0 and k in ("bot", "sinyal", "plan") and (k != "bot" or ex.get("e")):
+        chart = {"sym": s0, "title": f"#{s0}  {txt}", "sub": sub,
+                 "lines": {"giris": ex.get("e") or ex.get("lvl"), "stop": ex.get("s") or ex.get("stop"),
+                           "hedef": ex.get("h") or ex.get("tgt")},
+                 "pat": ex.get("pat"), "zone": bool(ex.get("zone"))}
+    if k in ("bot", "sinyal") and PUSH_PREF["tg_islem"] and (k == "bot" or ex.get("conf", 0) >= 70):
+        tg.send(f"{icon} <b>{tags} {_h(txt)}</b>" + (f"\n{_h(sub)}" if sub else ""), chart)
     elif k == "plan" and PUSH_PREF["tg_plan"]:
-        tg.send(f"👀 <b>{tags} {_h(txt)}</b>" + (f"\n{_h(sub)}" if sub else ""))
+        tg.send(f"👀 <b>{tags} {_h(txt)}</b>" + (f"\n{_h(sub)}" if sub else ""), chart)
     elif k == "haber" and PUSH_PREF["tg_haber"] and tone in ("iyi", "kötü") and (extra or {}).get("watched"):
         tg.send(f"📰 {tags} <b>{'Olumlu' if tone == 'iyi' else 'Olumsuz'} haber:</b> {_h(txt)}")
     elif k == "rapor" and PUSH_PREF["tg_rapor"]:
@@ -1305,7 +1373,7 @@ def feed_signal(sig):
     feed_add("sinyal", sig["sym"], f"{d} sinyali: {ad}",
              sub=f"giriş {fp_(sig['e'])}   stop {fp_(sig['s'])}   hedef {fp_(sig['h'])}   güven {sig['conf']}",
              tone="al" if sig["dir"] > 0 else "sat", t=sig.get("created") or sig["t"], key=f"s:{sig['id']}",
-             extra={"conf": sig["conf"]})
+             extra={"conf": sig["conf"], "e": sig["e"], "s": sig["s"], "h": sig["h"]})
 
 
 _RX_FILL = re.compile(r"Giriş doldu: ([\d.]+) adet @ ([\d.]+)")
@@ -1319,7 +1387,8 @@ def feed_bot_note(typ, msg, sym, t):
         side = "Açığa sattım" if pos and pos["dir"] < 0 else "İçerdeyim"
         txt = f"{side}: {fp_(float(m.group(2)))} $'dan {float(m.group(1)):g} adet" if m else f"{side}"
         sub = f"stop {fp_(pos['stop'])}   hedef {fp_(pos['target'])}" if pos else ""
-        feed_add("bot", sym, txt, sub=sub, tone="al" if not pos or pos["dir"] > 0 else "sat", t=t)
+        feed_add("bot", sym, txt, sub=sub, tone="al" if not pos or pos["dir"] > 0 else "sat", t=t,
+                 extra={"e": pos.get("entry") or pos.get("plan"), "s": pos["stop"], "h": pos["target"]} if pos else None)
     elif typ == "kapandı":
         m = _RX_CLOSE.search(msg)
         if m:
@@ -1639,7 +1708,7 @@ async def pattern_loop():
                 if last and z["hi"] < last <= z["hi"] * 1.01:
                     feed_add("plan", sym, f"Alıcı bölgesine yaklaştı: {fp_(z['lo'])}–{fp_(z['hi'])}",
                              sub=f"bu bantta hacmin %{z['alici']}'i alıcı mumlarında   şu an {fp_(last)}",
-                             tone="bilgi", key=f"z:{sym}:{z['lo']}:{datetime.now(ET).date()}")
+                             tone="bilgi", key=f"z:{sym}:{z['lo']}:{datetime.now(ET).date()}", extra={"zone": 1})
         found.sort(key=lambda r: (r["durum"] != "oluşuyor", abs(r["uzak"] or 99)))
         PATS[:] = found[:80]
         _pat_ver[0] += 1
@@ -2166,7 +2235,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop)]
+                                                  rapor_loop, font_task)]
     yield
     for t in tasks:
         t.cancel()
@@ -2359,7 +2428,13 @@ async def tg_test(request: Request):
         except Exception:
             pass
         return JSONResponse({"ok": 0, "durum": tg.status, "sohbetler": chats})
-    tg.send("✅ <b>ABD·BOT bağlandı.</b> Planlar, işlemler ve raporlar bu kanala düşecek.")
+    tg.send("✅ <b>ABD·BOT bağlandı.</b> Planlar, işlemler ve raporlar bu kanala grafikleriyle düşecek.")
+    sym = "SPY" if store.bars.get("SPY") else next((x for x in SYMBOLS if store.bars.get(x)), None)
+    if sym:
+        lv = levels(sym) or {}
+        tg.send(f"📈 <b>#{sym} deneme grafiği</b>\nÇizgiler: destek/direnç, formasyon, alıcı bölgesi.",
+                {"sym": sym, "title": f"#{sym}  deneme grafiği", "sub": "destek/direnç, formasyon, alıcı bölgesi",
+                 "lines": {}, "pat": next((p["ad"] for p in (lv.get("fx") or {}).get("pat", [])), None), "zone": True})
     return JSONResponse({"ok": 1, "durum": tg.status})
 
 
