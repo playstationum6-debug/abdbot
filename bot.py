@@ -194,6 +194,8 @@ class Bot:
 
         if self.cal.session(now) == "closed":
             return skip("seans kapalı")
+        if not self.cfg.get("yeni_islem", 1):
+            return skip("yeni işlem açma duraklatıldı (Ayarlar)")
         lim = self.cfg["daily_loss"]
         if self.today_pnl() <= -lim:
             return skip(f"günlük zarar limiti ({lim:.0f} $) doldu, bugün yeni işlem yok")
@@ -576,4 +578,41 @@ class Bot:
                       "avg_r": round(sum(rs) / len(rs), 3) if rs else None},
             "limit_hit": self.today_pnl() <= -lim,
             "open": opens, "recent": recent, "journal": self.journal[-80:][::-1],
+            "karne": self.karne(closed),
         }
+
+    def karne(self, closed):
+        """Karne: sermaye eğrisi, günlük kâr/zarar takvimi, en iyi/kötü işlemler, kurgu bazında sonuçlar."""
+        cl = sorted(closed, key=lambda p: p.get("xt") or 0)
+        cap0 = self.cfg.get("capital", 250.0)
+        eq, cum = [], 0.0
+        for p in cl:
+            cum += p["pnl"]
+            eq.append([int(p.get("xt") or 0), round(cap0 + cum, 2)])
+        days = {}
+        for p in cl:
+            d = self._day(p.get("xt"))
+            x = days.setdefault(d, {"d": d, "pnl": 0.0, "n": 0, "w": 0})
+            x["pnl"] += p["pnl"]
+            x["n"] += 1
+            x["w"] += 1 if p["pnl"] > 0 else 0
+        for x in days.values():
+            x["pnl"] = round(x["pnl"], 2)
+        setups = {}
+        for p in cl:
+            x = setups.setdefault(p["setup"], {"k": p["setup"], "n": 0, "pnl": 0.0, "w": 0, "rs": 0.0})
+            x["n"] += 1
+            x["pnl"] += p["pnl"]
+            x["w"] += 1 if p["pnl"] > 0 else 0
+            x["rs"] += p.get("r") or 0
+        st = sorted(({"k": x["k"], "n": x["n"], "pnl": round(x["pnl"], 2), "wr": round(100 * x["w"] / x["n"]),
+                      "avg_r": round(x["rs"] / x["n"], 2)} for x in setups.values()), key=lambda x: -x["pnl"])
+        slim = lambda p: {k: p.get(k) for k in ("id", "sym", "dir", "setup", "pnl", "r", "xt", "xr")}
+        peak, mdd = cap0, 0.0
+        for _, v in eq:
+            peak = max(peak, v)
+            mdd = max(mdd, peak - v)
+        return {"eq": eq[-400:], "cap0": cap0, "days": sorted(days.values(), key=lambda x: x["d"])[-62:],
+                "best": [slim(p) for p in sorted(cl, key=lambda p: -p["pnl"])[:5]],
+                "worst": [slim(p) for p in sorted(cl, key=lambda p: p["pnl"])[:5]],
+                "setups": st, "mdd": round(mdd, 2)}

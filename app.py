@@ -33,8 +33,10 @@ import pandas as pd
 import websockets
 import yfinance as yf
 
+import analiz
 import bot as botmod
 import formasyon
+import sektor
 import ikon
 import ogrenme
 import sinyal
@@ -80,6 +82,7 @@ BOT_CFG = {
     "daily_loss": float(os.getenv("BOT_DAILY_LOSS", "50")),  # günlük zarar limiti ($)
     "min_conf": int(os.getenv("BOT_MIN_CONF", "55")),        # botun alacağı en düşük güven puanı (normal seans)
     "min_conf_ext": int(os.getenv("BOT_MIN_CONF_EXT", "50")),# piyasa öncesi/sonrası için eşik (yarım lot + limit emir)
+    "yeni_islem": 1,                                          # 0: yeni işlem açma (açık pozisyonlar yönetilmeye devam eder)
 }
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
@@ -773,6 +776,7 @@ def status_payload():
         "bot": bot.status,
         "scan": scanner.status,
         "ai": scanner.ai_status,
+        "push": {"ok": push.ok, "n": len(push.subs), "st": push.status, "pref": PUSH_PREF},
         "sec": scanner.sec_status,
         "nRun": len(scanner.runners),
         "sigN": len(engine.signals),
@@ -940,7 +944,7 @@ async def yahoo_loop():
             if len(data) < len(SYMBOLS) * 0.8:
                 state.yahoo_err = f"{len(SYMBOLS) - len(data)} sembol boş geldi"
             # koşan küçük hisseler (tarayıcıdan)
-            runs = [r for r in scanner.runners if r not in SYMBOLS]
+            runs = [r for r in scanner.runners if r not in SYMBOLS] + viewed_syms()
             if runs:
                 for r in runs:
                     ensure_sym(r)
@@ -1028,6 +1032,128 @@ async def alpaca_loop():
             backoff = min(backoff * 2, 120)
 
 
+# ----------------------------------------------------------------- ayarlar (uygulamadan değiştirilebilir)
+AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd": (float, 0.1, 1e5),
+            "max_open": (int, 1, 50), "daily_loss": (float, 1, 1e6), "min_conf": (int, 0, 100),
+            "min_conf_ext": (int, 0, 100), "yeni_islem": (int, 0, 1)}
+PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0}
+
+
+def apply_ayar(d):
+    for k, v in (d or {}).items():
+        try:
+            if k in AYAR_DEF:
+                typ, lo, hi = AYAR_DEF[k]
+                BOT_CFG[k] = typ(min(hi, max(lo, float(v))))
+            elif k in PUSH_PREF:
+                PUSH_PREF[k] = 1 if v else 0
+        except (TypeError, ValueError):
+            continue
+
+
+# ----------------------------------------------------------------- telefon bildirimleri (Web Push)
+try:
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from py_vapid import Vapid02
+    from pywebpush import WebPushException, webpush
+    PUSH_LIB = True
+except Exception:
+    PUSH_LIB = False
+
+_P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+
+
+def _seed(tag):
+    return hashlib.sha256(f"{tag}:{ALPACA_SECRET or SITE_PASSWORD or 'abdbot'}".encode()).digest()
+
+
+class Push:
+    """Anahtarlar gizli bilgiden türetilir (her açılışta aynı, hiçbir yere yazılmaz).
+    Abonelikler yedeğe ŞİFRELİ yazılır (yedek deposu herkese açık olsa bile okunamaz)."""
+
+    def __init__(self):
+        self.subs = []
+        self.queue = []
+        self.ok = False
+        self.status = "kütüphane yok (requirements.txt: pywebpush)" if not PUSH_LIB else "hazır"
+        if not PUSH_LIB:
+            return
+        try:
+            n = int.from_bytes(_seed("vapid"), "big") % (_P256_N - 1) + 1
+            priv = ec.derive_private_key(n, ec.SECP256R1())
+            pem = priv.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                     serialization.NoEncryption())
+            self.vapid = Vapid02.from_pem(pem)
+            raw = priv.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+            self.pub = base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+            self.fernet = Fernet(base64.urlsafe_b64encode(_seed("push-enc")))
+            mail = re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", os.getenv("SEC_UA", ""))
+            self.claims = {"sub": "mailto:" + (mail.group(0) if mail else "bildirim@abdbot.app")}
+            self.ok = True
+        except Exception as e:
+            self.status = f"hata: {str(e)[:80]}"
+
+    def load(self, data):
+        if not self.ok or not data.get("push_enc"):
+            return
+        try:
+            self.subs = json.loads(self.fernet.decrypt(data["push_enc"].encode()))
+        except Exception:
+            self.subs = []
+
+    def save(self):
+        if self.ok:
+            backup.data["push_enc"] = self.fernet.encrypt(json.dumps(self.subs).encode()).decode()
+            backup.dirty = True
+
+    def add(self, sub):
+        if not (isinstance(sub, dict) and str(sub.get("endpoint", "")).startswith("https://") and sub.get("keys")):
+            return False
+        self.subs = [x for x in self.subs if x.get("endpoint") != sub["endpoint"]][-9:] + [
+            {"endpoint": sub["endpoint"], "keys": sub["keys"]}]
+        self.save()
+        return True
+
+    def notify(self, title, body, tag="", url="/"):
+        if self.ok and self.subs:
+            self.queue.append({"title": title[:80], "body": body[:180], "tag": tag, "url": url})
+            del self.queue[:-20]
+
+    def _send_all(self, msg):
+        dead = []
+        for sub in list(self.subs):
+            try:
+                webpush(sub, json.dumps(msg), vapid_private_key=self.vapid, vapid_claims=dict(self.claims), ttl=600,
+                        timeout=10)
+            except WebPushException as e:
+                code = getattr(getattr(e, "response", None), "status_code", None)
+                if code in (404, 410):
+                    dead.append(sub["endpoint"])
+                self.status = f"gönderim hatası {code}"
+            except Exception as e:
+                self.status = f"gönderim hatası: {str(e)[:60]}"
+        if dead:
+            self.subs = [x for x in self.subs if x["endpoint"] not in dead]
+            self.save()
+
+    async def loop(self):
+        while True:
+            await asyncio.sleep(3)
+            if not self.queue:
+                continue
+            batch, self.queue = self.queue[:], []
+            if len(batch) > 4:   # çok mesaj birikmişse tek bildirimde özetle
+                batch = batch[-3:] + [{"title": f"{len(batch) - 3} yeni mesaj daha", "body": "Akış'ta görmek için dokun",
+                                       "tag": "ozet", "url": "/"}]
+            for m in batch:
+                await asyncio.to_thread(self._send_all, m)
+
+
+push = Push()
+
+
 # ----------------------------------------------------------------- canlı akış
 # Haberler, izleme planları, sinyaller ve bot olayları tek bir zaman akışında (Telegram kanalı gibi).
 FEED = deque(maxlen=400)
@@ -1058,6 +1184,14 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
         it.update(extra)
     FEED.append(it)
     feed_pending.append(it)
+    # telefon bildirimi (Ayarlar'daki tercihlere göre)
+    s0 = it["sym"][0] if it["sym"] else ""
+    if k == "bot" and PUSH_PREF["push_islem"] and tone in ("al", "sat", "kar", "zarar"):
+        push.notify(f"#{s0} {txt}", sub or "Bot sekmesinde ayrıntılar", tag=f"bot-{s0}")
+    elif k == "plan" and PUSH_PREF["push_plan"]:
+        push.notify(f"#{s0} {txt}", sub, tag=f"plan-{s0}")
+    elif k == "haber" and PUSH_PREF["push_haber"] and tone in ("iyi", "kötü") and (extra or {}).get("watched"):
+        push.notify(f"#{s0} {'olumlu' if tone == 'iyi' else 'olumsuz'} haber", txt, tag=f"haber-{s0}", url=url or "/")
 
 
 def feed_signal(sig):
@@ -1245,6 +1379,9 @@ async def broadcaster():
                     await send_bot(cl)
                 if cl.scanv != scanner.ver or getattr(cl, "patv", -1) != _pat_ver[0]:
                     await send_scan(cl)
+                if getattr(cl, "mktv", -1) != _mkt_ver[0]:
+                    cl.mktv = _mkt_ver[0]
+                    await cl.send({"type": "mkt", **MARKET})
                 if tick % 3 == 0:
                     await send_wl(cl)
             except Exception:
@@ -1391,6 +1528,135 @@ async def pattern_loop():
         _pat_ver[0] += 1
 
 
+# ----------------------------------------------------------------- Keşfet: sektörler, en çok yükselen/düşen/hacim
+UNIVERSE = sektor.tum_semboller()
+MARKET = {"sek": [], "gain": [], "lose": [], "act": [], "t": 0}
+_mkt_ver = [0]
+
+
+async def market_loop():
+    await asyncio.sleep(8)
+    async with httpx.AsyncClient(timeout=20, headers=alpaca_headers()) as c:
+        while True:
+            try:
+                if ALPACA_KEY and ALPACA_SECRET:
+                    syms = list(dict.fromkeys(UNIVERSE + [g.get("symbol") for g in scanner.actives if g.get("symbol")]))
+                    snaps = {}
+                    for i in range(0, len(syms), 100):
+                        r = await c.get("https://data.alpaca.markets/v2/stocks/snapshots",
+                                        params={"symbols": ",".join(syms[i:i + 100]), "feed": "iex"})
+                        if r.status_code == 200:
+                            js = r.json() or {}
+                            snaps.update(js.get("snapshots", js) if isinstance(js.get("snapshots"), dict) else js)
+                    today = datetime.now(ET).date().isoformat()
+                    q = {}
+                    for sy, sn in snaps.items():
+                        if not isinstance(sn, dict):
+                            continue
+                        db, pdb = sn.get("dailyBar") or {}, sn.get("prevDailyBar") or {}
+                        is_today = (db.get("t") or "")[:10] == today
+                        prev = pdb.get("c") if is_today else db.get("c")
+                        px = (sn.get("latestTrade") or {}).get("p") or db.get("c")
+                        if px and prev:
+                            q[sy] = {"p": round(px, 4), "ch": round((px / prev - 1) * 100, 2)}
+                    sek = []
+                    for ad, lst in sektor.SEKTORLER.items():
+                        items = [{"s": x, **q[x]} for x in lst if x in q]
+                        if items:
+                            items.sort(key=lambda x: -x["ch"])
+                            sek.append({"ad": ad, "ort": round(sum(x["ch"] for x in items) / len(items), 2), "h": items})
+                    sek.sort(key=lambda x: -x["ort"])
+                    mv = lambda lst: [{"s": g["symbol"], "p": g.get("price"), "ch": round(float(g.get("percent_change") or 0), 2),
+                                       "sek": sektor.sektor_of(g["symbol"])} for g in lst]
+                    act = [{"s": x["symbol"], "v": x.get("volume"), "p": (q.get(x["symbol"]) or {}).get("p"),
+                            "ch": (q.get(x["symbol"]) or {}).get("ch"), "sek": sektor.sektor_of(x["symbol"])}
+                           for x in scanner.actives]
+                    MARKET.update(sek=sek, gain=mv(scanner.gainers), lose=mv(scanner.losers), act=act, t=int(time.time()))
+                    _mkt_ver[0] += 1
+            except Exception as e:
+                log.warning("Piyasa özeti hatası: %s", e)
+            await asyncio.sleep(60 if cal.session(time.time()) != "closed" else 900)
+
+
+VIEWED = {}        # listede olmayan ama uygulamada açılan hisseler: 30 dk boyunca dakikalık veri çekilir
+
+
+def viewed_syms():
+    now = time.time()
+    return [v for v, t in VIEWED.items() if now - t < 1800 and v not in SYMBOLS and v not in scanner.runners]
+
+
+_m15_cache = {}
+
+
+def m15_fetch(sym):
+    """Kısa vade analizi için 60 günlük 15 dk mumlar (Yahoo, normal seans)."""
+    df = yf.download(sym, period="60d", interval="15m", auto_adjust=False, progress=False, threads=False, prepost=False)
+    if df is None or df.empty:
+        return []
+    if isinstance(df.columns, pd.MultiIndex):
+        lv0 = df.columns.get_level_values(0)
+        df = df[sym] if sym in lv0 else (df.xs(sym, axis=1, level=1) if sym in df.columns.get_level_values(1)
+                                         else df.droplevel(1, axis=1))
+    out = []
+    for idx, r in df.iterrows():
+        try:
+            o, h, l, c = float(r["Open"]), float(r["High"]), float(r["Low"]), float(r["Close"])
+            v = float(r["Volume"]) if r["Volume"] == r["Volume"] else 0.0
+        except Exception:
+            continue
+        if c != c or o != o:
+            continue
+        ts = idx.tz_localize("UTC") if idx.tzinfo is None else idx
+        out.append((int(ts.timestamp()), o, h, l, c, v))
+    return out
+
+
+async def get_m15(sym):
+    hit = _m15_cache.get(sym)
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    try:
+        bars = await asyncio.to_thread(m15_fetch, sym)
+    except Exception as e:
+        log.warning("15 dk veri hatası %s: %s", sym, e)
+        bars = hit[1] if hit else []
+    if bars:
+        _m15_cache[sym] = (time.time(), bars)
+        if len(_m15_cache) > 60:
+            _m15_cache.pop(min(_m15_cache, key=lambda k: _m15_cache[k][0]), None)
+    return bars
+
+
+async def analiz_payload(sym):
+    d = await get_daily(sym)
+    daily = []
+    for x in d:
+        try:
+            daily.append((int(datetime.strptime(x[0], "%Y-%m-%d").replace(tzinfo=UTC).timestamp()),
+                          x[1], x[2], x[3], x[4], x[5]))
+        except Exception:
+            continue
+    m = await get_m15(sym)
+    res = await asyncio.to_thread(analiz.full, daily, m)
+    res.update(sym=sym, sektor=sektor.sektor_of(sym), t=int(time.time()))
+    return res
+
+
+def replay_payload(pid):
+    pos = next((p for p in bot.positions if p.get("id") == pid), None)
+    if not pos:
+        return None
+    sym = pos["sym"]
+    t0 = (pos.get("et") or pos["opened"]) - 45 * 60
+    t1 = (pos.get("xt") or time.time()) + 30 * 60
+    bars = store.bars.get(sym) or {}
+    rows = [bar_out(t, bars[t]) for t in sorted(bars) if t0 <= t <= t1]
+    sig = engine.by_id.get(pos.get("sig")) or {}
+    return {"type": "replay", "pos": pos, "bars": rows, "why": sig.get("why", []),
+            "ad": sinyal.SETUP_AD.get(pos["setup"], pos["setup"])}
+
+
 async def bot_loop():
     while True:
         await asyncio.sleep(2)
@@ -1449,6 +1715,8 @@ async def lifespan(app):
     engine.load(sigs)
     bot.load(botdays)
     learner.rebuild(engine.signals)
+    apply_ayar(backup.data.get("ayar"))
+    push.load(backup.data)
     feed_seed()
     bot.on_note = feed_bot_note
     backup.record_start()
@@ -1458,7 +1726,8 @@ async def lifespan(app):
     except Exception as e:
         log.warning("Bot senkron hatası: %s", e)
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
-                                                  scan_loop, bot_loop, fast_loop, news_loop, pattern_loop)]
+                                                  scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
+                                                  market_loop, push.loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -1562,11 +1831,17 @@ MANIFEST = {
     ],
 }
 SW_JS = """// ABD·BOT servis çalışanı: uygulama olarak yüklenebilmesi için. Canlı veri asla önbelleğe alınmaz.
-const C='abdbot-v1';
+const C='abdbot-v2';
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(C).then(c=>c.addAll(['/ikon-192.png','/ikon-512.png'])))});
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch',e=>{const u=new URL(e.request.url);
   if(u.pathname.startsWith('/ikon-'))e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)));});
+self.addEventListener('push',e=>{let d={};try{d=e.data.json()}catch(x){d={title:'ABD·BOT',body:e.data?e.data.text():''}}
+  e.waitUntil(self.registration.showNotification(d.title||'ABD·BOT',{body:d.body||'',tag:d.tag||undefined,renotify:!!d.tag,
+    icon:'/ikon-192.png',badge:'/ikon-192.png',data:{url:d.url||'/'}}))});
+self.addEventListener('notificationclick',e=>{e.notification.close();const url=(e.notification.data&&e.notification.data.url)||'/';
+  e.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if('focus' in c){c.focus();return}}
+    return self.clients.openWindow(url)}))});
 """
 
 
@@ -1601,6 +1876,51 @@ async def saglik():
     return Response("ok", media_type="text/plain")
 
 
+@app.post("/api/ayar")
+async def ayar_kaydet(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    try:
+        d = await request.json()
+    except Exception:
+        return JSONResponse({"hata": "geçersiz veri"}, status_code=400)
+    apply_ayar(d)
+    backup.data["ayar"] = {**{k: BOT_CFG[k] for k in AYAR_DEF}, **PUSH_PREF}
+    backup.dirty = True
+    bot.ver += 1
+    asyncio.create_task(backup.save(engine, bot))
+    return JSONResponse({"ok": 1, "cfg": BOT_CFG, "push": PUSH_PREF})
+
+
+@app.get("/push/key")
+async def push_key(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    return JSONResponse({"key": push.pub if push.ok else None, "durum": push.status})
+
+
+@app.post("/push/sub")
+async def push_sub(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    try:
+        ok = push.add(await request.json())
+    except Exception:
+        ok = False
+    if ok:
+        asyncio.create_task(backup.save(engine, bot))
+        push.notify("Bildirimler açık", "Bot işlem açınca, kapatınca ve plan yazınca buraya düşecek.", tag="test")
+    return JSONResponse({"ok": ok, "n": len(push.subs)})
+
+
+@app.post("/push/test")
+async def push_test(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    push.notify("Deneme bildirimi", "Bunu görüyorsan bildirimler çalışıyor.", tag="test")
+    return JSONResponse({"ok": push.ok, "n": len(push.subs), "durum": push.status})
+
+
 @app.get("/api/durum")
 async def durum(request: Request):
     if not authorized(request):
@@ -1624,6 +1944,8 @@ async def ws_endpoint(ws: WebSocket):
         await send_bot(cl)
         await send_scan(cl)
         await cl.send({"type": "feed", "items": list(FEED)[-150:], "full": 1})
+        cl.mktv = _mkt_ver[0]
+        await cl.send({"type": "mkt", **MARKET})
         while True:
             msg = json.loads(await ws.receive_text())
             if msg.get("daily"):
@@ -1631,8 +1953,33 @@ async def ws_endpoint(ws: WebSocket):
                 if dsym in store.bars:
                     await cl.send({"type": "daily", "sym": dsym, "bars": await get_daily(dsym)})
                 continue
-            sym = str(msg.get("sub", "")).upper()
+            if msg.get("analiz"):
+                asym = str(msg["analiz"]).upper()[:8]
+                if tarayici.SYM_RE.match(asym):
+                    try:
+                        await cl.send({"type": "analiz", **(await analiz_payload(asym))})
+                    except Exception as e:
+                        await cl.send({"type": "analiz", "sym": asym, "hata": str(e)[:120]})
+                continue
+            if msg.get("replay"):
+                rp = replay_payload(str(msg["replay"]))
+                await cl.send(rp or {"type": "replay", "hata": "işlem bulunamadı"})
+                continue
+            sym = str(msg.get("sub", "")).upper()[:8]
+            if sym and sym not in store.bars and tarayici.SYM_RE.match(sym):
+                # listede olmayan hisse: dakikalık veriyi hemen çek, 30 dk izle
+                ensure_sym(sym)
+                VIEWED[sym] = time.time()
+                try:
+                    rd = await asyncio.to_thread(yahoo_fetch, [sym], "5d")
+                    for s_, b_ in rd.items():
+                        store.merge_yahoo(s_, b_)
+                        store.snap_ver[s_] = store.snap_ver.get(s_, 0) + 1
+                except Exception as e:
+                    log.debug("Görüntülenen hisse verisi alınamadı %s: %s", sym, e)
             if sym in store.bars:
+                if sym not in SYMBOLS:
+                    VIEWED[sym] = time.time()
                 cl.sym = sym
                 await send_snap(cl)
     except WebSocketDisconnect:

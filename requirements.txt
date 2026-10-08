@@ -5,3 +5,4 @@ websockets>=12
 yfinance>=0.2.54
 pandas>=2.0
 tzdata
+pywebpush>=2.0

@@ -101,6 +101,7 @@ class Scanner:
         self._assets = {}
         self.dropped = {}        # sembol -> (zaman, sebep): elenen hisse 20 dk sonra tekrar aday olabilir
         self.keep = lambda sym: False   # açık pozisyonu olan hisse listeden çıkarılmaz (app.py ayarlar)
+        self.gainers, self.losers, self.actives = [], [], []
 
     def _h(self):
         return {"APCA-API-KEY-ID": self.key, "APCA-API-SECRET-KEY": self.secret}
@@ -133,13 +134,19 @@ class Scanner:
             async with httpx.AsyncClient(timeout=20) as c:
                 mv = await c.get(f"{DATA}/v1beta1/screener/stocks/movers", params={"top": 50}, headers=self._h())
                 mv.raise_for_status()
-                gainers = mv.json().get("gainers") or []
+                mj = mv.json()
+                gainers = mj.get("gainers") or []
+                # Keşfet sayfası: bütün piyasanın en çok yükselen / düşen / en yüksek hacimli hisseleri
+                self.gainers = [g for g in gainers if SYM_RE.match(g.get("symbol", "")) and is_common(g.get("symbol", ""))][:30]
+                self.losers = [g for g in (mj.get("losers") or []) if SYM_RE.match(g.get("symbol", "")) and is_common(g.get("symbol", ""))][:30]
                 vols = {}
                 try:
                     ma = await c.get(f"{DATA}/v1beta1/screener/stocks/most-actives",
                                      params={"by": "volume", "top": 100}, headers=self._h())
                     if ma.status_code == 200:
-                        vols = {x["symbol"]: x.get("volume") for x in ma.json().get("most_actives") or []}
+                        acts = ma.json().get("most_actives") or []
+                        vols = {x["symbol"]: x.get("volume") for x in acts}
+                        self.actives = [x for x in acts if SYM_RE.match(x.get("symbol", "")) and is_common(x.get("symbol", ""))][:30]
                 except Exception:
                     pass
                 cands = []
