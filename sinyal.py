@@ -34,6 +34,10 @@ SETUP_AD = {
     "hizli": "Haberli hızlı kırılım (anlık)",
     "formasyon": "Formasyon kırılımı",
     "talep": "Alıcı bölgesinden dönüş",
+    "fvg": "FVG dönüşü",
+    "kanal": "Kanal alt bandından dönüş",
+    "yapi": "Yapı kırılımı (BOS)",
+    "fib": "Fibonacci geri çekilme dönüşü",
 }
 SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa sonrası"}
 SES_NAME = {0: "pre", 1: "regular", 2: "post", 3: "closed"}
@@ -196,6 +200,7 @@ class Engine:
         closes = [bars[t][3] for t in win]
         e9, e21 = _ema_series(closes, 9), _ema_series(closes, 21)
         x["ema9"], x["ema21"] = e9[-1], e21[-1]
+        x["ema20"], x["ema50"] = _ema_series(closes, 20)[-1], _ema_series(closes, 50)[-1]
         x["ema9p"] = e9[-2] if len(e9) > 1 else e9[-1]
         x["ema21_10"] = e21[-11] if len(e21) > 11 else e21[0]
         trs = []
@@ -302,12 +307,78 @@ class Engine:
             elif room >= 2:
                 s += 5
                 why.append(f"Önünde {room:.1f}R boşluk var ({f2(near)})")
+        s += self._grafik_puan(x, d, why, risk)
         if x["ses"] == "regular":
             mins = (x["T"] - x["b"]["open"]) / 60
             if 120 <= mins <= 240:
                 s -= 5
                 why.append("Öğle saatleri: hareketler zayıf olabilir")
         return int(max(0, min(100, round(s))))
+
+    def _grafik_puan(self, x, d, why, risk):
+        """Grafik okuması: piyasa yapısı, kanal, FVG, Fibonacci, mum gövde/fitil, EMA 20/50."""
+        s = 0
+        fx = x.get("_fx") or {}
+        c = x["c"]
+        a5 = fx.get("atr") or x["atr"] * 2.2
+        y = fx.get("yapi") or {}
+        tr = y.get("trend")
+        if tr in ("yükseliş", "düşüş"):
+            if (tr == "yükseliş") == (d > 0):
+                s += 4
+                why.append(f"Piyasa yapısı lehte ({'yükselen tepe ve dipler' if d > 0 else 'alçalan tepe ve dipler'})")
+            else:
+                s -= 5
+                why.append(f"Piyasa yapısı ters ({tr}): dikkat")
+        kr = y.get("kirilim")
+        if kr and kr["yon"] == d and x["T"] - kr["t"] <= 1800:
+            s += 3
+            why.append(f"Yapı kırılımı ({kr['tip']}) {f2(kr['p'])} {'yukarı' if d > 0 else 'aşağı'}")
+        kn = fx.get("kanal")
+        if kn and not kn.get("kirildi"):
+            w = kn["ust_now"] - kn["alt_now"]
+            pos = (c - kn["alt_now"]) / w if w > 0 else 0.5
+            if ((d > 0 and pos <= 0.25) or (d < 0 and pos >= 0.75)) and not any("kanal" in w.lower() for w in why):
+                s += 4
+                why.append(f"{kn['ad']}: fiyat {'alt' if d > 0 else 'üst'} bantta (dönüş bölgesi)")
+            elif (d > 0 and pos >= 0.85) or (d < 0 and pos <= 0.15):
+                s -= 5
+                why.append(f"{kn['ad']}: fiyat {'üst' if d > 0 else 'alt'} bantta, yer dar")
+        for z in fx.get("fvg") or []:
+            if z["bull"] == (d > 0) and z["lo"] <= (x["l"] if d > 0 else x["h"]) <= z["hi"] and (c - z["hi"] if d > 0 else z["lo"] - c) >= 0:
+                if any("FVG" in w for w in why):
+                    break
+                s += 3
+                why.append(f"{'Boğa' if d > 0 else 'Ayı'} FVG boşluğundan ({f2(z['lo'])}–{f2(z['hi'])}) tepki")
+                break
+            if z["bull"] != (d > 0) and risk > 0 and 0 < (z["lo"] - c if d > 0 else c - z["hi"]) <= risk:
+                s -= 4
+                why.append(f"Hemen {'üstünde' if d > 0 else 'altında'} dolmamış FVG ({f2(z['lo'])}–{f2(z['hi'])}): engel")
+                break
+        fb = fx.get("fib")
+        if fb and fb["yon"] == d:
+            lo_, hi_ = fb["altin"]
+            ref = x["l"] if d > 0 else x["h"]
+            if lo_ - 0.2 * a5 <= ref <= hi_ + 0.2 * a5 and not any("Fibonacci" in w for w in why):
+                s += 3
+                why.append(f"Fibonacci 0,5–0,618 altın bölgesinden dönüş ({f2(lo_)}–{f2(hi_)})")
+        m = formasyon.mum(x["o"], x["h"], x["l"], c)
+        x["_mum"] = m
+        good = ("güçlü yeşil", "alt fitil reddi") if d > 0 else ("güçlü kırmızı", "üst fitil reddi")
+        bad = "üst fitil reddi" if d > 0 else "alt fitil reddi"
+        if m in good:
+            s += 3
+            why.append(f"Sinyal mumu: {m}")
+        elif m == bad:
+            s -= 5
+            why.append(f"Sinyal mumunda uzun {'üst' if d > 0 else 'alt'} fitil: bu yön reddedildi")
+        if x.get("ema50"):
+            if (x["ema20"] - x["ema50"]) * d > 0:
+                s += 2
+            else:
+                s -= 3
+                why.append("EMA 20, EMA 50'nin ters tarafında")
+        return s
 
     # ------------------------------------------------------------ kurgular
     def _ready(self, sym, setup, d, T, once=False, day=None):
@@ -625,6 +696,67 @@ class Engine:
                    f"Bu bantta işlem hacminin %{z['alici']}'i yükselen mumlarda (alıcılar toplanmış)",
                    f"Hacim ortalamanın {x['volr']:.1f} katı, kısa trend yukarı"]
             out.append(("talep", 1, c, c - risk, risk, 55, why))
+        # Uzatılmış seans / koşan hisse dışında kalan grafik kurguları (sadece alış)
+        up_ok = x["ema9"] > x["ema21"] or ((fx.get("yapi") or {}).get("trend") == "yükseliş")
+        green = c > o
+        # 3) FVG dönüşü: fiyat boğa boşluğuna indi, yeşil mumla boşluğun üstünde kapandı
+        for z in fx.get("fvg") or []:
+            if not z["bull"] or not (x["l"] <= z["hi"] < c and x["prev_c"] >= z["lo"] and green):
+                continue
+            if x["volr"] < 1.2 or not up_ok or not self._ready(sym, "fvg", 1, T):
+                break
+            stop = z["lo"] - 0.3 * atr
+            risk = max(c - stop, c * MIN_STOP_PCT, atr * MIN_STOP_ATR)
+            if risk > c * 0.04:
+                break
+            why = [f"Boğa FVG boşluğu ({f2(z['lo'])}–{f2(z['hi'])}) test edildi, yeşil mumla üstünde kapandı",
+                   "Dolmamış boşluk destek gibi çalıştı (alıcılar boşluğu savundu)",
+                   f"Hacim ortalamanın {x['volr']:.1f} katı"]
+            out.append(("fvg", 1, c, c - risk, risk, 54, why))
+            break
+        # 4) Kanal alt bandından dönüş (yükselen kanal / trend çizgisi sekmesi)
+        kn = fx.get("kanal")
+        if kn and kn["yon"] > 0 and not kn["kirildi"]:
+            alt = kn["ana_now"]
+            if x["l"] <= alt + 0.15 * a5 and c > alt and green and x["volr"] >= 1.2 and self._ready(sym, "kanal", 1, T):
+                stop = alt - 0.5 * a5
+                risk = max(c - stop, c * MIN_STOP_PCT, atr * MIN_STOP_ATR)
+                if risk <= c * 0.04:
+                    tgt = kn["karsi_now"] if kn["karsi_now"] - c >= 1.5 * risk else c + 2 * risk
+                    self._tgt_over[(sym, T, "kanal", 1)] = tgt
+                    why = [f"Yükselen trend çizgisine ({f2(alt)}) dokunup döndü (kanal alt bandı)",
+                           f"Hedef kanalın üst bandı {f2(kn['karsi_now'])}",
+                           f"Hacim ortalamanın {x['volr']:.1f} katı"]
+                    out.append(("kanal", 1, c, c - risk, risk, 54, why))
+        # 5) Yapı kırılımı: son tepe (swing high) hacimle kapanışla geçildi
+        y = fx.get("yapi") or {}
+        lvl = y.get("son_tepe")
+        if lvl and x["prev_c"] <= lvl < c and green and x["volr"] >= 1.5 and not ext and self._ready(sym, "yapi", 1, T):
+            sd = y.get("son_dip")
+            stop = max(sd - 0.2 * a5, c - 3 * a5) if sd and sd < c else c - 1.5 * a5
+            risk = max(c - stop, c * MIN_STOP_PCT, atr * MIN_STOP_ATR)
+            if risk <= c * 0.04:
+                tip = "karakter değişimi (CHoCH)" if y.get("trend") == "düşüş" else "yapı kırılımı (BOS)"
+                why = [f"Son tepe {f2(lvl)} kapanışla geçildi: {tip}",
+                       f"Stop son dibin altında ({f2(stop)})" if sd and sd < c else "Stop 1,5 ATR altında",
+                       f"Hacim ortalamanın {x['volr']:.1f} katı"]
+                out.append(("yapi", 1, c, c - risk, risk, 54, why))
+        # 6) Fibonacci geri çekilme dönüşü: yukarı hareketin 0,5–0,618 bölgesinde dönüş mumu
+        fb = fx.get("fib")
+        if fb and fb["yon"] > 0:
+            lo_, hi_ = fb["altin"]
+            if lo_ - 0.2 * a5 <= x["l"] <= hi_ + 0.2 * a5 and green and c > x["prev_h"] and up_ok \
+                    and self._ready(sym, "fib", 1, T):
+                stop = fb["lv"]["0.786"] - 0.3 * a5
+                risk = max(c - stop, c * MIN_STOP_PCT, atr * MIN_STOP_ATR)
+                if risk <= c * 0.04:
+                    tepe = fb["b"][1]
+                    tgt = tepe if tepe - c >= 1.5 * risk else c + 2 * risk
+                    self._tgt_over[(sym, T, "fib", 1)] = tgt
+                    why = [f"Son yükselişin Fibonacci 0,5–0,618 bölgesine ({f2(lo_)}–{f2(hi_)}) geri çekildi",
+                           "Dönüş mumu: önceki mumun tepesinin üstünde kapandı",
+                           f"Hedef hareketin tepesi {f2(tepe)}, stop 0,786 seviyesinin altında"]
+                    out.append(("fib", 1, c, c - risk, risk, 54, why))
         return out
 
     # ------------------------------------------------------------ anlık kırılım (koşan hisseler)
@@ -835,6 +967,34 @@ class Engine:
         f["formasyon"] = same[0]["ad"] + " (lehte)" if same else (opp[0]["ad"] + " (aleyhte)" if opp else "yok")
         zs = fx.get("zones") or []
         f["talep"] = "alıcı bölgesine yakın" if zs and x["c"] - zs[0]["hi"] <= x["atr"] * 3 else "uzak / yok"
+        y = fx.get("yapi") or {}
+        tr = y.get("trend")
+        f["yapi"] = "belirsiz" if tr in (None, "belirsiz", "karışık") else ("lehte" if (tr == "yükseliş") == (d > 0) else "ters")
+        kn = fx.get("kanal")
+        if kn and not kn.get("kirildi") and kn["ust_now"] > kn["alt_now"]:
+            pos = (x["c"] - kn["alt_now"]) / (kn["ust_now"] - kn["alt_now"])
+            pos = pos if d > 0 else 1 - pos
+            f["kanal"] = "lehte bantta" if pos <= 0.3 else ("ters bantta" if pos >= 0.8 else "ortada")
+        else:
+            f["kanal"] = "yok"
+        fv = fx.get("fvg") or []
+        if any(z["bull"] == (d > 0) and z["lo"] <= (x["l"] if d > 0 else x["h"]) <= z["hi"] for z in fv):
+            f["fvg"] = "lehte FVG'de"
+        elif any(z["bull"] != (d > 0) for z in fv):
+            f["fvg"] = "karşıda FVG var"
+        else:
+            f["fvg"] = "yok"
+        fb = fx.get("fib")
+        if fb and fb["yon"] == d:
+            lo_, hi_ = fb["altin"]
+            ref = x["l"] if d > 0 else x["h"]
+            a5 = fx.get("atr") or x["atr"] * 2.2
+            f["fib"] = "altın bölgede" if lo_ - 0.2 * a5 <= ref <= hi_ + 0.2 * a5 else "dışında"
+        else:
+            f["fib"] = "yok"
+        f["mum"] = x.get("_mum") or formasyon.mum(x["o"], x["h"], x["l"], x["c"])
+        if x.get("ema50"):
+            f["ema50"] = "uyumlu" if (x["ema20"] - x["ema50"]) * d > 0 else "ters"
         bil = getattr(self, "bilanco", None)
         if bil:
             f["bilanco"] = bil(sym) or "yok"

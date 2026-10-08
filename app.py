@@ -89,6 +89,9 @@ BOT_CFG = {
     "min_conf_ext": int(os.getenv("BOT_MIN_CONF_EXT", "50")),# piyasa öncesi/sonrası için eşik (yarım lot + limit emir)
     "yeni_islem": 1,                                          # 0: yeni işlem açma (açık pozisyonlar yönetilmeye devam eder)
     "sektor_max": 2,                                          # aynı sektörde en fazla açık pozisyon (0 = sınırsız)
+    "yarim_kapat": 1,                                         # +yarim_r R'de pozisyonun yarısını sat, stop girişe
+    "yarim_r": 1.0,
+    "kalan_r": 3.0,                                           # yarım kapattıktan sonra kalan kısmın hedefi (R)
 }
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
@@ -1067,7 +1070,8 @@ async def alpaca_loop():
 # ----------------------------------------------------------------- ayarlar (uygulamadan değiştirilebilir)
 AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd": (float, 0.1, 1e5),
             "max_open": (int, 1, 50), "daily_loss": (float, 1, 1e6), "min_conf": (int, 0, 100),
-            "min_conf_ext": (int, 0, 100), "yeni_islem": (int, 0, 1), "sektor_max": (int, 0, 20)}
+            "min_conf_ext": (int, 0, 100), "yeni_islem": (int, 0, 1), "sektor_max": (int, 0, 20),
+            "yarim_kapat": (int, 0, 1), "yarim_r": (float, 0.5, 3), "kalan_r": (float, 1, 8)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1,
              "tg_kosan": 1, "tg_tablo": 1}
@@ -1513,6 +1517,12 @@ def feed_bot_note(typ, msg, sym, t):
                      extra={"tgr": f"p:{pos['id']}"} if pos else None)
         else:
             feed_add("bot", sym, msg, tone="bilgi", t=t)
+    elif typ == "yarım":
+        pos = _pos_of(sym, open_=True)
+        m = re.search(r"([+-][\d.]+) \$ cebe", msg)
+        feed_add("bot", sym, f"Yarısını sattım: {m.group(1) if m else ''} $ cebe" if m else "Yarısını sattım",
+                 sub="Kalan kısım için stop girişte; bu işlem artık zarar yazmaz", tone="kar", t=t,
+                 extra={"tgr": f"p:{pos['id']}"} if pos else None)
     elif typ in ("koruma", "iz"):
         pos = _pos_of(sym, open_=True)
         feed_add("bot", sym, "Stop girişe çekildi, bu işlem artık zarar yazmaz" if typ == "koruma"
@@ -1566,7 +1576,7 @@ def feed_seed():
         if sig.get("day") == today:
             evs.append((sig.get("created") or sig["t"], "s", sig))
     for j in bot.journal[-600:]:
-        if j.get("day") == today and j.get("typ") in ("dolum", "kapandı", "koruma", "iz"):
+        if j.get("day") == today and j.get("typ") in ("dolum", "kapandı", "koruma", "iz", "yarım"):
             evs.append((j["t"], "b", j))
     _SEEDING[0] = True
     try:
@@ -2557,6 +2567,7 @@ def bot_dusunce(sym):
     fx = (levels(sym) or {}).get("fx") or {}
     return {"type": "dusun", "sym": sym, "sigs": sigs, "jr": jr, "pos": pos,
             "pat": fx.get("pat", []), "zones": fx.get("zones", []), "bil": bilanco_durum(sym),
+            "fvg": fx.get("fvg") or [], "kanal": fx.get("kanal"), "yapi": fx.get("yapi"), "fib": fx.get("fib"),
             "sek": sektor.sektor_of(sym), "runner": scanner.runners.get(sym), "hava": HAVA.get("etiket")}
 
 

@@ -29,6 +29,20 @@ PAPER = "https://paper-api.alpaca.markets"
 OPEN_ST = ("emir", "açık", "çıkış")
 
 
+def _half_total(pos):
+    """Yarım kapat yapıldıysa sonuç: cebe konan kısım + kalan kısım (R ve % başlangıçtaki toplam adede göre)."""
+    h = pos.get("half") or {}
+    if h.get("st") != "doldu" or not pos.get("entry"):
+        return
+    q0 = float(pos.get("qty0") or (float(pos["qty"]) + h["qty"]))
+    tot = round((pos["pnl"] or 0) + h["pnl"], 2)
+    pos["pnl"] = tot
+    pos["pct"] = round(tot / (pos["entry"] * q0) * 100, 3) if q0 else pos.get("pct")
+    risk = pos.get("risk") or abs(pos["entry"] - pos.get("init_stop", pos["stop"]))
+    if risk and q0:
+        pos["r"] = round(tot / (risk * q0), 2)
+
+
 def _iso_ts(s):
     """'2026-10-08T14:30:00.123456789Z' → epoch saniye (bozuksa 0)."""
     try:
@@ -319,6 +333,62 @@ class Bot:
             self.note("hata", f"Çıkış emri gönderilemedi: {e}", pos["sym"])
         self._touch(pos)
 
+    # ------------------------------------------------------------ yarım kapat (kârın bir kısmını cebe koy)
+    def _half_qty(self, pos, px):
+        q = pos["qty"]
+        if isinstance(q, int) or float(q) == int(q):
+            q = int(q)
+            if q >= 2:
+                return q // 2
+            if pos["dir"] < 0:
+                return None                       # açığa satışta kesirli adet yok
+        hq = round(float(q) / 2, 4)
+        return hq if pos["dir"] > 0 and hq * px >= 2.0 else None
+
+    async def _submit_half(self, pos, hq, px):
+        side = "sell" if pos["dir"] > 0 else "buy"
+        body = {"symbol": pos["sym"], "qty": str(hq), "side": side, "time_in_force": "day", "type": "market"}
+        try:
+            o = await self._req("POST", "/v2/orders", json=body)
+            pos["half"] = {"oid": o["id"], "qty": hq, "st": "emir", "t": int(time.time())}
+            self.note("emir", f"Yarım kapat emri: {side} {hq:g} adet (kârın bir kısmı cebe)", pos["sym"])
+        except Exception as e:
+            pos["half"] = {"st": "olmadı"}
+            self.note("hata", f"Yarım kapat emri gönderilemedi: {e}", pos["sym"])
+        self._touch(pos)
+
+    async def _poll_half(self, pos, now):
+        h = pos["half"]
+        if now - self._last_poll.get(h["oid"], 0) < 3:
+            return
+        self._last_poll[h["oid"]] = now
+        o = await self._poll(h["oid"])
+        st = o.get("status")
+        fq = float(o.get("filled_qty") or 0)
+        if st == "filled" or (st in ("canceled", "expired") and fq > 0):
+            d = pos["dir"]
+            px = float(o["filled_avg_price"])
+            pos["qty0"] = pos.get("qty0") or pos["qty"]
+            rest = round(float(pos["qty"]) - fq, 6)
+            pos["qty"] = int(rest) if rest == int(rest) else rest
+            pnl = round(d * (px - pos["entry"]) * fq, 2)
+            h.update(st="doldu", px=px, qty=fq, pnl=pnl, xt=int(now))
+            be = pos["entry"] + d * pos["entry"] * 0.0005
+            if (be - pos["stop"]) * d > 0:
+                pos["stop"] = be
+            pos["be"] = True
+            kalan_r = float(self.cfg.get("kalan_r", 3.0) or 0)
+            if kalan_r and pos.get("risk"):
+                nt = pos["entry"] + d * kalan_r * pos["risk"]
+                if (nt - pos["target"]) * d > 0:
+                    pos["target"] = nt
+            self.note("yarım", f"Yarım kapat: {fq:g} adet @ {px} → {pnl:+.2f} $ cebe. Kalan {pos['qty']:g} adet: "
+                               f"stop girişte, hedef {kalan_r:g}R", pos["sym"])
+        elif st in ("canceled", "expired", "rejected", "done_for_day"):
+            h["st"] = "olmadı"
+            self.note("uyarı", f"Yarım kapat emri dolmadı ({st}); pozisyon tam haliyle devam ediyor", pos["sym"])
+        self._touch(pos)
+
     async def _poll(self, oid):
         return await self._req("GET", f"/v2/orders/{oid}")
 
@@ -373,6 +443,9 @@ class Bot:
             return
 
         if pos["st"] == "açık":
+            h = pos.get("half")
+            if h and h.get("st") == "emir":           # yarım kapat emri bekliyor: sonuçlanana kadar çıkış yok
+                return await self._poll_half(pos, now)
             px, pt = self.price(pos["sym"])[:2]
             if now - pt > 20:
                 await self._refresh_latest(pos["sym"], now)
@@ -398,6 +471,12 @@ class Bot:
                         pos["trail"] = True
                         self.note("iz", "İz süren stop devrede (zirvenin 1R gerisinden)", pos["sym"])
                     self.dirty_days.add(pos["day"])
+            if self.cfg.get("yarim_kapat", 1) and not pos.get("half") and \
+                    best_r >= float(self.cfg.get("yarim_r", 1.0)) and self.cal.session(now) == "regular" \
+                    and (px - pos["stop"]) * d > 0 and (px - pos["target"]) * d < 0:
+                hq = self._half_qty(pos, px)
+                if hq:
+                    return await self._submit_half(pos, hq, px)
             reason = None
             if (px - pos["stop"]) * d <= 0:
                 reason = "iz süren stop" if pos["trail"] else ("kâr koruma" if pos["be"] else "stop")
@@ -462,6 +541,7 @@ class Bot:
         pos["pnl"] = round(d * (exit_px - pos["entry"]) * pos["qty"], 2)
         pos["pct"] = round(d * (exit_px / pos["entry"] - 1) * 100, 3)
         pos["r"] = round(d * (exit_px - pos["entry"]) / pos["risk"], 2) if pos.get("risk") else None
+        _half_total(pos)
         try:
             pos["lesson"] = self.learner.lesson(pos["setup"], pos["ses"], pos["f"], pos["r"])
         except Exception:
@@ -497,6 +577,7 @@ class Bot:
                     risk = abs(pos["entry"] - pos.get("init_stop", pos["stop"])) or 1e-9
                     pos["r"] = round((px - pos["entry"]) * d / risk, 2)
                     pos["pct"] = round((px / pos["entry"] - 1) * 100 * d, 2)
+                    _half_total(pos)
                     pos["xr"] = "senkron: Alpaca çıkışı bulundu"
                     try:
                         pos["lesson"] = self.learner.lesson(pos["setup"], pos["ses"], pos["f"], pos["r"])

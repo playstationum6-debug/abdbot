@@ -16,6 +16,12 @@ Girdi: 5 dakikalık mumlar [(t, o, h, l, c, v), ...] eskiden yeniye (son 2-3 gü
    - Boğa bayrağı (sert yükseliş direği + dar konsolidasyon)
    Her biri için: boyun çizgisi (kırılım seviyesi), hedef (formasyon yüksekliği kadar), durum (oluşuyor / kırıldı).
 3) Alıcı bölgesi: yükselen mumlardaki hacmin yoğunlaştığı fiyat bandı (fiyatın altında).
+4) FVG (boşluk / fair value gap): 3 mumluk dizide 1. mumun tepesi ile 3. mumun dibi arasında kalan, fiyatın
+   hiç işlem görmediği boşluk. Fiyat çoğu zaman bu boşluğu doldurmaya döner; dolmamış boşluk destek/direnç gibi çalışır.
+5) Trend çizgisi ve kanal: yükselen diplerden (ya da alçalan tepelerden) geçen çizgi + karşı tarafta paralel çizgi.
+6) Piyasa yapısı: tepe/dip dizisi (HH-HL yükseliş, LH-LL düşüş) ve yapı kırılımı (BOS) / karakter değişimi (CHoCH).
+7) Fibonacci geri çekilmesi: son sert hareketin 0,382 / 0,5 / 0,618 / 0,786 seviyeleri (0,5–0,618 "altın bölge").
+8) Mum okuma: gövde kararı gösterir, uzun fitil o yönün reddedildiğini söyler.
 """
 
 
@@ -319,16 +325,182 @@ def demand_zones(b, last):
     return zones[:2]
 
 
+# ----------------------------------------------------------------- FVG (boşluk)
+def fvg(b, a, look=120):
+    """Dolmamış boşluklar. Boğa FVG: mum[i].dip > mum[i-2].tepe (fiyatın altında kalırsa destek).
+    Ayı FVG: mum[i].tepe < mum[i-2].dip. Dönüş: [{"lo","hi","bull","t","test"}] (en yakın 2'şer)."""
+    n = len(b)
+    if n < 10 or a <= 0:
+        return []
+    last = b[-1][4]
+    out = []
+    for i in range(max(2, n - look), n):
+        h2, l2 = b[i - 2][2], b[i - 2][3]
+        h0, l0 = b[i][2], b[i][3]
+        if l0 > h2 and l0 - h2 >= 0.35 * a and b[i - 1][4] > b[i - 1][1]:
+            lo, hi, bull = h2, l0, True
+        elif h0 < l2 and l2 - h0 >= 0.35 * a and b[i - 1][4] < b[i - 1][1]:
+            lo, hi, bull = h0, l2, False
+        else:
+            continue
+        after = b[i + 1:]
+        if bull:
+            if any(x[3] <= lo for x in after):          # tamamen doldu: artık geçersiz
+                continue
+            test = any(x[3] <= hi for x in after)
+        else:
+            if any(x[2] >= hi for x in after):
+                continue
+            test = any(x[2] >= lo for x in after)
+        out.append({"lo": round(lo, 4), "hi": round(hi, 4), "bull": bull, "t": b[i - 1][0], "test": test})
+    below = sorted([z for z in out if z["bull"] and z["hi"] <= last * 1.002], key=lambda z: last - z["hi"])[:2]
+    above = sorted([z for z in out if not z["bull"] and z["lo"] >= last * 0.998], key=lambda z: z["lo"] - last)[:2]
+    return below + above
+
+
+# ----------------------------------------------------------------- trend çizgisi / kanal
+def kanal(b, piv, a):
+    """Son iki yükselen dipten (ya da alçalan tepeden) geçen trend çizgisi + paralel kanal çizgisi."""
+    n = len(b)
+    if n < 30 or a <= 0:
+        return None
+    last_i = n - 1
+    L = [p for p in piv if p[2] == "L"][-3:]
+    H = [p for p in piv if p[2] == "H"][-3:]
+    cands = []
+    if len(L) >= 2 and L[-1][1] > L[-2][1] and L[-1][0] - L[-2][0] >= 6:
+        p1, p2 = (L[-2][0], L[-2][1]), (L[-1][0], L[-1][1])
+        f = (lambda i, p1=p1, p2=p2: _line_at(p1, p2, i))
+        off = max(b[i][2] - f(i) for i in range(p1[0], n))
+        cands.append(("Yükselen kanal", 1, f, off, p1[0]))
+    if len(H) >= 2 and H[-1][1] < H[-2][1] and H[-1][0] - H[-2][0] >= 6:
+        p1, p2 = (H[-2][0], H[-2][1]), (H[-1][0], H[-1][1])
+        f = (lambda i, p1=p1, p2=p2: _line_at(p1, p2, i))
+        off = min(b[i][3] - f(i) for i in range(p1[0], n))
+        cands.append(("Alçalan kanal", -1, f, off, p1[0]))
+    best = None
+    for ad, yon, f, off, i0 in cands:
+        span = last_i - i0
+        if span < 10 or abs(f(last_i) - f(i0)) < 1.0 * a or abs(off) < 1.5 * a:
+            continue
+        line_now = f(last_i)
+        other_now = line_now + off
+        c = b[-1][4]
+        # kırıldı mı: ana çizginin 0,5 ATR ötesinde kapanış (yükselen kanalda altında)
+        kir = (c < line_now - 0.5 * a) if yon > 0 else (c > line_now + 0.5 * a)
+        if any((x[4] < f(j) - 1.5 * a) if yon > 0 else (x[4] > f(j) + 1.5 * a) for j, x in enumerate(b[i0:-3], i0)):
+            continue                                   # çizgi daha önce sertçe delinmiş: geçerli değil
+        d = {"ad": ad, "yon": yon,
+             "ana": [[b[i0][0], round(f(i0), 4)], [b[last_i][0], round(line_now, 4)]],
+             "karsi": [[b[i0][0], round(f(i0) + off, 4)], [b[last_i][0], round(other_now, 4)]],
+             "ana_now": round(line_now, 4), "karsi_now": round(other_now, 4), "kirildi": kir,
+             "alt_now": round(min(line_now, other_now), 4), "ust_now": round(max(line_now, other_now), 4)}
+        if best is None or span > best[0]:
+            best = (span, d)
+    return best[1] if best else None
+
+
+# ----------------------------------------------------------------- piyasa yapısı
+def yapi(b, piv, a):
+    """HH/HL (yükseliş) · LH/LL (düşüş) dizisi ve son yapı kırılımı."""
+    if len(piv) < 4:
+        return {"trend": "belirsiz", "etiket": [], "kirilim": None}
+    et = []
+    lastH = lastL = None
+    for i, p, k in piv:
+        if k == "H":
+            lab = "HH" if lastH is not None and p > lastH else ("LH" if lastH is not None else "H")
+            lastH = p
+        else:
+            lab = "HL" if lastL is not None and p > lastL else ("LL" if lastL is not None else "L")
+            lastL = p
+        et.append([b[i][0], round(p, 4), lab, i])
+    son = [e[2] for e in et[-4:]]
+    up = sum(1 for x in son if x in ("HH", "HL"))
+    dn = sum(1 for x in son if x in ("LH", "LL"))
+    trend = "yükseliş" if up >= 3 else ("düşüş" if dn >= 3 else "karışık")
+    # yapı kırılımı: son tepe/dip pivotundan sonra kapanışla geçildi mi
+    kir = None
+    hs = [e for e in et if e[2] in ("HH", "LH", "H")]
+    ls_ = [e for e in et if e[2] in ("HL", "LL", "L")]
+    n = len(b)
+    if hs:
+        h = hs[-1]
+        j = next((j for j in range(h[3] + 1, n) if b[j][4] > h[1]), None)
+        if j is not None and n - 1 - j <= 24:
+            kir = {"yon": 1, "p": h[1], "t": b[j][0], "t0": h[0],
+                   "tip": "CHoCH" if trend == "düşüş" or h[2] == "LH" else "BOS"}
+    if ls_:
+        l = ls_[-1]
+        j = next((j for j in range(l[3] + 1, n) if b[j][4] < l[1]), None)
+        if j is not None and n - 1 - j <= 24 and (kir is None or b[j][0] > kir["t"]):
+            kir = {"yon": -1, "p": l[1], "t": b[j][0], "t0": l[0],
+                   "tip": "CHoCH" if trend == "yükseliş" or l[2] == "HL" else "BOS"}
+    return {"trend": trend, "etiket": [e[:3] for e in et[-8:]], "kirilim": kir,
+            "son_tepe": hs[-1][1] if hs else None, "son_dip": ls_[-1][1] if ls_ else None}
+
+
+# ----------------------------------------------------------------- Fibonacci
+FIB_ORAN = (0.382, 0.5, 0.618, 0.786)
+
+
+def fib(b, piv, a):
+    """Son sert hareket (en az 4 ATR) için geri çekilme seviyeleri."""
+    if len(piv) < 2 or a <= 0:
+        return None
+    last = b[-1][4]
+    for j in range(len(piv) - 1, 0, -1):
+        p0, p1 = piv[j - 1], piv[j]
+        size = abs(p1[1] - p0[1])
+        if size < 4 * a:
+            continue
+        yon = 1 if p1[2] == "H" else -1           # yukarı hareket: dipten tepeye
+        lo, hi = min(p0[1], p1[1]), max(p0[1], p1[1])
+        if not (lo - a <= last <= hi + a):
+            return None
+        lv = {str(r): round(hi - r * size if yon > 0 else lo + r * size, 4) for r in FIB_ORAN}
+        return {"yon": yon, "a": [b[p0[0]][0], round(p0[1], 4)], "b": [b[p1[0]][0], round(p1[1], 4)], "lv": lv,
+                "altin": [min(lv["0.5"], lv["0.618"]), max(lv["0.5"], lv["0.618"])]}
+    return None
+
+
+# ----------------------------------------------------------------- mum okuma
+def mum(o, h, l, c):
+    """Gövde ve fitil: 'güçlü yeşil' / 'güçlü kırmızı' / 'alt fitil reddi' / 'üst fitil reddi' / 'kararsız' / 'normal'."""
+    rng = h - l
+    if rng <= 0:
+        return "kararsız"
+    body = abs(c - o)
+    up = h - max(o, c)
+    dn = min(o, c) - l
+    if body <= rng * 0.15:
+        return "kararsız"
+    if dn >= 2 * body and dn >= rng * 0.5:
+        return "alt fitil reddi"
+    if up >= 2 * body and up >= rng * 0.5:
+        return "üst fitil reddi"
+    if body >= rng * 0.6:
+        return "güçlü yeşil" if c > o else "güçlü kırmızı"
+    return "normal"
+
+
 # ----------------------------------------------------------------- hepsi bir arada
 def analyze(b):
-    """b: 5 dk mumlar [(t,o,h,l,c,v)]. Dönüş: {"lv": [...], "pat": [...], "zones": [...], "atr": x}"""
+    """b: 5 dk mumlar [(t,o,h,l,c,v)]. Dönüş: lv, pat, zones, fvg, kanal, yapi, fib, atr"""
     if len(b) < 30:
-        return {"lv": [], "pat": [], "zones": [], "atr": 0}
+        return {"lv": [], "pat": [], "zones": [], "fvg": [], "kanal": None, "yapi": None, "fib": None, "atr": 0}
     a = atr(b)
     last = b[-1][4]
     piv = pivots(b, k=3, min_move=a * 1.0)
-    return {"lv": key_levels(b, piv, a), "pat": patterns(b, piv, a), "zones": demand_zones(b, last),
-            "atr": round(a, 4)}
+    out = {"lv": key_levels(b, piv, a), "pat": patterns(b, piv, a), "zones": demand_zones(b, last),
+           "atr": round(a, 4)}
+    for k, fn in (("fvg", lambda: fvg(b, a)), ("kanal", lambda: kanal(b, piv, a)),
+                  ("yapi", lambda: yapi(b, piv, a)), ("fib", lambda: fib(b, piv, a))):
+        try:
+            out[k] = fn()
+        except Exception:
+            out[k] = None
+    return out
 
 
 def to5m(rows):

@@ -37,7 +37,8 @@ FEAT_AD = {"volr": "Hacim katı", "vwap": "VWAP", "trend": "Kısa trend", "spy":
            "tod": "Zaman", "fiyat": "Fiyat", "tip": "Hisse tipi", "haber": "Haber", "obv": "OBV hacim akışı",
            "ai": "Yapay zeka haber puanı", "sec": "SEC bildirimi", "formasyon": "Formasyon",
            "talep": "Alıcı bölgesi",
-           "bilanco": "Bilanço", "hava": "Piyasa havası"}
+           "bilanco": "Bilanço", "hava": "Piyasa havası", "yapi": "Piyasa yapısı", "kanal": "Kanal",
+           "fvg": "FVG boşluğu", "fib": "Fibonacci", "mum": "Sinyal mumu", "ema50": "EMA 20/50"}
 
 
 def _shr(n, s):

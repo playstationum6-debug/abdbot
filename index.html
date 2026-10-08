@@ -345,7 +345,7 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
   </div>
   <div class="warn" id="warn"></div>
   <div class="cwrap" id="cwrap">
-    <div class="tools" id="tools"><button class="chip3" data-k="line">Çizgi</button><button class="chip3" data-k="sr">Destek/Direnç</button><button class="chip3" data-k="fx">Formasyon</button><button class="chip3" data-k="zn">Alıcı bölgesi</button><button class="chip3" data-k="rsi">RSI</button><button class="chip3" data-k="macd">MACD</button><button class="chip3" data-k="vp">Hacim profili</button><button class="chip3" data-k="vol">Hacim ort.</button><button class="chip3" data-k="vwap">VWAP</button><button class="chip3" data-k="ema">EMA 9/21</button><button class="chip3" data-k="kl">Gün seviyeleri</button><button class="chip3" data-k="mk">Sinyaller</button><button class="chip3 fsb" data-k="fs">Tam ekran</button></div>
+    <div class="tools" id="tools"><button class="chip3" data-k="line">Çizgi</button><button class="chip3" data-k="sr">Destek/Direnç</button><button class="chip3" data-k="fx">Formasyon</button><button class="chip3" data-k="zn">Alıcı bölgesi</button><button class="chip3" data-k="kn">Kanal</button><button class="chip3" data-k="fvg">FVG</button><button class="chip3" data-k="yp">Yapı</button><button class="chip3" data-k="fib">Fibonacci</button><button class="chip3" data-k="rsi">RSI</button><button class="chip3" data-k="macd">MACD</button><button class="chip3" data-k="vp">Hacim profili</button><button class="chip3" data-k="vol">Hacim ort.</button><button class="chip3" data-k="vwap">VWAP</button><button class="chip3" data-k="ema">EMA 9/21</button><button class="chip3" data-k="e50">EMA 20/50</button><button class="chip3" data-k="kl">Gün seviyeleri</button><button class="chip3" data-k="mk">Sinyaller</button><button class="chip3 fsb" data-k="fs">Tam ekran</button></div>
     <div class="ohlc" id="ohlc"></div>
     <div class="cload" id="cload">Günlük veri yükleniyor…</div>
     <div id="chart"><canvas id="vpc"></canvas></div>
@@ -462,6 +462,9 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
     <div class="fld"><label>İşlem başı en fazla ($)<small>Küçük tutarsan aynı anda daha çok işlem açılır</small></label><input type="number" inputmode="decimal" data-k="notional"></div>
     <div class="fld"><label>İşlem başı en fazla risk ($)<small>Stop olursa kaybedilecek tutar</small></label><input type="number" inputmode="decimal" data-k="risk_usd"></div>
     <div class="fld"><label>En fazla açık işlem</label><input type="number" inputmode="numeric" data-k="max_open"></div>
+    <div class="fld"><label>Yarım kapat<small>Kâr belirlenen R'ye gelince pozisyonun yarısını sat, kalan için stop girişe</small></label><button class="tg" data-k="yarim_kapat"></button></div>
+    <div class="fld"><label>Yarım kapat seviyesi (R)<small>Örn. 1 = risk kadar kâr gelince</small></label><input type="number" inputmode="decimal" step="0.1" data-k="yarim_r"></div>
+    <div class="fld"><label>Kalan kısmın hedefi (R)<small>Yarım kapattıktan sonra; örn. 3 = 3R hedef</small></label><input type="number" inputmode="decimal" step="0.5" data-k="kalan_r"></div>
     <div class="fld"><label>Aynı sektörde en fazla işlem<small>Örn. 2: üç yarı iletken hissesine birden girmez. 0 = sınır yok</small></label><input type="number" inputmode="numeric" data-k="sektor_max"></div>
     <div class="fld"><label>Günlük zarar limiti ($)<small>Dolunca bot o gün yeni işlem açmaz</small></label><input type="number" inputmode="decimal" data-k="daily_loss"></div>
     <div class="fld"><label>Güven eşiği, normal seans</label><input type="number" inputmode="numeric" data-k="min_conf"></div>
@@ -544,8 +547,8 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
 <script>
 const TR_OFF=3*3600;
 const SES_TR={pre:'Piyasa öncesi',regular:'Normal seans',post:'Piyasa sonrası',closed:'Kapalı'};
-const SETUP={formasyon:'Formasyon kırılımı',talep:'Alıcı bölgesinden dönüş',hizli:'Haberli hızlı kırılım',orb:'Açılış aralığı kırılımı',vwap:'VWAP geri alma',hacim:'Hacimli seviye kırılımı',trend:'Trend geri çekilme',gap:'Boşluk devamı',uz_seviye:'Seviye kırılımı',uz_kirilim:'Seans aralığı kırılımı',uz_vwap:'Seans VWAP geri alma',kosu:'Haberli momentum kırılımı',geri:'Momentum ilk geri çekilme',itki:'Hacimli itki (scalp)',vwap_sek:'VWAP sekmesi (scalp)'};
-const SETUP_K={formasyon:'Formasyon',talep:'Talep',hizli:'Hızlı',orb:'ORB',vwap:'VWAP',hacim:'Hacim',trend:'Trend',gap:'Boşluk',uz_seviye:'Seviye',uz_kirilim:'Aralık',uz_vwap:'sVWAP',kosu:'Koşu',geri:'Geri',itki:'İtki',vwap_sek:'Sekme'};
+const SETUP={formasyon:'Formasyon kırılımı',talep:'Alıcı bölgesinden dönüş',fvg:'FVG dönüşü',kanal:'Kanal alt bandından dönüş',yapi:'Yapı kırılımı (BOS)',fib:'Fibonacci geri çekilme dönüşü',hizli:'Haberli hızlı kırılım',orb:'Açılış aralığı kırılımı',vwap:'VWAP geri alma',hacim:'Hacimli seviye kırılımı',trend:'Trend geri çekilme',gap:'Boşluk devamı',uz_seviye:'Seviye kırılımı',uz_kirilim:'Seans aralığı kırılımı',uz_vwap:'Seans VWAP geri alma',kosu:'Haberli momentum kırılımı',geri:'Momentum ilk geri çekilme',itki:'Hacimli itki (scalp)',vwap_sek:'VWAP sekmesi (scalp)'};
+const SETUP_K={formasyon:'Formasyon',talep:'Talep',fvg:'FVG',kanal:'Kanal',yapi:'Yapı',fib:'Fibo',hizli:'Hızlı',orb:'ORB',vwap:'VWAP',hacim:'Hacim',trend:'Trend',gap:'Boşluk',uz_seviye:'Seviye',uz_kirilim:'Aralık',uz_vwap:'sVWAP',kosu:'Koşu',geri:'Geri',itki:'İtki',vwap_sek:'Sekme'};
 const SES_K={pre:'Öncesi',regular:'Normal',post:'Sonrası'};
 const ST_TR={bekliyor:'Emir bekliyor','açık':'Açık',hedef:'Hedef ✓',stop:'Stop ✗','süre':'Süre doldu','dolmadı':'Dolmadı'};
 const BST_TR={emir:'Emir gönderildi','açık':'Açık','çıkış':'Çıkış emri','kapandı':'Kapandı',iptal:'İptal'};
@@ -561,7 +564,7 @@ let cur=QS||ls('sym')||'SPY',tf=String(ls('tf')||'1'),sortKey=ls('sort')||'hare'
 let sigList=[],sigStats=[],mine=[],learn=null,sigFilter=ls('sigf')||'hepsi',sigShow=15,knownIds=null,sigLines=[],openIds=new Set();
 let botD=null,knownJ=null,runRows=[],runDrop=[],runPats=[],runStatus='',tab=ls('v2')?(ls('tab')||'akis'):'akis';ls('v2','1');
 let LV={lv:[],sup:null,res:null},lvLines=[],srLines=[],vpLines=[],srKey='',vpKey='',VP=null,daily={};
-let opt={sr:1,vp:1,vol:1,vwap:1,ema:0,kl:0,mk:1,fx:1,zn:1,rsi:0,macd:0,line:0};
+let opt={sr:1,vp:1,vol:1,vwap:1,ema:0,kl:0,mk:1,fx:1,zn:1,rsi:0,macd:0,line:0,kn:1,fvg:1,yp:0,fib:0,e50:0};
 try{Object.assign(opt,JSON.parse(ls('opt2')||'{}'))}catch(e){}
 if(!['1','5','15','D'].includes(tf))tf='1';
 const isD=()=>tf==='D';
@@ -603,6 +606,8 @@ const vma=chart.addLineSeries({color:C.wa,lineWidth:1,priceScaleId:'v',priceLine
 const vw=chart.addLineSeries({color:'#fb923c',lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
 const e9=chart.addLineSeries({color:'#38bdf8',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
 const e21=chart.addLineSeries({color:'#a78bfa',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+const e20=chart.addLineSeries({color:'#facc15',lineWidth:1.5,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+const e50=chart.addLineSeries({color:'#f472b6',lineWidth:1.5,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
 const rsiS=chart.addLineSeries({color:'#b9afff',lineWidth:1.5,priceScaleId:'osc1',priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:false,priceFormat:{type:'price',precision:0,minMove:1}});
 rsiS.createPriceLine({price:70,color:'rgba(255,107,107,.45)',lineWidth:1,lineStyle:2,axisLabelVisible:false,title:''});
 rsiS.createPriceLine({price:30,color:'rgba(61,220,151,.45)',lineWidth:1,lineStyle:2,axisLabelVisible:false,title:''});
@@ -654,6 +659,7 @@ function drawInd(a,ma){vw.setData(opt.vwap?vwapData():[]);oscLayout();
   rsiS.setData(opt.rsi?rsiData(a):[]);
   if(opt.macd){const m=macdData(a);macdL.setData(m.L);macdSg.setData(m.S);macdH.setData(m.H)}else{macdL.setData([]);macdSg.setData([]);macdH.setData([])}
   if(opt.ema){e9.setData(emaData(a,9));e21.setData(emaData(a,21))}else{e9.setData([]);e21.setData([])}
+  if(opt.e50){e20.setData(emaData(a,20));e50.setData(emaData(a,50))}else{e20.setData([]);e50.setData([])}
   vma.setData(opt.vol?a.map((x,i)=>ma[i]==null?{time:TT(x[0])}:{time:TT(x[0]),value:ma[i]}):[])}
 try{chart.subscribeCrosshairMove(p=>{const o=$('ohlc');const d=p&&p.seriesData?p.seriesData.get(cs):null;
   if(!d||!p.time){o.style.display='none';return}const v=p.seriesData.get(vs),chg=d.open?((d.close/d.open-1)*100):0;
@@ -691,10 +697,29 @@ function drawSR(a){const sv=(!isD()&&LV.fx&&LV.fx.lv&&LV.fx.lv.length)?LV.fx.lv:
 // formasyon çizimi: dönüş noktalarını birleştiren çizgi, boyun çizgisi (sarı kesikli), hedef fiyat
 const patS=[],patPL=[];let patKey='';
 function lineData(pts){const m=new Map();for(const[t,p]of pts){const tt=bk(t);m.set(tt,{time:tt,value:p})}return[...m.values()].sort((x,y)=>x.time-y.time)}
-function drawPat(){const P=(opt.fx&&!isD()&&LV.fx)?(LV.fx.pat||[]):[];
-  const key=tf+cur+JSON.stringify(P.map(p=>[p.ad,p.durum,p.neck_now,p.t1,p.hedef]));if(key===patKey)return;patKey=key;
+function drawPat(){const P=(opt.fx&&!isD()&&LV.fx)?(LV.fx.pat||[]):[];const F=(!isD()&&LV.fx)||{};
+  const KN=opt.kn?F.kanal:null,YP=opt.yp?F.yapi:null,FB=opt.fib?F.fib:null;
+  const key=tf+cur+JSON.stringify(P.map(p=>[p.ad,p.durum,p.neck_now,p.t1,p.hedef]))+JSON.stringify([KN,YP,FB]);if(key===patKey)return;patKey=key;
   for(const x of patS){try{chart.removeSeries(x)}catch(e){}}patS.length=0;for(const l of patPL){try{cs.removePriceLine(l)}catch(e){}}patPL.length=0;
   const first=raw.length?raw[0][0]:0;
+  const ln=(pts,o)=>{const d=lineData(pts.filter(x=>x[0]>=first));if(d.length<2)return null;
+    const x=chart.addLineSeries(Object.assign({lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},o));x.setData(d);patS.push(x);return x};
+  // trend çizgisi + kanal
+  if(KN){const col=KN.yon>0?'#a78bfa':'#f0abfc';ln(KN.ana,{color:col,lineWidth:2});ln(KN.karsi,{color:col,lineWidth:1,lineStyle:2});
+    const lastT=raw.length?raw[raw.length-1][0]:0;
+    const s=ln([[KN.ana[0][0],KN.ana[0][1]],[lastT,KN.ana_now]],{color:'rgba(0,0,0,0)',lineWidth:1});
+    if(s){try{s.setMarkers([{time:bk(lastT),position:KN.yon>0?'belowBar':'aboveBar',color:col,shape:'circle',text:KN.ad+(KN.kirildi?' (kırıldı)':'')}])}catch(e){}}}
+  // piyasa yapısı: HH/HL/LH/LL etiketleri + yapı kırılımı çizgisi
+  if(YP&&YP.etiket&&YP.etiket.length>1){const pts=YP.etiket.filter(x=>x[0]>=first);
+    const s=ln(pts.map(x=>[x[0],x[1]]),{color:'rgba(139,149,169,.55)',lineWidth:1});
+    if(s){const mk=[];const seen=new Set();for(const x of pts){const tt=bk(x[0]);if(seen.has(tt))continue;seen.add(tt);
+        const up=x[2]==='HH'||x[2]==='HL';mk.push({time:tt,position:x[2][x[2].length-1]==='H'?'aboveBar':'belowBar',color:up?C.up:(x[2]==='H'||x[2]==='L')?C.mut:C.dn,shape:'circle',size:0.4,text:x[2]})}
+      try{s.setMarkers(mk.sort((a,b)=>a.time-b.time))}catch(e){}}
+    const k=YP.kirilim;if(k&&k.t0>=first){const lastT=raw.length?raw[raw.length-1][0]:k.t;ln([[k.t0,k.p],[Math.max(k.t,lastT),k.p]],{color:k.yon>0?C.up:C.dn,lineWidth:1,lineStyle:2});
+      patPL.push(cs.createPriceLine({price:k.p,color:k.yon>0?C.up:C.dn,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:k.tip+(k.yon>0?' ▲':' ▼')}))}}
+  // Fibonacci geri çekilme seviyeleri
+  if(FB){ln([FB.a,FB.b],{color:'rgba(250,204,21,.5)',lineWidth:1,lineStyle:1});
+    for(const r of ['0.382','0.5','0.618','0.786'])patPL.push(cs.createPriceLine({price:FB.lv[r],color:r==='0.5'||r==='0.618'?'#facc15':'rgba(250,204,21,.45)',lineWidth:1,lineStyle:r==='0.618'?0:2,axisLabelVisible:r==='0.618',title:'Fib '+r}))}
   for(const p of P){const col=p.bull?C.up:C.dn;
     const mk=(pts,o)=>{const d=lineData(pts.filter(x=>x[0]>=first));if(d.length<2)return null;
       const x=chart.addLineSeries(Object.assign({color:col,lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},o));x.setData(d);patS.push(x);return x};
@@ -732,6 +757,14 @@ function drawVPCanvas(){if(vpRaf)return;vpRaf=requestAnimationFrame(()=>{vpRaf=0
     const top=Math.min(y0,y1),hh=Math.max(2,Math.abs(y1-y0));g.fillStyle='rgba(61,220,151,.10)';g.fillRect(0,top,w-psw,hh);
     g.strokeStyle='rgba(61,220,151,.5)';g.setLineDash([4,4]);g.beginPath();g.moveTo(0,top+.5);g.lineTo(w-psw,top+.5);g.moveTo(0,top+hh-.5);g.lineTo(w-psw,top+hh-.5);g.stroke();g.setLineDash([]);
     g.fillStyle='rgba(61,220,151,.9)';g.font='600 12px Inter, sans-serif';g.fillText(`Alıcı bölgesi · alımların %${z.alici}'i`,8,top+13)}
+  const FV=(opt.fvg&&!isD()&&LV.fx)?(LV.fx.fvg||[]):[];
+  for(const z of FV){const y0=cs.priceToCoordinate(z.hi),y1=cs.priceToCoordinate(z.lo);if(y0==null||y1==null)continue;
+    let x0=null;try{x0=chart.timeScale().timeToCoordinate(bk(z.t))}catch(e){}if(x0==null)x0=0;
+    const top=Math.min(y0,y1),hh=Math.max(2,Math.abs(y1-y0)),ww=Math.max(0,w-psw-x0);if(!ww)continue;
+    g.fillStyle=z.bull?'rgba(56,189,248,.13)':'rgba(244,114,182,.13)';g.fillRect(x0,top,ww,hh);
+    g.strokeStyle=z.bull?'rgba(56,189,248,.55)':'rgba(244,114,182,.55)';g.strokeRect(x0+.5,top+.5,ww-1,hh-1);
+    g.fillStyle=z.bull?'rgba(56,189,248,.95)':'rgba(244,114,182,.95)';g.font='600 11px Inter, sans-serif';
+    g.fillText((z.bull?'Boğa FVG':'Ayı FVG')+(z.test?' · test edildi':''),x0+4,top+(hh>14?12:-3))}
   if(!VP)return;
   const right=w-psw-2,maxW=Math.min(110,(w-psw)*.24);
   for(let i=0;i<VP.bins.length;i++){if(!VP.bins[i])continue;const y1=cs.priceToCoordinate(VP.lo+(i+1)*VP.st),y0=cs.priceToCoordinate(VP.lo+i*VP.st);
@@ -748,6 +781,11 @@ function volStats(a,ma){const n=a.length;if(n<3){$('vRv').textContent='—';$('v
   const ob=den?num/den:0,o=$('vObv');o.textContent=ob>=.25?'Alıcı ▲ '+Math.round(ob*100)+'%':ob<=-.25?'Satıcı ▼ '+Math.round(-ob*100)+'%':'Nötr';o.className=ob>=.25?'up':ob<=-.25?'dn':''}
 function legend(){const L=[];if(opt.sr)L.push(`<span><i style="color:${C.dn};border-top-style:solid"></i>Direnç</span><span><i style="color:${C.up};border-top-style:solid"></i>Destek</span>`);
   if(opt.fx&&!isD())L.push(`<span><i style="color:${C.wa}"></i>Formasyon boyun çizgisi</span>`);
+  if(opt.kn&&!isD())L.push('<span><i style="color:#a78bfa;border-top-style:solid"></i>Trend çizgisi / kanal</span>');
+  if(opt.fvg&&!isD())L.push('<span><i style="color:#38bdf8;border-top-style:solid"></i>FVG: dolmamış boşluk (mavi destek, pembe direnç)</span>');
+  if(opt.yp&&!isD())L.push('<span>HH/HL yükseliş, LH/LL düşüş · BOS yapı kırılımı · CHoCH karakter değişimi</span>');
+  if(opt.fib&&!isD())L.push('<span><i style="color:#facc15"></i>Fibonacci 0,5–0,618 altın bölge</span>');
+  if(opt.e50)L.push('<span><i style="color:#facc15;border-top-style:solid"></i>EMA 20</span><span><i style="color:#f472b6;border-top-style:solid"></i>EMA 50</span>');
   if(opt.rsi)L.push('<span><i style="color:#b9afff;border-top-style:solid"></i>RSI 14 (70 aşırı alım, 30 aşırı satım)</span>');
   if(opt.macd)L.push('<span><i style="color:#5cc8ff;border-top-style:solid"></i>MACD 12/26/9</span>');
   if(opt.vp)L.push(`<span><i style="color:${C.wa};border-top-style:solid"></i>POC</span>`);if(opt.vwap&&!isD())L.push(`<span><i style="color:#fb923c;border-top-style:solid"></i>VWAP</span>`);
@@ -1094,6 +1132,11 @@ function renderDusun(){const D=DSN[cur];if(!D){$('dsn').innerHTML='<div class="m
   for(const j of jr)ln(j.typ==='al'||j.typ==='dolum'?'up':j.typ==='atla'||j.typ==='hata'?'wa':'',`<b>${esc(JTR[j.typ]||j.typ)}:</b> ${esc(j.msg)}`,tTR(j.t));
   for(const p of (D.pat||[]).slice(0,2))ln(p.bull?'up':'dn',`${esc(p.ad)} ${esc(p.durum||'')}`,p.hedef?`boyun ${fp(p.neck_now)} → hedef ${fp(p.hedef)}`:'');
   const z=(D.zones||[])[0];if(z)ln('up',`Alıcı bölgesi ${fp(z.lo)}–${fp(z.hi)}`,'Fiyat buraya çekilip yeşil mumla dönerse bot alım arar.');
+  const Y=D.yapi;if(Y&&Y.trend&&Y.trend!=='belirsiz')ln(Y.trend==='yükseliş'?'up':Y.trend==='düşüş'?'dn':'',`Piyasa yapısı: ${esc(Y.trend)}`,
+    (Y.kirilim?`Son ${Y.kirilim.tip} ${Y.kirilim.yon>0?'yukarı':'aşağı'} @ ${fp(Y.kirilim.p)} · `:'')+(Y.son_tepe?`son tepe ${fp(Y.son_tepe)} kırılırsa yapı kırılımı alımı`:''));
+  const K=D.kanal;if(K)ln(K.yon>0?'up':'dn',`${esc(K.ad)}${K.kirildi?' (kırıldı)':''}`,`alt bant ${fp(K.alt_now)} · üst bant ${fp(K.ust_now)}`+(K.yon>0&&!K.kirildi?' · alt banda dokunup dönerse alım':''));
+  for(const f of (D.fvg||[]).slice(0,2))ln(f.bull?'up':'dn',`${f.bull?'Boğa':'Ayı'} FVG ${fp(f.lo)}–${fp(f.hi)}${f.test?' (test edildi)':''}`,f.bull?'Boşluğa inip üstünde kapanırsa FVG dönüşü alımı':'Üstteki dolmamış boşluk direnç olabilir');
+  const FB=D.fib;if(FB)ln('wa',`Fibonacci altın bölge ${fp(FB.altin[0])}–${fp(FB.altin[1])}`,FB.yon>0?'Yükselişin 0,5–0,618 geri çekilmesinde dönüş mumu gelirse alım':'Düşüşün geri çekilmesi');
   if(D.runner)ln('wa','<b>Koşan hisse listesinde</b>',D.runner.news?'Haberi var; kırılımda hızlı giriş açık.':'Hacimli hareket var.');
   if(D.bil)ln('wa',`Bilanço ${esc(D.bil)}`,'Bot bu hissede lotu yarıya indirir.');
   const ek=[];if(D.sek)ek.push(esc(D.sek));if(D.hava)ek.push('piyasa havası: '+esc(D.hava));if(ek.length)ln('',ek.join(' · '),'');
@@ -1185,6 +1228,7 @@ const AYK=['capital','notional','risk_usd','max_open','sektor_max','daily_loss',
 function renderAyar(){const c=(botD&&botD.cfg)||{};
   for(const i of $('ayf').querySelectorAll('input'))if(document.activeElement!==i&&!i.dataset.dirty)i.value=c[i.dataset.k]!=null?c[i.dataset.k]:'';
   $('ayf').querySelector('[data-k=yeni_islem]').classList.toggle('on',c.yeni_islem!==0);
+  $('ayf').querySelector('[data-k=yarim_kapat]').classList.toggle('on',c.yarim_kapat!==0);
   const P=status.push||{},pref=P.pref||{};
   for(const b of document.querySelectorAll('[data-p]'))b.classList.toggle('on',!!pref[b.dataset.p]);
   const G=status.tg||{};$('tgst').textContent=(G.ok?'Telegram bağlı: '+(G.st||''):'Telegram kapalı: '+(G.st||"Render'da TG_TOKEN ve TG_CHAT girilmemiş"))+(G.grafik?' · grafik: '+G.grafik:'')+(G.komut?' · komutlar: '+G.komut:'')+(G.alarm?' · '+G.alarm+' alarm':'');
@@ -1196,6 +1240,7 @@ $('ayf').addEventListener('input',e=>{if(e.target.dataset.k)e.target.dataset.dir
 $('ayf').addEventListener('click',e=>{const t=e.target.closest('.tg');if(t)t.classList.toggle('on')});
 $('aySave').onclick=async()=>{const d={};for(const i of $('ayf').querySelectorAll('input'))if(i.value!=='')d[i.dataset.k]=+i.value;
   d.yeni_islem=$('ayf').querySelector('[data-k=yeni_islem]').classList.contains('on')?1:0;
+  d.yarim_kapat=$('ayf').querySelector('[data-k=yarim_kapat]').classList.contains('on')?1:0;
   try{const r=await postJSON('/api/ayar',d);if(botD)botD.cfg=r.cfg;for(const i of $('ayf').querySelectorAll('input'))delete i.dataset.dirty;renderAyar();renderBot();toast('<b>Ayarlar kaydedildi</b><br><span class="meta">Yeni işlemlerden itibaren geçerli.</span>','info')}
   catch(e){toast('<b>Kaydedilemedi</b><br><span class="meta">'+esc(e.message)+'</span>','sat')}};
 for(const b of document.querySelectorAll('[data-p]'))b.addEventListener('click',async()=>{b.classList.toggle('on');

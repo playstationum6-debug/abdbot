@@ -215,6 +215,47 @@ def ciz(bars, fx=None, title="", sub="", lines=None, pat=None, zone=None, max_ba
         d.rectangle([x0, Y(Z["hi"]), x1, Y(Z["lo"])], fill=(61, 220, 151, 34), outline=(61, 220, 151, 90))
         d.text((x0 + 8, Y(Z["hi"]) + 3), _t(f"Alıcı bölgesi {fp(Z['lo'])}–{fp(Z['hi'])}"), fill=UP, font=f12)
 
+    # FVG boşlukları (dolmamış): oluştuğu mumdan sağa kutu
+    for z in (fx.get("fvg") or [])[:3]:
+        if not (lo <= z["lo"] <= hi or lo <= z["hi"] <= hi):
+            continue
+        xs = Xt(z["t"]) if z["t"] >= ts[0] else x0
+        col = (56, 189, 248) if z["bull"] else (244, 114, 182)
+        d.rectangle([xs, Y(min(hi, z["hi"])), x1, Y(max(lo, z["lo"]))], fill=col + (30,), outline=col + (120,))
+        d.text((xs + 4, Y(min(hi, z["hi"])) + 2), _t("Boğa FVG" if z["bull"] else "Ayı FVG"), fill=col, font=f12)
+    # Fibonacci altın bölge (0,5–0,618)
+    FB = fx.get("fib")
+    if FB and lo <= FB["altin"][0] <= hi:
+        d.rectangle([x0, Y(min(hi, FB["altin"][1])), x1, Y(FB["altin"][0])], fill=(250, 204, 21, 22))
+        d.text((x1 - 190, Y(FB["altin"][0]) - 18), _t("Fibo 0,5–0,618"), fill=(250, 204, 21), font=f12)
+    # trend çizgisi / kanal
+    KN = fx.get("kanal")
+    if KN:
+        col = (167, 139, 250)
+        (ta, pa), (tb, pb) = KN["ana"]
+        (tc, pc_), (td, pd) = KN["karsi"]
+        xa = Xt(ta) if ta >= ts[0] else x0
+        if ta < ts[0] and tb > ta:      # pencerenin solunda başlıyorsa çizgiyi pencere başına kaydır
+            pa = pa + (pb - pa) * (ts[0] - ta) / (tb - ta)
+            pc_ = pc_ + (pd - pc_) * (ts[0] - tc) / (td - tc) if td > tc else pc_
+        def clip(xa_, ya, xb_, yb):
+            """Çizgiyi fiyat alanının içinde kalan parçasıyla sınırla."""
+            pts = []
+            for t_ in [i / 40 for i in range(41)]:
+                yy = ya + (yb - ya) * t_
+                if lo <= yy <= hi:
+                    pts.append((xa_ + (xb_ - xa_) * t_, Y(yy)))
+            return (pts[0], pts[-1]) if len(pts) >= 2 else None
+        seg = clip(xa, pa, x1, pb)
+        if seg:
+            d.line(list(seg), fill=col, width=3)
+        seg2 = clip(xa, pc_, x1, pd)
+        if seg2:
+            _dash(d, seg2[0][0], seg2[0][1], seg2[1][0], seg2[1][1], col, w=2)
+        if seg:
+            label(max(x0 + 8, seg[1][0] - 200), seg[1][1] + (8 if KN["yon"] > 0 else -26),
+                  KN["ad"] + (" (kırıldı)" if KN.get("kirildi") else ""), col)
+
     # destek / direnç (en yakın 2'şer)
     last = B[-1][4]
     lv = fx.get("lv") or []
