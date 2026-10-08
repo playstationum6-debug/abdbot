@@ -31,7 +31,10 @@ import pandas as pd
 import websockets
 import yfinance as yf
 
+import bot as botmod
+import ogrenme
 import sinyal
+import tarayici
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
@@ -61,6 +64,19 @@ GH_TOKEN = os.getenv("GH_TOKEN", "")
 GH_REPO = os.getenv("GH_REPO", "")            # ör. kullaniciadi/abdbot-veri
 GH_PATH = os.getenv("GH_PATH", "durum/state.json")
 SIG_DIR = "sinyaller"
+BOT_DIR = "bot"
+
+# Bot ayarları (Render → Environment'tan değiştirilebilir)
+BOT_CFG = {
+    "enabled": os.getenv("BOT_ENABLED", "1") == "1",
+    "notional": float(os.getenv("BOT_NOTIONAL", "250")),     # işlem başı pozisyon büyüklüğü ($)
+    "max_open": int(os.getenv("BOT_MAX_OPEN", "5")),         # aynı anda en fazla açık pozisyon
+    "daily_loss": float(os.getenv("BOT_DAILY_LOSS", "50")),  # günlük zarar limiti ($)
+    "min_conf": int(os.getenv("BOT_MIN_CONF", "60")),        # botun alacağı en düşük güven puanı
+}
+RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
+RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
+RUN_MAX = int(os.getenv("RUN_MAX", "12"))                    # aynı anda izlenecek en fazla koşan hisse
 BACKUP_SEC = int(os.getenv("BACKUP_SEC", "600"))
 
 # İlk 30'u IEX ile anlık izlenir (ücretsiz planın sembol sınırı 30).
@@ -164,8 +180,8 @@ class Backup:
 
     async def restore(self):
         if not self.enabled:
-            return []
-        sigs = []
+            return [], []
+        sigs, botdays = [], []
         try:
             async with httpx.AsyncClient(timeout=30) as c:
                 d = await self._get(c, GH_PATH)
@@ -179,18 +195,26 @@ class Backup:
                         part = await self._get(c, p)
                         if isinstance(part, list):
                             sigs.extend(part)
-            self.status = f"geri yüklendi ({len(sigs)} sinyal)"
+                r = await c.get(self._url(BOT_DIR), headers=self._headers())
+                if r.status_code == 200:
+                    files = sorted(x["path"] for x in r.json() if x.get("type") == "file" and x["path"].endswith(".json"))
+                    for p in files[-120:]:
+                        part = await self._get(c, p)
+                        if isinstance(part, dict):
+                            botdays.append(part)
+            self.status = f"geri yüklendi ({len(sigs)} sinyal, {sum(len(b.get('pos', [])) for b in botdays)} bot işlemi)"
             self.last_ok = time.time()
         except Exception as e:
             self.status = f"okuma hatası: {str(e)[:80]}"
             log.warning("GitHub yedeği okunamadı: %s", e)
-        return sigs
+        return sigs, botdays
 
-    async def save(self, engine=None):
+    async def save(self, engine=None, bot=None):
         if not self.enabled:
             return
         days = set(engine.dirty_days) if engine else set()
-        if not self.dirty and not days:
+        bdays = set(bot.dirty_days) if bot else set()
+        if not self.dirty and not days and not bdays:
             return
         try:
             async with httpx.AsyncClient(timeout=30) as c:
@@ -200,6 +224,9 @@ class Backup:
                 for day in sorted(days):
                     await self._put(c, f"{SIG_DIR}/{day}.json", engine.day_list(day))
                     engine.dirty_days.discard(day)
+                for day in sorted(bdays):
+                    await self._put(c, f"{BOT_DIR}/{day}.json", bot.day_data(day))
+                    bot.dirty_days.discard(day)
             self.last_ok = time.time()
             self.status = "tamam"
         except Exception as e:
@@ -421,6 +448,21 @@ class Store:
 
 store = Store()
 engine = sinyal.Engine(store, bar_info, cal, ET)
+learner = ogrenme.Learner()
+engine.learner = learner
+scanner = tarayici.Scanner(ALPACA_KEY, ALPACA_SECRET, SYMBOLS, min_price=RUN_MIN_PRICE, min_pct=RUN_MIN_PCT,
+                           max_runners=RUN_MAX, log=log)
+bot = botmod.Bot(engine, learner, store, cal, ET, ALPACA_KEY, ALPACA_SECRET, log, BOT_CFG)
+
+
+def all_syms():
+    return SYMBOLS + [s for s in scanner.runners if s not in SYMBOLS]
+
+
+def ensure_sym(sym):
+    store.bars.setdefault(sym, {})
+    store.ver.setdefault(sym, 0)
+    store.snap_ver.setdefault(sym, 0)
 
 
 # ----------------------------------------------------------------- özetler
@@ -529,6 +571,9 @@ def status_payload():
         "bk": backup.status,
         "bkAge": int(now - backup.last_ok) if backup.last_ok else None,
         "rs7": backup.starts_last_7d() if backup.enabled else None,
+        "bot": bot.status,
+        "scan": scanner.status,
+        "nRun": len(scanner.runners),
         "sigN": len(engine.signals),
         "sigOpen": engine.open_count(),
         "mkt": engine.mkt.get("dir"),
@@ -598,6 +643,24 @@ async def yahoo_loop():
             first = False
             if len(data) < len(SYMBOLS) * 0.8:
                 state.yahoo_err = f"{len(SYMBOLS) - len(data)} sembol boş geldi"
+            # koşan küçük hisseler (tarayıcıdan)
+            runs = [r for r in scanner.runners if r not in SYMBOLS]
+            if runs:
+                for r in runs:
+                    ensure_sym(r)
+                new = [r for r in runs if not store.bars.get(r)]
+                old = [r for r in runs if store.bars.get(r)]
+                for group, per in ((new, "5d"), (old, "1d")):
+                    if not group:
+                        continue
+                    try:
+                        rd = await asyncio.to_thread(yahoo_fetch, group, per)
+                        for sym, bars in rd.items():
+                            if store.merge_yahoo(sym, bars) and per == "5d":
+                                store.snap_ver[sym] += 1
+                    except Exception as e:
+                        log.warning("Yahoo (koşan hisseler) hatası: %s", e)
+                store.flush()
             log.debug("Yahoo: %d sembol değişti", n)
         except Exception as e:
             state.yahoo_err = str(e)[:200]
@@ -676,6 +739,8 @@ class Client:
         self.snap = -1
         self.wl = {}
         self.sigv = -1
+        self.botv = -1
+        self.scanv = -1
         self.lock = asyncio.Lock()
 
     async def send(self, obj):
@@ -698,14 +763,27 @@ async def send_snap(cl):
 
 async def send_sig(cl):
     cl.sigv = engine.ver
-    await cl.send({"type": "sig", "list": engine.recent(40), "stats": engine.stats(),
-                   "mine": engine.for_symbol(cl.sym, time.time() - 4 * 86400) if cl.sym else []})
+    await cl.send({"type": "sig", "list": engine.recent(60), "stats": engine.stats(),
+                   "mine": engine.for_symbol(cl.sym, time.time() - 4 * 86400) if cl.sym else [],
+                   "learn": {"ins": learner.insights(), "groups": learner.group_rows(), "cmp": compare_rows()}})
+
+
+async def send_bot(cl):
+    cl.botv = bot.ver
+    await cl.send({"type": "bot", "d": bot.summary()})
+
+
+async def send_scan(cl):
+    cl.scanv = scanner.ver
+    await cl.send({"type": "scan", "rows": scanner.rows(), "status": scanner.status})
 
 
 async def send_wl(cl, full=False):
     rows = {}
-    for s in SYMBOLS:
+    for s in all_syms():
         r = list_row(s)
+        if r and s in scanner.runners:
+            r["run"] = 1
         if r and (full or cl.wl.get(s) != r):
             rows[s] = r
             cl.wl[s] = r
@@ -732,6 +810,10 @@ async def broadcaster():
                                        "i": summary(sym)})
                 if cl.sigv != engine.ver:
                     await send_sig(cl)
+                if cl.botv != bot.ver or (tick % 3 == 0 and bot.open_positions()):
+                    await send_bot(cl)
+                if cl.scanv != scanner.ver:
+                    await send_scan(cl)
                 if tick % 3 == 0:
                     await send_wl(cl)
             except Exception:
@@ -740,11 +822,17 @@ async def broadcaster():
 
 async def signal_loop():
     """Her 5 sn: yeni kapanan mumlarda sinyal ara, açık sinyalleri gölgede takip et."""
-    order = (["SPY"] if "SPY" in SYMBOLS else []) + [s for s in SYMBOLS if s != "SPY"]
     while True:
         await asyncio.sleep(5)
         now = time.time()
         cu = state.yahoo_t0
+        engine.runners = scanner.runners
+        try:
+            learner.rebuild(engine.signals)
+        except Exception as e:
+            log.warning("Öğrenme hatası: %s", e)
+        syms = all_syms()
+        order = (["SPY"] if "SPY" in syms else []) + [s for s in syms if s != "SPY"]
         for sym in order:
             key = (store.ver.get(sym, 0), store.snap_ver.get(sym, 0), int(cu))
             if engine.seen.get(sym) == key:
@@ -756,12 +844,51 @@ async def signal_loop():
                 for sig in engine.signals[before:]:
                     log.info("SİNYAL %s %s %s güven=%s giriş=%s stop=%s hedef=%s", sig["sym"],
                              "AL" if sig["dir"] > 0 else "SAT", sig["setup"], sig["conf"], sig["e"], sig["s"], sig["h"])
+                    bot.consider(sig, now)
             except Exception as e:
                 log.warning("Sinyal hatası %s: %s", sym, e)
         try:
             engine.tick(now)
         except Exception as e:
             log.warning("Sinyal süre kontrolü hatası: %s", e)
+
+
+async def scan_loop():
+    while True:
+        ses = cal.session(time.time())
+        if ses != "closed" or not scanner.last_ok:
+            await scanner.scan(ET)
+            engine.runners = scanner.runners
+            for r in scanner.runners:
+                ensure_sym(r)
+        await asyncio.sleep(60 if ses != "closed" else 600)
+
+
+async def bot_loop():
+    while True:
+        await asyncio.sleep(2)
+        try:
+            await bot.manage()
+        except Exception as e:
+            log.warning("Bot döngüsü hatası: %s", e)
+
+
+def compare_rows():
+    """Tüm sinyaller vs botun seçtikleri vs botun gerçek işlemleri."""
+    def pack(k, rs, extra=None):
+        n = len(rs)
+        row = {"k": k, "n": n, "wr": round(100 * sum(1 for r in rs if r > 0) / n, 1) if n else None,
+               "avg": round(sum(rs) / n, 3) if n else None, "tot": round(sum(rs), 2)}
+        if extra:
+            row.update(extra)
+        return row
+    closed = [s for s in engine.signals if s.get("r") is not None and s["st"] in ("hedef", "stop", "süre")]
+    chosen = {p["sig"] for p in bot.positions if p["st"] != "iptal"}
+    real = [p for p in bot.positions if p["st"] == "kapandı" and p.get("r") is not None]
+    return [pack("Tüm sinyaller (gölge)", [s["r"] for s in closed]),
+            pack("Botun seçtikleri (gölge)", [s["r"] for s in closed if s["id"] in chosen]),
+            pack("Botun gerçek işlemleri (Alpaca)", [p["r"] for p in real],
+                 {"usd": round(sum(p["pnl"] for p in real), 2)})]
 
 
 async def housekeeping():
@@ -775,7 +902,7 @@ async def housekeeping():
                 await cal.refresh()
                 store.prune()
             if backup.enabled and (n * 15) % BACKUP_SEC < 15:
-                await backup.save(engine)
+                await backup.save(engine, bot)
         except Exception as e:
             log.warning("Bakım hatası: %s", e)
 
@@ -787,15 +914,23 @@ async def lifespan(app):
         log.warning("SITE_PASSWORD boş: site şifresiz açık!")
     store.load()
     await cal.refresh(force=True)
-    engine.load(await backup.restore())
+    sigs, botdays = await backup.restore()
+    engine.load(sigs)
+    bot.load(botdays)
+    learner.rebuild(engine.signals)
     backup.record_start()
-    await backup.save(engine)
-    tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping)]
+    await backup.save(engine, bot)
+    try:
+        await bot.reconcile()
+    except Exception as e:
+        log.warning("Bot senkron hatası: %s", e)
+    tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
+                                                  scan_loop, bot_loop)]
     yield
     for t in tasks:
         t.cancel()
     store.flush()
-    await backup.save(engine)
+    await backup.save(engine, bot)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -904,6 +1039,8 @@ async def ws_endpoint(ws: WebSocket):
         await cl.send({"type": "hello", "symbols": SYMBOLS, "iex": IEX_SYMBOLS})
         await send_wl(cl, full=True)
         await send_sig(cl)
+        await send_bot(cl)
+        await send_scan(cl)
         while True:
             msg = json.loads(await ws.receive_text())
             sym = str(msg.get("sub", "")).upper()

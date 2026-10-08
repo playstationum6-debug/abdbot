@@ -23,6 +23,8 @@ SETUP_AD = {
     "trend": "Trend geri çekilme",
     "gap": "Boşluk devamı",
     "uz_seviye": "Seviye kırılımı (uzatılmış)",
+    "kosu": "Haberli momentum kırılımı",
+    "geri": "Momentum ilk geri çekilme",
 }
 SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa sonrası"}
 SES_NAME = {0: "pre", 1: "regular", 2: "post", 3: "closed"}
@@ -32,6 +34,13 @@ SLIP = {"regular": 0.0003, "pre": 0.0010, "post": 0.0010}  # tek yön kayma (%0,
 FEE = 0.00005                                              # tek yön masraf payı (SEC/FINRA ücretleri vb.)
 
 R_MULT = 2.0             # hedef = 2R
+R_RUNNER = 3.0           # küçük/haberli koşan hisselerde hedef = 3R
+
+# Haberle koşan küçük hisseler: kayma çok daha yüksek varsayılır
+SLIP_RUNNER = {"regular": 0.005, "pre": 0.008, "post": 0.008}
+RUN_MIN_MOVE = 10.0          # önceki kapanışa göre en az %10 yükselmiş olmalı
+RUN_MIN_SES_DV = 1_000_000   # bu seansta en az 1 mn $ işlem hacmi
+RUN_MIN_BAR_DV = 50_000      # sinyal mumunda en az 50 bin $ işlem
 COOLDOWN = 30 * 60       # aynı hisse + kurgu + yön için bekleme
 FILL_BARS = 3            # uzatılmış seansta limit emir en fazla 3 mum bekler
 FRESH_SEC = 300          # sadece son 5 dk içinde kapanan mumlar değerlendirilir
@@ -62,6 +71,14 @@ def kb(v):
     return f"{v / 1e6:.1f} mn" if v >= 1e6 else f"{v / 1e3:.0f} bin"
 
 
+def usd(v):
+    return f"{v / 1e6:.1f} mn $" if v >= 1e6 else f"{v / 1e3:.0f} bin $"
+
+
+def slip_of(sig):
+    return (SLIP_RUNNER if sig.get("runner") else SLIP).get(sig["ses"], 0.001)
+
+
 class Engine:
     def __init__(self, store, bar_info, cal, et):
         self.store = store
@@ -77,6 +94,8 @@ class Engine:
         self.ver = 0
         self.dirty_days = set()
         self.seen = {}             # sembol -> (ver, snap_ver)
+        self.runners = {}          # tarayıcının bulduğu koşan hisseler: sembol -> bilgi (yüzde, haber)
+        self.learner = None        # öğrenme modülü (güven ayarı + not)
 
     # ------------------------------------------------------------ yardımcılar
     def bounds(self, day):
@@ -184,6 +203,11 @@ class Engine:
         x["low5"] = min(bars[t][2] for t in tss[max(0, k - 4):k + 1])
         x["high5"] = max(bars[t][1] for t in tss[max(0, k - 4):k + 1])
         x["closes4"] = [bars[t][3] for t in tss[max(0, k - 4):k]]
+        x["ses_dv"] = sum(bars[t][4] * bars[t][3] for t in ses_today)
+        x["sh"] = max((bars[t][1] for t in ses_today if t < T), default=None)
+        x["sh2"] = max((bars[t][1] for t in ses_today if t < T - 60), default=None)
+        x["recent"] = [tuple(bars[t][:5]) for t in ses_today[-12:]]
+        x["mins"] = (T - b["open"]) / 60
         return x
 
     # ------------------------------------------------------------ puan / gerekçe
@@ -206,7 +230,7 @@ class Engine:
             s -= 7
             why.append("Kısa trend ters (EMA9/EMA21)")
         m = self.mkt.get("dir")
-        if sym not in ("SPY", "QQQ") and m is not None and x["ses"] == "regular":
+        if sym not in ("SPY", "QQQ") and sym not in self.runners and m is not None and x["ses"] == "regular":
             if m == d:
                 s += 5
                 why.append("SPY aynı yönde (piyasa destekliyor)")
@@ -220,6 +244,7 @@ class Engine:
         if opp and risk > 0:
             near = min(opp, key=lambda p: abs(p - c))
             room = abs(near - c) / risk
+            x["_room"] = room
             if room < 1:
                 s -= 10
                 why.append(f"Yakın {'direnç' if d > 0 else 'destek'} {f2(near)} ({room:.1f}R) — hedef zor")
@@ -346,6 +371,76 @@ class Engine:
             break
         return out
 
+    def _runner(self, sym, x):
+        """Haberle/yüksek hacimle koşan küçük hisseler — sadece alış yönü."""
+        out = []
+        info = self.runners.get(sym, {})
+        T, c, atr = x["T"], x["c"], x["atr"]
+        ref = x["pc"]
+        move = (c / ref - 1) * 100 if ref else float(info.get("pct") or 0)
+        if move < RUN_MIN_MOVE:
+            return out
+        dv_bar = x["v"] * c
+        if x["ses_dv"] < RUN_MIN_SES_DV or dv_bar < RUN_MIN_BAR_DV or x["active10"] < 7 or (x["h"] - x["l"]) > 4 * atr:
+            return out
+        ext = x["ses"] != "regular"
+        liq = f"Seans işlem hacmi {usd(x['ses_dv'])}, son mum {usd(dv_bar)}"
+
+        # 1) Tepe kırılımı (gün/seans tepesi), hacimli
+        if ext:
+            lvl = x["sh2"]
+            ok = bool(lvl) and x["prev_c"] > lvl and c > lvl and x["prev2_c"] <= lvl
+        else:
+            lvls = [p for p in (x["hod"], x["pmh"]) if p]
+            lvl = max(lvls) if lvls else None
+            ok = bool(lvl) and c > lvl and x["prev_c"] <= lvl and (x["vwap"] is None or c > x["vwap"])
+        if ok and x["volr"] >= 2 and self._ready(sym, "kosu", 1, T):
+            base_stop = (lvl - 0.5 * atr) if ext else (min(x["l"], lvl) - 0.3 * atr)
+            stop, risk = self._clamp(c, base_stop, 1, atr, 1.0, 3.0)
+            risk = max(risk, c * 0.01)
+            why = [f"Günün yükseleni: önceki kapanışa göre {move:+.0f}%",
+                   f"{'Seans' if ext else 'Gün'} tepesi ({f2(lvl)}) hacimle kırıldı{', 2 mum teyitli' if ext else ''}",
+                   f"Hacim ortalamanın {x['volr']:.1f} katı · {liq}"]
+            out.append(["kosu", 1, c, c - risk, risk, 55, why])
+
+        # 2) İlk geri çekilme: güçlü koşu → düşük hacimli geri çekilme → önceki mumun tepesi kırılıyor
+        rec = x["recent"]
+        if not out and len(rec) >= 8 and x["volr"] >= 1.5 and self._ready(sym, "geri", 1, T):
+            hist = rec[:-1]
+            pi = max(range(len(hist)), key=lambda i: hist[i][1])
+            pull = hist[pi + 1:]
+            if 2 <= len(pull) <= 6:
+                peak_h = hist[pi][1]
+                peak_v = max(b[4] for b in hist[max(0, pi - 2):pi + 1]) or 1
+                pull_low = min(b[2] for b in pull)
+                pull_v = sum(b[4] for b in pull) / len(pull)
+                start = hist[0][3]
+                run = peak_h / start - 1 if start else 0
+                depth = (peak_h - pull_low) / peak_h
+                support = (x["vwap"] is None or pull_low > x["vwap"]) and pull_low > x["ema21"] * 0.995
+                if run >= 0.04 and 0.005 <= depth <= 0.6 * run and pull_v < 0.7 * peak_v and support \
+                        and c > pull[-1][1] and c > x["o"]:
+                    stop, risk = self._clamp(c, pull_low - 0.1 * atr, 1, atr, 1.0, 3.0)
+                    risk = max(risk, c * 0.01)
+                    why = [f"Güçlü koşu (+{run * 100:.0f}%) sonrası düşük hacimli geri çekilme (−{depth * 100:.1f}%)",
+                           f"Geri çekilme bitti: önceki mumun tepesi ({f2(pull[-1][1])}) kırıldı",
+                           f"Hacim ortalamanın {x['volr']:.1f} katı · {liq}"]
+                    out.append(["geri", 1, c, c - risk, risk, 55, why])
+
+        news = info.get("news")
+        for o in out:
+            if news:
+                o[6].insert(0, f"Haber: {news.get('headline', '')[:100]}")
+                o[5] += 10
+            else:
+                o[6].append("Haber bulunamadı — hareketin sebebi belirsiz (risk yüksek)")
+                o[5] -= 10
+            if c < 1:
+                o[6].append("1 $ altı hisse: manipülasyon ve işlem durdurma riski çok yüksek")
+                o[5] -= 5
+            o[6].append("Küçük/koşan hisse: kayma yüksek varsayıldı" + (", limit emir ve yarım lot" if ext else ""))
+        return [tuple(o) for o in out]
+
     # ------------------------------------------------------------ ana döngü
     def process(self, sym, complete_until, now):
         bars = self.store.bars.get(sym) or {}
@@ -387,7 +482,10 @@ class Engine:
             return
         if sym == "SPY" and x["vwap"] and x["ses"] == "regular":
             self.mkt = {"dir": 1 if x["c"] > x["vwap"] else -1, "t": x["T"]}
-        cands = self._regular(sym, x) if x["ses"] == "regular" else self._extended(sym, x)
+        if sym in self.runners:
+            cands = self._runner(sym, x)
+        else:
+            cands = self._regular(sym, x) if x["ses"] == "regular" else self._extended(sym, x)
         best = {}   # aynı mum + aynı yön için tek sinyal: en yüksek güvenli kurgu
         for setup, d, entry, stop, risk, base, why in cands:
             conf = self._score(x, d, base, why, risk, sym)
@@ -398,16 +496,48 @@ class Engine:
         for setup, d, entry, stop, risk, conf, why in best.values():
             self._create(sym, x, setup, d, entry, stop, risk, conf, why)
 
+    def _features(self, sym, x, d):
+        """Öğrenme için sinyal anındaki koşullar (kovalara ayrılmış)."""
+        vr = x["volr"]
+        f = {"volr": "<2" if vr < 2 else "2-3" if vr < 3 else "3-5" if vr < 5 else "5+"}
+        f["vwap"] = "yok" if not x["vwap"] else ("lehte" if (x["c"] - x["vwap"]) * d > 0 else "aleyhte")
+        f["trend"] = "uyumlu" if (x["ema9"] - x["ema21"]) * d > 0 else "ters"
+        m = self.mkt.get("dir")
+        f["spy"] = "yok" if m is None or x["ses"] != "regular" else ("uyumlu" if m == d else "ters")
+        room = x.get("_room")
+        f["room"] = "bilinmiyor" if room is None else ("<1R" if room < 1 else "1-2R" if room < 2 else "2R+")
+        if x["ses"] == "regular":
+            mn = x["mins"]
+            f["tod"] = "ilk 30 dk" if mn < 30 else "sabah" if mn < 120 else "öğle" if mn < 240 else "kapanışa doğru"
+        else:
+            f["tod"] = SES_AD[x["ses"]]
+        c = x["c"]
+        f["fiyat"] = "<1$" if c < 1 else "1-5$" if c < 5 else "5-20$" if c < 20 else "20$+"
+        f["tip"] = "koşan küçük hisse" if sym in self.runners else "ana liste"
+        if sym in self.runners:
+            f["haber"] = "var" if self.runners[sym].get("news") else "yok"
+        return f
+
     def _create(self, sym, x, setup, d, entry, stop, risk, conf, why):
         T = x["T"]
         ses = x["ses"]
         sid = f"{sym}-{T}-{setup}-{d}"
         if sid in self.by_id:
             return
-        tgt = entry + d * R_MULT * risk
+        runner = sym in self.runners
+        tgt = entry + d * (R_RUNNER if runner else R_MULT) * risk
+        feats = self._features(sym, x, d)
+        conf0 = conf
+        if self.learner:
+            try:
+                conf, notes = self.learner.adjust(setup, ses, conf, feats)
+                why = why + notes
+            except Exception:
+                pass
         sig = {
             "id": sid, "sym": sym, "dir": d, "setup": setup, "ses": ses, "t": T, "day": x["day"].isoformat(),
-            "e": round(entry, 4), "s": round(stop, 4), "h": round(tgt, 4), "conf": conf, "why": why,
+            "e": round(entry, 4), "s": round(stop, 4), "h": round(tgt, 4), "conf": conf, "conf0": conf0, "why": why,
+            "runner": runner, "f": feats,
             "typ": "market" if ses == "regular" else "limit",
             "end": int(self._end_of(ses, x["b"])), "st": "bekliyor", "wait": 0,
             "fill": None, "ft": None, "x": None, "xt": None, "r": None, "pct": None, "last": T, "lc": x["c"],
@@ -428,7 +558,7 @@ class Engine:
     # ------------------------------------------------------------ gölge takip
     def _close(self, sig, px, t, st):
         d = sig["dir"]
-        slip = SLIP.get(sig["ses"], 0.001)
+        slip = slip_of(sig)
         if st in ("stop", "süre"):
             px = px * (1 - d * slip)       # piyasa emri: aleyhte kayma
         fill = sig["fill"]
@@ -439,7 +569,7 @@ class Engine:
 
     def _update(self, sig, tss, bars, now):
         d, s, h = sig["dir"], sig["s"], sig["h"]
-        slip = SLIP.get(sig["ses"], 0.001)
+        slip = slip_of(sig)
         changed = False
         for t in tss:
             if t <= sig["last"]:
@@ -518,8 +648,9 @@ class Engine:
 
     @staticmethod
     def slim(s):
-        return {k: s[k] for k in ("id", "sym", "dir", "setup", "ses", "t", "e", "s", "h", "conf", "why", "typ",
-                                  "st", "fill", "ft", "x", "xt", "r", "pct")}
+        out = {k: s.get(k) for k in ("id", "sym", "dir", "setup", "ses", "t", "e", "s", "h", "conf", "conf0", "why", "typ",
+                                     "st", "fill", "ft", "x", "xt", "r", "pct", "runner")}
+        return out
 
     def stats(self):
         groups = {}
@@ -540,7 +671,9 @@ class Engine:
             add(SES_AD.get(s["ses"], s["ses"]), s)
             add(f"{SES_AD.get(s['ses'], s['ses'])} · {SETUP_AD.get(s['setup'], s['setup'])}", s)
             add("Güven ≥ 70" if s["conf"] >= 70 else "Güven < 70", s)
-        order = ["Tümü"] + [SES_AD[k] for k in ("pre", "regular", "post")] + ["Güven ≥ 70", "Güven < 70"]
+            if s.get("runner"):
+                add("Koşan küçük hisseler", s)
+        order = ["Tümü"] + [SES_AD[k] for k in ("pre", "regular", "post")] + ["Güven ≥ 70", "Güven < 70", "Koşan küçük hisseler"]
         rows = [groups[k] for k in order if k in groups]
         rows += sorted((g for k, g in groups.items() if k not in order), key=lambda g: g["k"])
         for g in rows:
