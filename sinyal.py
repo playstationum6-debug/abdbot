@@ -107,6 +107,7 @@ class Engine:
         self.dirty_days = set()
         self.seen = {}             # sembol -> (ver, snap_ver)
         self._fast_px = {}         # koşan hisse -> son anlık fiyat (kırılımın "şimdi" olduğunu anlamak için)
+        self._plan_posted = {}     # koşan hisse -> son yayınlanan plan seviyesi
         self.runners = {}          # tarayıcının bulduğu koşan hisseler: sembol -> bilgi (yüzde, haber)
         self.learner = None        # öğrenme modülü (güven ayarı + not)
 
@@ -468,8 +469,8 @@ class Engine:
         """Haberle/yüksek hacimle koşan küçük hisseler — sadece alış yönü."""
         out = []
         info = self.runners.get(sym, {})
-        if info.get("news_kind") == "kötü":
-            return out   # hisse ihracı / ters bölünme / seyreltme haberi: genelde tuzak, alış yok
+        if info.get("news_kind") == "kötü" or (info.get("sec") or {}).get("kind") == "seyreltme":
+            return out   # hisse ihracı / ters bölünme / seyreltme (haber ya da SEC bildirimi): genelde tuzak, alış yok
         T, c, atr = x["T"], x["c"], x["atr"]
         ref = x["pc"]
         move = (c / ref - 1) * 100 if ref else float(info.get("pct") or 0)
@@ -529,6 +530,12 @@ class Engine:
         for o in out:
             if ai:
                 o[6].append(f"Yapay zeka haber puanı {ai['skor']:+d} ({ai['neden']}) — şimdilik sadece ölçülüyor")
+            sec = info.get("sec") or {}
+            if sec.get("kind") == "dikkat":
+                o[6].append(sec["msg"])
+                o[5] -= 5
+            elif sec.get("kind") == "temiz":
+                o[6].append(sec["msg"])
             if news:
                 o[6].insert(0, f"Haber: {news.get('headline', '')[:100]}")
                 if info.get("news_kind") == "iyi":
@@ -554,7 +561,7 @@ class Engine:
             return None
         prev = self._fast_px.get(sym)
         self._fast_px[sym] = px
-        if prev is None or info.get("news_kind") == "kötü":
+        if prev is None or info.get("news_kind") == "kötü" or (info.get("sec") or {}).get("kind") == "seyreltme":
             return None
         bars = self.store.bars.get(sym) or {}
         lim = int(now // 60 * 60) - 60           # son KAPANMIŞ mum
@@ -613,6 +620,12 @@ class Engine:
         if px < 1:
             why.append("1 $ altı hisse: manipülasyon ve işlem durdurma riski çok yüksek")
             conf -= 5
+        sec = info.get("sec") or {}
+        if sec.get("kind") == "dikkat":
+            why.append(sec["msg"])
+            conf -= 5
+        elif sec.get("kind") == "temiz":
+            why.append(sec["msg"])
         if info.get("ai"):
             why.append(f"Yapay zeka haber puanı {info['ai']['skor']:+d} ({info['ai']['neden']}) — şimdilik sadece ölçülüyor")
         why.append("Hızlı giriş: kayma yüksek varsayıldı" + (", limit emir ve yarım lot" if ext else ""))
@@ -620,6 +633,42 @@ class Engine:
         before = len(self.signals)
         self._create(sym, x2, "hizli", 1, px, stop, risk, conf, why)
         return self.signals[-1] if len(self.signals) > before else None
+
+    def watch_plan(self, sym, px, now):
+        """Koşan hisse tepesine %3'ten fazla yaklaşmadıysa None; yaklaştıysa (ve bu seviye için daha önce
+        söylenmediyse) "X'i kırarsa giriyor" planı: {"lvl", "stop", "tgt", "px", "move"}."""
+        info = self.runners.get(sym)
+        if not info or not px or info.get("news_kind") == "kötü" or (info.get("sec") or {}).get("kind") == "seyreltme":
+            return None
+        bars = self.store.bars.get(sym) or {}
+        lim = int(now // 60 * 60) - 60
+        tss = sorted(t for t in bars if lim - 6 * 86400 <= t <= lim)
+        if len(tss) < 30:
+            return None
+        T = tss[-1]
+        if now - T > 300 or self.bar_info(T)[0] != datetime.fromtimestamp(now, self.ET).date():
+            return None
+        x = self._ctx(tss, bars, len(tss) - 1)
+        if not x or x["sc"] == 3:
+            return None
+        ext = x["ses"] != "regular"
+        lvl = max(v for v in ((x["sh"], x["h"]) if ext else (x["hod"], x["pmh"], x["h"])) if v)
+        if not (lvl * 0.97 <= px < lvl * 1.002):
+            return None
+        ref = x["pc"]
+        move = (px / ref - 1) * 100 if ref else float(info.get("pct") or 0)
+        if move < RUN_MIN_MOVE:
+            return None
+        last = self._plan_posted.get(sym)
+        if last and abs(lvl / last - 1) < 0.01:
+            return None
+        self._plan_posted[sym] = lvl
+        atr = x["atr"]
+        trig = lvl * 1.002
+        low3 = min(r[2] for r in x["recent"][-3:]) if x["recent"] else x["l"]
+        stop, risk = self._clamp(trig, min(low3, lvl - 0.5 * atr), 1, atr, 1.0, 3.0)
+        risk = max(risk, trig * 0.01, trig * MIN_STOP_PCT, atr * MIN_STOP_ATR)
+        return {"lvl": trig, "stop": trig - risk, "tgt": trig + R_RUNNER * risk, "px": px, "move": move}
 
     # ------------------------------------------------------------ ana döngü
     def process(self, sym, complete_until, now):
@@ -704,6 +753,7 @@ class Engine:
         if sym in self.runners:
             ri = self.runners[sym]
             f["haber"] = (ri.get("news_kind") or "nötr") if ri.get("news") else "yok"   # iyi / nötr / kötü / yok
+            f["sec"] = (ri.get("sec") or {}).get("kind", "bakılmadı")
             ai = (ri.get("ai") or {}).get("skor")
             f["ai"] = "yok" if ai is None else ("+70 ve üstü" if ai >= 70 else "+30…+69" if ai >= 30
                                                else "−29…+29" if ai > -30 else "−30 ve altı")

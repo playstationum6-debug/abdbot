@@ -58,6 +58,7 @@ class Bot:
         self.cfg = cfg
         self.positions = []
         self.journal = []
+        self.on_note = None      # app.py: canlı akışa mesaj düşürmek için
         self.ver = 0
         self.dirty_days = set()
         self.seen = set()
@@ -89,6 +90,11 @@ class Bot:
             self.log.info("BOT %s %s %s", typ, sym or "", msg)
         except Exception:
             pass
+        if self.on_note:
+            try:
+                self.on_note(typ, msg, sym, t)
+            except Exception:
+                pass
 
     def _touch(self, pos):
         self.dirty_days.add(pos["day"])

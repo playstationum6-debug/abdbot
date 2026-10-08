@@ -12,6 +12,9 @@ seyreltme…) ya da "nötr". Kötü haberli hisselere alış yapılmaz (genelde 
 Liste doluysa en zayıf (pozisyonu olmayan) hisse, çok daha güçlü yeni bir koşanla değiştirilir.
 Yapay zeka haber puanı (GEMINI_API_KEY varsa, ücretsiz katman): her yeni başlık −100…+100 puanlanır.
 ŞİMDİLİK SADECE ÖLÇÜLÜR: al-sat kararını değiştirmez, öğrenme modülü puanın işe yarayıp yaramadığını ölçer.
+SEC EDGAR (ücretsiz, resmi): koşan her hissenin son SEC bildirimleri okunur.
+  - Son 3 günde hisse ihracı / izahname (424B, S-1, F-1, 8-K madde 3.02) → "seyreltme": ALIŞ YAPILMAZ
+  - Son 30 günde raf kaydı (S-3, F-3, EFFECT) → "dikkat": şirket her an hisse satabilir, güven −5
 """
 import json
 import re
@@ -50,6 +53,11 @@ def haber_turu(headline):
     return "nötr", ""
 
 
+SEC_UA = "abdbot paper-trading bot"   # app.py SEC_UA ortam değişkeniyle değiştirir (SEC iletişim bilgisi ister)
+SEC_DILUTE = ("424B1", "424B2", "424B3", "424B4", "424B5", "424B7", "S-1", "S-1/A", "F-1", "F-1/A")
+SEC_SHELF = ("S-3", "S-3/A", "F-3", "F-3/A", "EFFECT", "S-3ASR")
+SEC_TTL = 600        # aynı hisse için bildirimler 10 dk'da bir yeniden okunur
+
 DROP_SEC = 20 * 60   # elenen hisse bu süre sonra (hâlâ yükselenler listesindeyse) tekrar izlenir
 
 AI_PROMPT = """You are a US small-cap day trading news analyst. A stock is up {pct:.0f}% today.
@@ -76,6 +84,10 @@ class Scanner:
         self.ai_cache = {}       # başlık -> {"skor", "neden"}
         self.ai_calls = []       # son çağrı zamanları (ücretsiz kota: dakikada en fazla 8)
         self.ai_status = "kapalı (GEMINI_API_KEY yok)" if not ai_key else "hazır"
+        self.sec_ua = SEC_UA
+        self.sec_cik = {}        # sembol -> CIK (günde bir yüklenir)
+        self.sec_cik_t = 0.0
+        self.sec_status = "başlamadı"
         self.core = set(core)
         self.min_price = min_price
         self.min_pct = min_pct
@@ -191,6 +203,8 @@ class Scanner:
                                         if kind == "kötü":
                                             info["news"] = item
                                 info.setdefault("news_kind", "nötr")
+                # SEC EDGAR: seyreltme / hisse ihracı bildirimi var mı?
+                await self._sec_check(c)
                 # Yapay zeka haber puanı (sadece ölçüm)
                 if self.ai_key:
                     for info in list(self.runners.values()):
@@ -209,6 +223,64 @@ class Scanner:
             self.ver += 1
             if self.log:
                 self.log.warning("Tarayıcı hatası: %s", e)
+
+    async def _sec_check(self, c):
+        if not self.runners:
+            return
+        h = {"User-Agent": self.sec_ua, "Accept-Encoding": "gzip, deflate"}
+        now = time.time()
+        try:
+            if not self.sec_cik or now - self.sec_cik_t > 86400:
+                r = await c.get("https://www.sec.gov/files/company_tickers.json", headers=h)
+                if r.status_code != 200:
+                    self.sec_status = f"hata {r.status_code} (sembol listesi)"
+                    return
+                self.sec_cik = {v["ticker"].upper(): int(v["cik_str"]) for v in r.json().values()}
+                self.sec_cik_t = now
+            n = 0
+            for info in list(self.runners.values()):
+                if now - (info.get("sec_t") or 0) < SEC_TTL:
+                    continue
+                cik = self.sec_cik.get(info["sym"])
+                info["sec_t"] = now
+                if not cik:
+                    info["sec"] = {"kind": "bilinmiyor", "msg": "SEC kaydı bulunamadı (yabancı/yeni şirket olabilir)"}
+                    continue
+                r = await c.get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json", headers=h)
+                n += 1
+                if r.status_code != 200:
+                    continue
+                info["sec"] = self._sec_eval(r.json().get("filings", {}).get("recent", {}))
+                if n >= 8:          # SEC sınırı saniyede 10 istek; tarama başına en fazla 8
+                    break
+            self.sec_status = f"çalışıyor · {len(self.sec_cik)} şirket"
+        except Exception as e:
+            self.sec_status = f"hata: {str(e)[:80]}"
+
+    @staticmethod
+    def _sec_eval(rec):
+        """Son bildirimlerden seyreltme riski: {"kind": seyreltme|dikkat|temiz, "msg", "form", "date"}."""
+        forms = rec.get("form") or []
+        dates = rec.get("filingDate") or []
+        items = rec.get("items") or [""] * len(forms)
+        today = datetime.now(timezone.utc).date()
+        shelf = None
+        for i, f in enumerate(forms[:60]):
+            try:
+                age = (today - datetime.strptime(dates[i], "%Y-%m-%d").date()).days
+            except Exception:
+                continue
+            if age > 30:
+                break
+            it = items[i] if i < len(items) else ""
+            if age <= 3 and (f in SEC_DILUTE or (f in ("8-K", "6-K") and "3.02" in (it or ""))):
+                why = "hisse ihracı / izahname" if f in SEC_DILUTE else "kayıtsız hisse satışı (8-K 3.02)"
+                return {"kind": "seyreltme", "form": f, "date": dates[i],
+                        "msg": f"SEC: {dates[i]} tarihli {f} — {why}. Alış yapılmaz."}
+            if f in SEC_SHELF and shelf is None:
+                shelf = {"kind": "dikkat", "form": f, "date": dates[i],
+                         "msg": f"SEC: {dates[i]} tarihli {f} raf kaydı — şirket her an hisse satabilir"}
+        return shelf or {"kind": "temiz", "msg": "SEC: son 30 günde seyreltme bildirimi yok"}
 
     async def _ai_score(self, c, sym, headline, pct):
         """Gemini ile başlığı puanla: {"skor": -100..100, "neden": str} ya da None (kota/hata)."""

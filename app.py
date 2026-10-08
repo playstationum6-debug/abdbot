@@ -20,6 +20,8 @@ import os
 import secrets
 import sqlite3
 import time
+import re
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time as dtime, timedelta, timezone
 from functools import lru_cache
@@ -506,6 +508,7 @@ engine.learner = learner
 scanner = tarayici.Scanner(ALPACA_KEY, ALPACA_SECRET, SYMBOLS, min_price=RUN_MIN_PRICE, min_pct=RUN_MIN_PCT,
                            max_runners=RUN_MAX, log=log,
                            ai_key=os.getenv("GEMINI_API_KEY", ""), ai_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
+scanner.sec_ua = os.getenv("SEC_UA", "abdbot paper-trading bot")
 scanner.keep = lambda sym: any(p["sym"] == sym for p in bot.open_positions())
 bot = botmod.Bot(engine, learner, store, cal, ET, ALPACA_KEY, ALPACA_SECRET, log, BOT_CFG)
 
@@ -761,6 +764,7 @@ def status_payload():
         "bot": bot.status,
         "scan": scanner.status,
         "ai": scanner.ai_status,
+        "sec": scanner.sec_status,
         "nRun": len(scanner.runners),
         "sigN": len(engine.signals),
         "sigOpen": engine.open_count(),
@@ -1015,6 +1019,129 @@ async def alpaca_loop():
             backoff = min(backoff * 2, 120)
 
 
+# ----------------------------------------------------------------- canlı akış
+# Haberler, izleme planları, sinyaller ve bot olayları tek bir zaman akışında (Telegram kanalı gibi).
+FEED = deque(maxlen=400)
+FEED_KEYS = set()
+feed_pending = []
+_feed_seq = [0]
+
+
+def fp_(x):
+    if x is None:
+        return "—"
+    return f"{x:.4f}" if x < 1 else f"{x:.2f}"
+
+
+def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None):
+    """k: haber | plan | sinyal | bot | tara. tone: iyi | kötü | nötr | al | sat | kar | zarar | bilgi."""
+    if key:
+        if key in FEED_KEYS:
+            return
+        FEED_KEYS.add(key)
+        if len(FEED_KEYS) > 5000:
+            FEED_KEYS.clear()
+    _feed_seq[0] += 1
+    it = {"id": _feed_seq[0], "t": int(t or time.time()), "k": k,
+          "sym": sym if isinstance(sym, list) else ([sym] if sym else []),
+          "txt": txt, "sub": sub, "tone": tone, "url": url}
+    if extra:
+        it.update(extra)
+    FEED.append(it)
+    feed_pending.append(it)
+
+
+def feed_signal(sig):
+    d = "AL" if sig["dir"] > 0 else "SAT"
+    ad = sinyal.SETUP_AD.get(sig["setup"], sig["setup"])
+    feed_add("sinyal", sig["sym"], f"{d} sinyali: {ad}",
+             sub=f"giriş {fp_(sig['e'])}   stop {fp_(sig['s'])}   hedef {fp_(sig['h'])}   güven {sig['conf']}",
+             tone="al" if sig["dir"] > 0 else "sat", t=sig.get("created") or sig["t"], key=f"s:{sig['id']}",
+             extra={"conf": sig["conf"]})
+
+
+_RX_FILL = re.compile(r"Giriş doldu: ([\d.]+) adet @ ([\d.]+)")
+_RX_CLOSE = re.compile(r"Kapandı \(([^)]+)\): ([+-][\d.]+) \$ · ([+-][\d.]+)R")
+
+
+def feed_bot_note(typ, msg, sym, t):
+    if typ == "dolum":
+        m = _RX_FILL.search(msg)
+        pos = next((p for p in bot.positions if p["sym"] == sym and p["st"] in botmod.OPEN_ST), None)
+        side = "Açığa sattım" if pos and pos["dir"] < 0 else "İçerdeyim"
+        txt = f"{side}: {fp_(float(m.group(2)))} $'dan {float(m.group(1)):g} adet" if m else f"{side}"
+        sub = f"stop {fp_(pos['stop'])}   hedef {fp_(pos['target'])}" if pos else ""
+        feed_add("bot", sym, txt, sub=sub, tone="al" if not pos or pos["dir"] > 0 else "sat", t=t)
+    elif typ == "kapandı":
+        m = _RX_CLOSE.search(msg)
+        if m:
+            why, usd, r = m.group(1), float(m.group(2)), float(m.group(3))
+            head = {"hedef": "Hedef geldi", "stop": "Stop oldu", "kâr koruma": "Başa başta çıktım",
+                    "iz süren stop": "Kârı aldım (iz süren stop)", "seans sonu": "Seans bitti, kapattım"}.get(why, "Kapattım")
+            feed_add("bot", sym, f"{head}: {r:+.2f}R ({usd:+.2f} $)", tone="kar" if usd > 0 else "zarar", t=t)
+        else:
+            feed_add("bot", sym, msg, tone="bilgi", t=t)
+    elif typ in ("koruma", "iz"):
+        feed_add("bot", sym, "Stop girişe çekildi, bu işlem artık zarar yazmaz" if typ == "koruma"
+                 else "Kâr büyüyor, stop arkadan takip ediyor", tone="kar", t=t)
+    elif typ in ("hata", "uyarı"):
+        feed_add("bot", sym, msg, tone="zarar", t=t)
+
+
+async def news_loop():
+    """Tüm piyasanın Benzinga haber akışı (Alpaca, ücretsiz): her yeni başlık akışa düşer."""
+    first = True
+    async with httpx.AsyncClient(timeout=15, headers=alpaca_headers()) as c:
+        while True:
+            try:
+                if ALPACA_KEY and ALPACA_SECRET:
+                    r = await c.get("https://data.alpaca.markets/v1beta1/news",
+                                    params={"limit": 50, "sort": "desc"})
+                    if r.status_code == 200:
+                        items = r.json().get("news") or []
+                        for n in reversed(items):
+                            syms = [x for x in (n.get("symbols") or []) if tarayici.SYM_RE.match(x)][:4]
+                            if not syms:
+                                continue
+                            kind, word = tarayici.haber_turu(n.get("headline", ""))
+                            watched = [x for x in syms if x in scanner.runners or x in SYMBOLS]
+                            ai = next(((scanner.runners[x].get("ai") or {}) for x in syms if x in scanner.runners
+                                       and scanner.runners[x].get("ai_h") == n.get("headline")), {})
+                            feed_add("haber", syms, n.get("headline", ""), sub=n.get("source", ""),
+                                     tone=kind, t=_iso_epoch(n.get("created_at", "")), url=n.get("url", ""),
+                                     key=f"n:{n.get('id')}",
+                                     extra={"word": word, "watched": bool(watched), "ai": ai or None})
+            except Exception as e:
+                log.debug("Haber akışı hatası: %s", e)
+            first = False
+            await asyncio.sleep(30 if cal.session(time.time()) != "closed" else 180)
+
+
+def _iso_epoch(s):
+    try:
+        return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
+    except Exception:
+        return int(time.time())
+
+
+def feed_seed():
+    """Yeniden başlamada akışı bugünkü sinyal ve bot kayıtlarından doldur."""
+    today = datetime.now(ET).date().isoformat()
+    evs = []
+    for sig in engine.signals[-300:]:
+        if sig.get("day") == today:
+            evs.append((sig.get("created") or sig["t"], "s", sig))
+    for j in bot.journal[-600:]:
+        if j.get("day") == today and j.get("typ") in ("dolum", "kapandı", "koruma", "iz"):
+            evs.append((j["t"], "b", j))
+    for t, kind, o in sorted(evs, key=lambda e: e[0])[-150:]:
+        if kind == "s":
+            feed_signal(o)
+        else:
+            feed_bot_note(o["typ"], o["msg"], o["sym"], o["t"])
+    feed_pending.clear()
+
+
 # ----------------------------------------------------------------- tarayıcı
 class Client:
     def __init__(self, ws):
@@ -1080,7 +1207,15 @@ async def broadcaster():
     while True:
         await asyncio.sleep(1)
         tick += 1
+        fresh = feed_pending[:]
+        feed_pending.clear()
         for cl in list(clients):
+            if fresh:
+                try:
+                    await cl.send({"type": "feed", "items": fresh})
+                except Exception:
+                    clients.discard(cl)
+                    continue
             try:
                 sym = cl.sym
                 if sym:
@@ -1129,6 +1264,7 @@ async def signal_loop():
                 for sig in engine.signals[before:]:
                     log.info("SİNYAL %s %s %s güven=%s giriş=%s stop=%s hedef=%s", sig["sym"],
                              "AL" if sig["dir"] > 0 else "SAT", sig["setup"], sig["conf"], sig["e"], sig["s"], sig["h"])
+                    feed_signal(sig)
                     bot.consider(sig, now)
             except Exception as e:
                 log.warning("Sinyal hatası %s: %s", sym, e)
@@ -1142,7 +1278,14 @@ async def scan_loop():
     while True:
         ses = cal.session(time.time())
         if ses != "closed" or not scanner.last_ok:
+            before = set(scanner.runners)
             await scanner.scan(ET)
+            for r in set(scanner.runners) - before:
+                info = scanner.runners[r]
+                n = info.get("news") or {}
+                feed_add("tara", r, f"Koşan hisseler listesine girdi: bugün {info.get('pct') or 0:+.0f}%",
+                         sub=n.get("headline", "Haber bulunamadı")[:140], tone="iyi" if n else "nötr",
+                         key=f"r:{r}:{datetime.now(ET).date()}")
             engine.runners = scanner.runners
             for r in scanner.runners:
                 ensure_sym(r)
@@ -1184,10 +1327,17 @@ async def fast_loop():
                 if not last or t >= last["t"]:
                     store.live[sym] = {"p": p, "t": t}
                 try:
+                    plan = engine.watch_plan(sym, p, now)
+                    if plan:
+                        feed_add("plan", sym, f"{fp_(plan['lvl'])} üstünü kırarsa giriş",
+                                 sub=f"stop {fp_(plan['stop'])}   hedef {fp_(plan['tgt'])}   şu an {fp_(p)}   "
+                                     f"bugün {plan['move']:+.0f}%", tone="bilgi",
+                                 extra={"lvl": plan["lvl"], "stop": plan["stop"], "tgt": plan["tgt"]})
                     sig = engine.fast_check(sym, p, now)
                     if sig:
                         log.info("HIZLI SİNYAL %s AL güven=%s giriş=%s stop=%s hedef=%s",
                                  sym, sig["conf"], sig["e"], sig["s"], sig["h"])
+                        feed_signal(sig)
                         bot.consider(sig, now)
                 except Exception as e:
                     log.warning("Hızlı kırılım hatası %s: %s", sym, e)
@@ -1251,6 +1401,8 @@ async def lifespan(app):
     engine.load(sigs)
     bot.load(botdays)
     learner.rebuild(engine.signals)
+    feed_seed()
+    bot.on_note = feed_bot_note
     backup.record_start()
     await backup.save(engine, bot)
     try:
@@ -1258,7 +1410,7 @@ async def lifespan(app):
     except Exception as e:
         log.warning("Bot senkron hatası: %s", e)
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
-                                                  scan_loop, bot_loop, fast_loop)]
+                                                  scan_loop, bot_loop, fast_loop, news_loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -1423,6 +1575,7 @@ async def ws_endpoint(ws: WebSocket):
         await send_sig(cl)
         await send_bot(cl)
         await send_scan(cl)
+        await cl.send({"type": "feed", "items": list(FEED)[-150:], "full": 1})
         while True:
             msg = json.loads(await ws.receive_text())
             if msg.get("daily"):

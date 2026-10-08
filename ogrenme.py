@@ -34,7 +34,7 @@ SETUP_AD = {
 SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa sonrası"}
 FEAT_AD = {"volr": "Hacim katı", "vwap": "VWAP", "trend": "Kısa trend", "spy": "SPY yönü", "room": "Hedefe yer",
            "tod": "Zaman", "fiyat": "Fiyat", "tip": "Hisse tipi", "haber": "Haber", "obv": "OBV hacim akışı",
-           "ai": "Yapay zeka haber puanı"}
+           "ai": "Yapay zeka haber puanı", "sec": "SEC bildirimi"}
 
 
 def _shr(n, s):
