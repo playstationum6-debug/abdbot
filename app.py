@@ -1185,6 +1185,9 @@ async def housekeeping():
                 store.prune_xvol()
             if backup.enabled and (n * 15) % BACKUP_SEC < 15:
                 await backup.save(engine, bot)
+            elif backup.enabled and bot.dirty_days and time.time() - (backup.last_ok or 0) > 60:
+                # İşlem açılıp kapandıkça dakikada bir yedekle: yeniden başlamada kayıt kaybolmasın
+                await backup.save(engine, bot)
         except Exception as e:
             log.warning("Bakım hatası: %s", e)
 

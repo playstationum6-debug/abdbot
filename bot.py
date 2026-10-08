@@ -9,7 +9,8 @@ Kurallar:
 - Stop, hedef, kâr koruma (+1,5R'de stop girişe), iz süren stop (+1,5R'den sonra 1R geriden),
   seans bitmeden kapatma, günlük zarar limiti, en fazla N açık pozisyon.
 - Uzatılmış seansta açığa satış yok; koşan küçük hisselerde sadece alış.
-- Öğrenme: yeterli veri varsa beklentisi negatif kurgular atlanır; her kapanan işlem için ders yazılır.
+- Öğrenme (trader gibi): kurgu atlanmaz; geçmişi zayıf kurgu küçük lotla, iyi kurgu büyük lotla alınır
+  (0,5×–1,5× risk). Üst üste 3 kayıpta lot yarıya iner, ilk kazançta normale döner. Her işleme ders yazılır.
 - Çıkışları bot kendisi yönetir (Alpaca uzatılmış seansta stop emri kabul etmediği için).
 """
 import math
@@ -131,6 +132,16 @@ class Bot:
         d = self._day()
         return [p for p in self.positions if p["st"] == "kapandı" and p.get("pnl") is not None and self._day(p["xt"]) == d]
 
+    def loss_streak(self):
+        """Bugün kapanan işlemlerde sondan geriye üst üste kayıp sayısı."""
+        n = 0
+        for p in sorted(self.today_closed(), key=lambda p: p.get("xt") or 0, reverse=True):
+            if p["pnl"] < 0:
+                n += 1
+            else:
+                break
+        return n
+
     def today_pnl(self):
         return sum(p["pnl"] for p in self.today_closed())
 
@@ -179,16 +190,25 @@ class Bot:
         if d < 0 and sig.get("runner"):
             return skip("koşan küçük hisselerde sadece alış")
         thr = self.cfg["min_conf"] if ses == "regular" else self.cfg.get("min_conf_ext", self.cfg["min_conf"])
-        if conf < thr:
-            return skip(f"güven {conf} < eşik {thr}")
+        # Eşik, kuralların ham güvenine bakar (öğrenme işlem sayısını düşürmez, sadece lotu ayarlar)
+        conf0 = sig.get("conf0", conf)
+        if conf0 < thr:
+            return skip(f"güven {conf0} < eşik {thr}")
         n, e = self.learner.group(sig["setup"], ses)
-        if n >= 20 and e < 0:
-            return skip(f"öğrenilmiş beklenti negatif ({e:+.2f}R, {n} işlem)")
+        # Trader gibi: kurguyu atlama, lotu geçmişe ve güvene göre ayarla
+        try:
+            mult, mwhy = self.learner.size_mult(sig["setup"], ses, conf, sig.get("f"))
+        except Exception:
+            mult, mwhy = 1.0, ""
+        streak = self.loss_streak()
+        if streak >= 3:
+            mult *= 0.5
+            mwhy = (mwhy + ", " if mwhy else "") + f"üst üste {streak} kayıp: disiplin, lot yarıya"
         notional = self.cfg["notional"] * (1 if ses == "regular" else 0.5)
         px = sig["e"]
         # Risk bazlı büyüklük: stop mesafesi ne olursa olsun işlem başı kayıp en fazla risk_usd
         risk_px = abs(sig["e"] - sig["s"])
-        risk_usd = self.cfg.get("risk_usd", 5.0) * (1 if ses == "regular" else 0.5)
+        risk_usd = self.cfg.get("risk_usd", 5.0) * (1 if ses == "regular" else 0.5) * mult
         if px > 0 and risk_px > 0:
             notional = min(notional, risk_usd / risk_px * px)
         whole = int(math.floor(notional / px)) if px > 0 else 0
@@ -200,7 +220,8 @@ class Bot:
         if qty <= 0 or (qty < 1 and not (d > 0 and ses == "regular")):
             return skip(f"fiyat ({px:.2f} $) pozisyon büyüklüğünden ({notional:.0f} $) yüksek"
                         + (" — açığa satışta kesirli adet yok" if d < 0 else " — uzatılmış seansta kesirli adet yok"))
-        why = f"güven {conf}" + (f", geçmiş {n} işlem ort. {e:+.2f}R" if n else ", keşif (henüz geçmiş yok)")
+        why = (f"güven {conf}" + (f", geçmiş {n} işlem beklenti {e:+.2f}R" if n else ", keşif (henüz geçmiş yok)")
+               + f", lot ×{mult:.2f}" + (f" ({mwhy})" if mwhy else ""))
         pos = {
             "id": f"P-{sig['id']}", "sig": sig["id"], "sym": sym, "dir": d, "setup": sig["setup"], "ses": ses,
             "runner": bool(sig.get("runner")), "conf": conf, "qty": qty, "notional": round(qty * px, 2),
@@ -423,15 +444,47 @@ class Bot:
             self.note("hata", f"Senkron yapılamadı: {e}")
             return
         for pos in open_:
-            if pos["st"] == "açık" and pos["sym"] not in alp:
+            if pos["st"] in ("açık", "çıkış") and pos["sym"] not in alp:
                 pos["st"] = "kapandı"
                 pos["xr"] = "senkron: Alpaca'da pozisyon yok"
                 pos["xt"] = int(time.time())
-                self.note("uyarı", "Yeniden başlamada pozisyon Alpaca'da bulunamadı; kapandı sayıldı (sonuç bilinmiyor)", pos["sym"])
+                fill = await self._find_exit(pos)
+                if fill and pos.get("entry"):
+                    px, xt = fill
+                    d = pos["dir"]
+                    pos["exit"], pos["xt"] = px, xt
+                    pos["pnl"] = round((px - pos["entry"]) * d * pos["qty"], 2)
+                    risk = abs(pos["entry"] - pos.get("init_stop", pos["stop"])) or 1e-9
+                    pos["r"] = round((px - pos["entry"]) * d / risk, 2)
+                    pos["pct"] = round((px / pos["entry"] - 1) * 100 * d, 2)
+                    pos["xr"] = "senkron: Alpaca çıkışı bulundu"
+                    try:
+                        pos["lesson"] = self.learner.lesson(pos["setup"], pos["ses"], pos["f"], pos["r"])
+                    except Exception:
+                        pos["lesson"] = ""
+                    self.note("kapandı", f"Yeniden başlamada Alpaca'daki çıkış bulundu: {pos['pnl']:+.2f} $ · "
+                                         f"{pos['r']:+.2f}R", pos["sym"])
+                else:
+                    self.note("uyarı", "Yeniden başlamada pozisyon Alpaca'da bulunamadı; kapandı sayıldı (sonuç bilinmiyor)", pos["sym"])
                 self._touch(pos)
             elif pos["st"] == "açık":
                 pos["stale_noted"] = False
                 self.note("senkron", "Yeniden başlama sonrası pozisyon yönetimi devam ediyor", pos["sym"])
+
+    async def _find_exit(self, pos):
+        """Kapanmış pozisyonun çıkış emrini Alpaca geçmişinden bul: (fiyat, zaman) ya da None."""
+        try:
+            after = datetime.fromtimestamp(pos.get("et") or pos["opened"], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            orders = await self._req("GET", "/v2/orders", params={
+                "status": "closed", "symbols": pos["sym"], "after": after, "direction": "asc", "limit": 50})
+            side = "sell" if pos["dir"] > 0 else "buy"
+            for o in orders or []:
+                if o.get("side") == side and o.get("filled_avg_price") and float(o.get("filled_qty") or 0) > 0:
+                    xt = _iso_ts(o.get("filled_at") or o.get("updated_at") or "") or int(time.time())
+                    return float(o["filled_avg_price"]), int(xt)
+        except Exception as e:
+            self.note("hata", f"Çıkış geçmişi okunamadı: {e}", pos["sym"])
+        return None
 
     # ------------------------------------------------------------ kayıt / özet
     def load(self, days):
