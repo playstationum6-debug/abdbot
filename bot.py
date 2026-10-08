@@ -12,6 +12,7 @@ Kurallar:
 - Çıkışları bot kendisi yönetir (Alpaca uzatılmış seansta stop emri kabul etmediği için).
 """
 import math
+import re
 import time
 from datetime import datetime, timezone
 
@@ -457,7 +458,34 @@ class Bot:
             opens.append(q)
         recent = [p for p in self.positions if p["st"] in ("kapandı", "iptal")][-40:][::-1]
         lim = self.cfg["daily_loss"]
+        # Bugünkü kararlar: kaç sinyal geldi, kaçı alındı, neden atlandı
+        today = self._day()
+        tj = [j for j in self.journal if j.get("day") == today]
+        reasons = {}
+        for j in tj:
+            if j["typ"] == "atla" and "atlandı:" in j["msg"]:
+                r = j["msg"].split("atlandı:", 1)[1].strip()
+                key = re.sub(r"[-+]?\d+([.,]\d+)?", "#", r).split(" (")[0]
+                reasons.setdefault(key, [0, r])
+                reasons[key][0] += 1
+                reasons[key][1] = r
+        top = sorted(reasons.values(), key=lambda x: -x[0])[:4]
+        dec = {"al": sum(1 for j in tj if j["typ"] == "al"), "atla": sum(1 for j in tj if j["typ"] == "atla"),
+               "reasons": [{"n": n, "ornek": ex} for n, ex in top]}
+        # Kârlı gün serisi
+        by_day = {}
+        for p in closed:
+            d = self._day(p["xt"])
+            by_day[d] = by_day.get(d, 0) + p["pnl"]
+        streak = 0
+        for d in sorted(by_day, reverse=True):
+            if by_day[d] > 0:
+                streak += 1
+            else:
+                break
         return {
+            "dec": dec, "streak": streak, "days": len(by_day),
+            "left": round(max(0.0, lim + min(0.0, self.today_pnl())), 2),
             "active": self.active, "status": self.status, "cfg": self.cfg, "account": self.account,
             "today": {"pnl": round(sum(p["pnl"] for p in tc), 2), "n": len(tc), "w": sum(1 for p in tc if p["pnl"] > 0)},
             "total": {"pnl": round(sum(p["pnl"] for p in closed), 2), "n": len(closed),

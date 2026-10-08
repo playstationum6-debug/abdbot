@@ -1110,21 +1110,24 @@ def ask_login():
 
 
 LOGIN_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#070b14">
-<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="ABD·BOT"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/ikon-192.png">
-<title>ABD·BOT · Giriş</title><style>
-body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(800px 400px at 80% -100px,rgba(129,140,248,.18),transparent),#070b14;color:#e6edf6;
-font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-form{width:100%;max-width:340px;margin:16px;background:#111a2b;border:1px solid #1e2a3e;border-radius:16px;padding:24px}
-h1{margin:0 0 4px;font-size:22px}h1 span{color:#38bdf8}p{margin:0 0 18px;color:#8a97ab;font-size:14px}
-input{width:100%;box-sizing:border-box;font-size:17px;padding:13px;border-radius:10px;border:1px solid #1e2a3e;background:#0b1220;color:#e6edf6;margin-bottom:12px}
-button{width:100%;font-size:17px;font-weight:700;padding:13px;border:0;border-radius:10px;background:#38bdf8;color:#0b1220}
-.err{color:#f87171;font-size:14px;margin:0 0 12px}</style></head><body>
-<form method="post" action="/giris"><img src="/ikon-192.png" alt="" style="width:64px;height:64px;border-radius:16px;margin-bottom:12px;box-shadow:0 8px 30px rgba(34,211,238,.25)"><h1>ABD<span>·</span>BOT</h1><p>Devam etmek için şifreni gir.</p>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+<title>abdbot · Giriş</title><style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fff;color:#3c3c3c;font:700 16px Nunito,-apple-system,sans-serif}
+form{width:100%;max-width:360px;margin:16px;text-align:center}
+img{width:92px;height:92px;border-radius:26px;margin-bottom:14px;box-shadow:0 6px 0 #58a700}
+h1{margin:0 0 4px;font-size:30px;font-weight:900;color:#58cc02;letter-spacing:-.5px}p{margin:0 0 22px;color:#777}
+input{width:100%;box-sizing:border-box;font:700 17px Nunito,sans-serif;padding:14px 16px;border-radius:16px;border:2px solid #e5e5e5;background:#f7f7f7;color:#3c3c3c;margin-bottom:14px;outline:none}
+input:focus{border-color:#1cb0f6;background:#fff}
+button{width:100%;font:900 16px Nunito,sans-serif;letter-spacing:.6px;text-transform:uppercase;padding:14px;border:0;border-radius:16px;background:#58cc02;color:#fff;box-shadow:0 5px 0 #58a700;cursor:pointer}
+button:active{transform:translateY(5px);box-shadow:none}
+.err{color:#ea2b2b;background:#ffdfe0;border-radius:12px;padding:9px;font-size:14px;margin:0 0 14px}</style></head><body>
+<form method="post" action="/giris"><img src="/ikon-192.png" alt=""><h1>abdbot</h1><p>Tekrar hoş geldin! Şifreni gir.</p>
 __ERR__<input type="password" name="sifre" placeholder="Şifre" autocomplete="current-password" autofocus required>
-<button type="submit">Giriş</button></form></body></html>"""
+<button type="submit">Giriş yap</button></form></body></html>"""
 
 
 def login_page(err=""):
@@ -1172,7 +1175,7 @@ async def giris(request: Request):
 MANIFEST = {
     "name": "ABD·BOT", "short_name": "ABD·BOT", "description": "ABD borsası canlı sinyal ve sanal işlem botu",
     "start_url": "/", "scope": "/", "display": "standalone", "orientation": "portrait",
-    "background_color": "#070b14", "theme_color": "#070b14", "lang": "tr",
+    "background_color": "#58cc02", "theme_color": "#ffffff", "lang": "tr",
     "icons": [
         {"src": "/ikon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
         {"src": "/ikon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
