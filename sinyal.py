@@ -16,6 +16,8 @@ import math
 import time
 from datetime import datetime
 
+import formasyon
+
 SETUP_AD = {
     "orb": "Açılış aralığı kırılımı",
     "vwap": "VWAP geri alma",
@@ -30,6 +32,8 @@ SETUP_AD = {
     "itki": "Hacimli itki (1 dk scalp)",
     "vwap_sek": "VWAP sekmesi (1 dk scalp)",
     "hizli": "Haberli hızlı kırılım (anlık)",
+    "formasyon": "Formasyon kırılımı",
+    "talep": "Alıcı bölgesinden dönüş",
 }
 SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa sonrası"}
 SES_NAME = {0: "pre", 1: "regular", 2: "post", 3: "closed"}
@@ -108,6 +112,8 @@ class Engine:
         self.seen = {}             # sembol -> (ver, snap_ver)
         self._fast_px = {}         # koşan hisse -> son anlık fiyat (kırılımın "şimdi" olduğunu anlamak için)
         self._plan_posted = {}     # koşan hisse -> son yayınlanan plan seviyesi
+        self._fx = {}              # (sembol, 5 dk dilimi) -> grafik analizi (formasyon, seviye, alıcı bölgesi)
+        self._tgt_over = {}        # formasyon hedefi: (sembol, mum, kurgu, yön) -> hedef fiyat
         self.runners = {}          # tarayıcının bulduğu koşan hisseler: sembol -> bilgi (yüzde, haber)
         self.learner = None        # öğrenme modülü (güven ayarı + not)
 
@@ -552,6 +558,75 @@ class Engine:
             o[6].append("Küçük/koşan hisse: kayma yüksek varsayıldı" + (", limit emir ve yarım lot" if ext else ""))
         return [tuple(o) for o in out]
 
+    # ------------------------------------------------------------ grafik okuma (formasyon + alıcı bölgesi)
+    def fx_at(self, sym, tss, bars, k):
+        """k. mum anındaki grafik analizi: kapanmış 5 dk mumlar (son ~3 gün) üzerinden. Önbellekli."""
+        T = tss[k]
+        key = (sym, T // 300)
+        c = self._fx.get(key)
+        if c is not None:
+            return c
+        lim = T // 300 * 300                     # bu 5 dk dilimi henüz kapanmadı → dahil etme
+        rows = [(t, *bars[t][:5]) for t in tss[max(0, k - 900):k + 1]
+                if t < lim and self.bar_info(t)[1] != 3]
+        fx = formasyon.analyze(formasyon.to5m(rows)[-260:])
+        if len(self._fx) > 3000:
+            self._fx.clear()
+        self._fx[key] = fx
+        return fx
+
+    def _chart(self, sym, x, tss, bars, k):
+        """Grafiğe bakarak: formasyon boyun çizgisi kırılımı ve alıcı bölgesinden hacimli dönüş."""
+        out = []
+        fx = self.fx_at(sym, tss, bars, k)
+        x["_fx"] = fx
+        T, c, o, atr = x["T"], x["c"], x["o"], x["atr"]
+        a5 = fx.get("atr") or atr * 2.2
+        ext = x["ses"] != "regular"
+        runner = sym in self.runners
+        # 1) Formasyon kırılımı: bu mum boyun çizgisini hacimle kapanışla geçti
+        for p in fx.get("pat", []):
+            if p["durum"] != "oluşuyor":
+                continue
+            d = 1 if p["bull"] else -1
+            if d < 0 and (ext or runner):
+                continue                          # uzatılmış seans / koşan hissede açığa satış yok
+            neck = p["neck_now"]
+            if not ((x["prev_c"] - neck) * d <= 0 < (c - neck) * d):
+                continue
+            if x["volr"] < 1.5 or not self._ready(sym, "formasyon", d, T):
+                continue
+            # stop: boyun çizgisinin 1 (5 dk) ATR ötesi; hedef: formasyon yüksekliği kadar
+            stop = neck - d * a5
+            risk = abs(c - stop)
+            risk = max(risk, c * MIN_STOP_PCT, atr * MIN_STOP_ATR)
+            if risk > c * 0.05:
+                continue
+            tgt = p["hedef"]
+            if (tgt - c) * d < 1.2 * risk:
+                tgt = c + d * 2 * risk            # formasyon hedefi çok yakınsa en az 2R
+            self._tgt_over[(sym, T, "formasyon", d)] = tgt
+            why = [f"{p['ad']} formasyonu: boyun çizgisi ({f2(neck)}) hacimle {'yukarı' if d > 0 else 'aşağı'} kırıldı",
+                   f"Formasyon hedefi {f2(p['hedef'])} (formasyon yüksekliği {f2(p['boy'])})",
+                   f"Hacim ortalamanın {x['volr']:.1f} katı"]
+            out.append(("formasyon", d, c, c - d * risk, risk, 56, why))
+            break
+        # 2) Alıcı bölgesinden dönüş: fiyat bölgeye indi, yeşil mumla ve hacimle bölgenin üstünde kapandı
+        for z in fx.get("zones", [])[:1]:
+            if not (x["l"] <= z["hi"] and c > z["hi"] and c > o and x["prev_c"] <= z["hi"] * 1.003):
+                continue
+            if x["volr"] < 1.5 or x["ema9"] < x["ema21"] or not self._ready(sym, "talep", 1, T):
+                continue
+            stop = z["lo"] - 0.3 * atr
+            risk = max(c - stop, c * MIN_STOP_PCT, atr * MIN_STOP_ATR)
+            if risk > c * 0.04:
+                continue
+            why = [f"Alıcı bölgesi ({f2(z['lo'])}–{f2(z['hi'])}) test edildi, yeşil mumla üstünde kapandı",
+                   f"Bu bantta işlem hacminin %{z['alici']}'i yükselen mumlarda (alıcılar toplanmış)",
+                   f"Hacim ortalamanın {x['volr']:.1f} katı, kısa trend yukarı"]
+            out.append(("talep", 1, c, c - risk, risk, 55, why))
+        return out
+
     # ------------------------------------------------------------ anlık kırılım (koşan hisseler)
     def fast_check(self, sym, px, now):
         """Koşan hissede canlı fiyat gün/seans tepesini ŞİMDİ kırdıysa mum kapanmasını beklemeden sinyal üret.
@@ -715,6 +790,10 @@ class Engine:
             cands = self._runner(sym, x)
         else:
             cands = self._regular(sym, x) if x["ses"] == "regular" else self._extended(sym, x)
+        try:
+            cands = list(cands) + self._chart(sym, x, tss, bars, k)
+        except Exception:
+            pass
         best = {}   # aynı mum + aynı yön için tek sinyal: en yüksek güvenli kurgu
         for setup, d, entry, stop, risk, base, why in cands:
             # Asgari stop mesafesi: çok dar stoplar normal 1 dk kıpırdamasında patlıyordu
@@ -750,6 +829,12 @@ class Engine:
         ob = x.get("obv", 0.0) * d
         f["obv"] = "lehte" if ob >= 0.25 else ("aleyhte" if ob <= -0.25 else "nötr")
         f["tip"] = "koşan küçük hisse" if sym in self.runners else "ana liste"
+        fx = x.get("_fx") or {}
+        same = [p for p in fx.get("pat", []) if (1 if p["bull"] else -1) == d]
+        opp = [p for p in fx.get("pat", []) if (1 if p["bull"] else -1) != d]
+        f["formasyon"] = same[0]["ad"] + " (lehte)" if same else (opp[0]["ad"] + " (aleyhte)" if opp else "yok")
+        zs = fx.get("zones") or []
+        f["talep"] = "alıcı bölgesine yakın" if zs and x["c"] - zs[0]["hi"] <= x["atr"] * 3 else "uzak / yok"
         if sym in self.runners:
             ri = self.runners[sym]
             f["haber"] = (ri.get("news_kind") or "nötr") if ri.get("news") else "yok"   # iyi / nötr / kötü / yok
@@ -766,7 +851,8 @@ class Engine:
         if sid in self.by_id:
             return
         runner = sym in self.runners
-        tgt = entry + d * (R_RUNNER if runner else R_SETUP.get(setup, R_MULT)) * risk
+        tgt = self._tgt_over.pop((sym, T, setup, d), None) or \
+            entry + d * (R_RUNNER if runner else R_SETUP.get(setup, R_MULT)) * risk
         feats = self._features(sym, x, d)
         conf0 = conf
         if self.learner:

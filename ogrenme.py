@@ -30,11 +30,13 @@ SETUP_AD = {
     "kosu": "Haberli momentum kırılımı", "geri": "Momentum ilk geri çekilme",
     "itki": "Hacimli itki (1 dk scalp)", "vwap_sek": "VWAP sekmesi (1 dk scalp)",
     "hizli": "Haberli hızlı kırılım (anlık)",
+    "formasyon": "Formasyon kırılımı", "talep": "Alıcı bölgesinden dönüş",
 }
 SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa sonrası"}
 FEAT_AD = {"volr": "Hacim katı", "vwap": "VWAP", "trend": "Kısa trend", "spy": "SPY yönü", "room": "Hedefe yer",
            "tod": "Zaman", "fiyat": "Fiyat", "tip": "Hisse tipi", "haber": "Haber", "obv": "OBV hacim akışı",
-           "ai": "Yapay zeka haber puanı", "sec": "SEC bildirimi"}
+           "ai": "Yapay zeka haber puanı", "sec": "SEC bildirimi", "formasyon": "Formasyon",
+           "talep": "Alıcı bölgesi"}
 
 
 def _shr(n, s):

@@ -268,7 +268,7 @@ nav button.on{color:var(--tx)}nav button.on .ib{background:var(--acb);color:var(
   </div>
   <div class="warn" id="warn"></div>
   <div class="cwrap" id="cwrap">
-    <div class="tools" id="tools"><button class="chip3" data-k="sr">Destek/Direnç</button><button class="chip3" data-k="vp">Hacim profili</button><button class="chip3" data-k="vol">Hacim ort.</button><button class="chip3" data-k="vwap">VWAP</button><button class="chip3" data-k="ema">EMA 9/21</button><button class="chip3" data-k="kl">Gün seviyeleri</button><button class="chip3" data-k="mk">Sinyaller</button><button class="chip3 fsb" data-k="fs">Tam ekran</button></div>
+    <div class="tools" id="tools"><button class="chip3" data-k="sr">Destek/Direnç</button><button class="chip3" data-k="fx">Formasyon</button><button class="chip3" data-k="zn">Alıcı bölgesi</button><button class="chip3" data-k="rsi">RSI</button><button class="chip3" data-k="macd">MACD</button><button class="chip3" data-k="vp">Hacim profili</button><button class="chip3" data-k="vol">Hacim ort.</button><button class="chip3" data-k="vwap">VWAP</button><button class="chip3" data-k="ema">EMA 9/21</button><button class="chip3" data-k="kl">Gün seviyeleri</button><button class="chip3" data-k="mk">Sinyaller</button><button class="chip3 fsb" data-k="fs">Tam ekran</button></div>
     <div class="ohlc" id="ohlc"></div>
     <div class="cload" id="cload">Günlük veri yükleniyor…</div>
     <div id="chart"><canvas id="vpc"></canvas></div>
@@ -325,6 +325,9 @@ nav button.on{color:var(--tx)}nav button.on .ib{background:var(--acb);color:var(
     <div class="note" style="margin:6px 0 0">Bugün önceki kapanışa göre en az %10 yükselen, işlem görebilen hisseler + Benzinga haberleri. Varant/birimler ve bugün düşenler elenir. Bot bunlarda sadece alış yapar. 1 $ altı hisseler dahildir — risk çok yüksektir.</div>
     <div class="meta" id="scst" style="margin-top:8px"></div></div>
   <div id="runs"></div>
+  <h3>Formasyon tarayıcı</h3>
+  <div class="note" style="margin:0 2px 10px">Bütün hisselerin 5 dakikalık grafiklerinde dakikada bir taranır. Bot, oluşan bir formasyonun boyun çizgisi hacimle kırılınca işleme girer. Formasyonlar rastgele fiyat hareketinde de oluşabilir; işe yarayıp yaramadığını Öğren sekmesi gösterecek.</div>
+  <div id="pats"></div>
 </section>
 
 <!-- ÖĞRENME -->
@@ -363,8 +366,8 @@ nav button.on{color:var(--tx)}nav button.on .ib{background:var(--acb);color:var(
 <script>
 const TR_OFF=3*3600;
 const SES_TR={pre:'Piyasa öncesi',regular:'Normal seans',post:'Piyasa sonrası',closed:'Kapalı'};
-const SETUP={orb:'Açılış aralığı kırılımı',vwap:'VWAP geri alma',hacim:'Hacimli seviye kırılımı',trend:'Trend geri çekilme',gap:'Boşluk devamı',uz_seviye:'Seviye kırılımı',uz_kirilim:'Seans aralığı kırılımı',uz_vwap:'Seans VWAP geri alma',kosu:'Haberli momentum kırılımı',geri:'Momentum ilk geri çekilme',itki:'Hacimli itki (scalp)',vwap_sek:'VWAP sekmesi (scalp)'};
-const SETUP_K={orb:'ORB',vwap:'VWAP',hacim:'Hacim',trend:'Trend',gap:'Boşluk',uz_seviye:'Seviye',uz_kirilim:'Aralık',uz_vwap:'sVWAP',kosu:'Koşu',geri:'Geri',itki:'İtki',vwap_sek:'Sekme'};
+const SETUP={formasyon:'Formasyon kırılımı',talep:'Alıcı bölgesinden dönüş',hizli:'Haberli hızlı kırılım',orb:'Açılış aralığı kırılımı',vwap:'VWAP geri alma',hacim:'Hacimli seviye kırılımı',trend:'Trend geri çekilme',gap:'Boşluk devamı',uz_seviye:'Seviye kırılımı',uz_kirilim:'Seans aralığı kırılımı',uz_vwap:'Seans VWAP geri alma',kosu:'Haberli momentum kırılımı',geri:'Momentum ilk geri çekilme',itki:'Hacimli itki (scalp)',vwap_sek:'VWAP sekmesi (scalp)'};
+const SETUP_K={formasyon:'Formasyon',talep:'Talep',hizli:'Hızlı',orb:'ORB',vwap:'VWAP',hacim:'Hacim',trend:'Trend',gap:'Boşluk',uz_seviye:'Seviye',uz_kirilim:'Aralık',uz_vwap:'sVWAP',kosu:'Koşu',geri:'Geri',itki:'İtki',vwap_sek:'Sekme'};
 const SES_K={pre:'Öncesi',regular:'Normal',post:'Sonrası'};
 const ST_TR={bekliyor:'Emir bekliyor','açık':'Açık',hedef:'Hedef ✓',stop:'Stop ✗','süre':'Süre doldu','dolmadı':'Dolmadı'};
 const BST_TR={emir:'Emir gönderildi','açık':'Açık','çıkış':'Çıkış emri','kapandı':'Kapandı',iptal:'İptal'};
@@ -377,9 +380,9 @@ function esc(x){return String(x==null?'':x).replace(/[&<>"]/g,c=>({'&':'&amp;','
 let ws=null,retry=0,symbols=[],iexSet=new Set(),rows={},status={},offset=0;
 let cur=ls('sym')||'SPY',tf=String(ls('tf')||'1'),sortKey=ls('sort')||'hare',raw=[],info=null,prevLine=null,lastPx={};
 let sigList=[],sigStats=[],mine=[],learn=null,sigFilter=ls('sigf')||'hepsi',sigShow=15,knownIds=null,sigLines=[],openIds=new Set();
-let botD=null,knownJ=null,runRows=[],runDrop=[],runStatus='',tab=ls('v2')?(ls('tab')||'akis'):'akis';ls('v2','1');
+let botD=null,knownJ=null,runRows=[],runDrop=[],runPats=[],runStatus='',tab=ls('v2')?(ls('tab')||'akis'):'akis';ls('v2','1');
 let LV={lv:[],sup:null,res:null},lvLines=[],srLines=[],vpLines=[],srKey='',vpKey='',VP=null,daily={};
-let opt={sr:1,vp:1,vol:1,vwap:1,ema:0,kl:0,mk:1};
+let opt={sr:1,vp:1,vol:1,vwap:1,ema:0,kl:0,mk:1,fx:1,zn:1,rsi:0,macd:0};
 try{Object.assign(opt,JSON.parse(ls('opt2')||'{}'))}catch(e){}
 if(!['1','5','15','D'].includes(tf))tf='1';
 const isD=()=>tf==='D';
@@ -413,6 +416,25 @@ const vma=chart.addLineSeries({color:C.wa,lineWidth:1,priceScaleId:'v',priceLine
 const vw=chart.addLineSeries({color:'#fb923c',lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
 const e9=chart.addLineSeries({color:'#38bdf8',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
 const e21=chart.addLineSeries({color:'#a78bfa',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+const rsiS=chart.addLineSeries({color:'#b9afff',lineWidth:1.5,priceScaleId:'osc1',priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:false,priceFormat:{type:'price',precision:0,minMove:1}});
+rsiS.createPriceLine({price:70,color:'rgba(255,107,107,.45)',lineWidth:1,lineStyle:2,axisLabelVisible:false,title:''});
+rsiS.createPriceLine({price:30,color:'rgba(61,220,151,.45)',lineWidth:1,lineStyle:2,axisLabelVisible:false,title:''});
+const macdH=chart.addHistogramSeries({priceScaleId:'osc2',priceLineVisible:false,lastValueVisible:false});
+const macdL=chart.addLineSeries({color:'#5cc8ff',lineWidth:1.5,priceScaleId:'osc2',priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+const macdSg=chart.addLineSeries({color:'#ffc857',lineWidth:1,priceScaleId:'osc2',priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+function oscLayout(){const n=(opt.rsi?1:0)+(opt.macd?1:0),band=.17;
+  cs.priceScale().applyOptions({scaleMargins:{top:.06,bottom:.24+band*n}});let pos=.8;
+  if(opt.rsi){chart.priceScale('osc1').applyOptions({scaleMargins:{top:pos-band+.015,bottom:1-pos+.015}});pos-=band}
+  if(opt.macd){chart.priceScale('osc2').applyOptions({scaleMargins:{top:pos-band+.015,bottom:1-pos+.015}});pos-=band}
+  if(!$('cwrap').classList.contains('fs'))$('chart').style.height=(window.innerWidth>=700?480:400)+n*90+'px'}
+function rsiData(a,n=14){const out=[];let g=0,l=0;
+  for(let i=1;i<a.length;i++){const d=a[i][4]-a[i-1][4],up=Math.max(d,0),dn=Math.max(-d,0);
+    if(i<=n){g+=up/n;l+=dn/n;if(i===n)out.push({time:TT(a[i][0]),value:l?100-100/(1+g/l):100});continue}
+    g=(g*(n-1)+up)/n;l=(l*(n-1)+dn)/n;out.push({time:TT(a[i][0]),value:l?100-100/(1+g/l):100})}return out}
+function macdData(a){const k=n=>2/(n+1);let f=null,sl=null,sg=null;const L=[],S=[],H=[];
+  for(const x of a){const c=x[4];f=f===null?c:f+k(12)*(c-f);sl=sl===null?c:sl+k(26)*(c-sl);const m=f-sl;sg=sg===null?m:sg+k(9)*(m-sg);
+    const t=TT(x[0]);L.push({time:t,value:m});S.push({time:t,value:sg});H.push({time:t,value:m-sg,color:m-sg>=0?'rgba(61,220,151,.55)':'rgba(255,107,107,.55)'})}
+  return{L,S,H}}
 
 function agg(b,m){if(m===1)return b;const o=[];let c=null;
   for(const x of b){const t=Math.floor(x[0]/(m*60))*m*60;
@@ -441,7 +463,9 @@ function vwapData(){if(isD())return[];const m=+tf,out=new Map();let pv=0,vv=0,la
     else if(!out.has(bt))out.set(bt,{time:bt})}
   return [...out.values()]}
 function emaData(a,n){const k=2/(n+1);let e=null;return a.map(x=>{e=e===null?x[4]:e+k*(x[4]-e);return{time:TT(x[0]),value:e}})}
-function drawInd(a,ma){vw.setData(opt.vwap?vwapData():[]);
+function drawInd(a,ma){vw.setData(opt.vwap?vwapData():[]);oscLayout();
+  rsiS.setData(opt.rsi?rsiData(a):[]);
+  if(opt.macd){const m=macdData(a);macdL.setData(m.L);macdSg.setData(m.S);macdH.setData(m.H)}else{macdL.setData([]);macdSg.setData([]);macdH.setData([])}
   if(opt.ema){e9.setData(emaData(a,9));e21.setData(emaData(a,21))}else{e9.setData([]);e21.setData([])}
   vma.setData(opt.vol?a.map((x,i)=>ma[i]==null?{time:TT(x[0])}:{time:TT(x[0]),value:ma[i]}):[])}
 try{chart.subscribeCrosshairMove(p=>{const o=$('ohlc');const d=p&&p.seriesData?p.seriesData.get(cs):null;
@@ -462,16 +486,34 @@ function srCalc(a){const cf=SRCFG[tf],b=a.slice(-cf.n),k=cf.k;if(b.length<2*k+8)
     return st.sort((x,y)=>Math.abs(x.p-last)-Math.abs(y.p-last)).slice(0,2)};
   const res=pick(cl.filter(c=>c.p>last+tol*.2).sort((x,y)=>x.p-y.p),1),sup=pick(cl.filter(c=>c.p<last-tol*.2).sort((x,y)=>y.p-x.p),-1);
   return{res,sup}}
-function drawSR(a){const r=opt.sr?srCalc(a):{res:[],sup:[]};
-  const key=tf+'|'+JSON.stringify(r.res.concat(r.sup).map(c=>[+c.p.toPrecision(6),c.n]));
-  const s0=r.sup[0],r0=r.res[0];
-  $('sSup').textContent=s0?fp(s0.p):'—';$('sSups').textContent=s0?`${TF_AD[tf]} · ${s0.weak?'zayıf':s0.n+' dokunuş'}`:TF_AD[tf];
-  $('sRes').textContent=r0?fp(r0.p):'—';$('sRess').textContent=r0?`${TF_AD[tf]} · ${r0.weak?'zayıf':r0.n+' dokunuş'}`:TF_AD[tf];
+// Gün içi grafiklerde ana seviyeler sunucudan (formasyon.py: dönüş noktası kümeleri + kırılıp test edilme + hacim);
+// botun kararlarında kullandığı seviyelerle aynı. Günlük grafikte tarayıcıda hesaplanır.
+function drawSR(a){const sv=(!isD()&&LV.fx&&LV.fx.lv&&LV.fx.lv.length)?LV.fx.lv:null;let r;
+  if(!opt.sr)r={res:[],sup:[]};
+  else if(sv)r={res:sv.filter(x=>x.k==='res').sort((x,y)=>x.p-y.p),sup:sv.filter(x=>x.k==='sup').sort((x,y)=>y.p-x.p)};
+  else r=srCalc(a);
+  const key=tf+'|'+(sv?'s':'c')+JSON.stringify(r.res.concat(r.sup).map(c=>[+c.p.toPrecision(6),c.n,c.t]));
+  const s0=r.sup[0],r0=r.res[0],lab=c=>c.t?c.t.replace(/^(Destek|Direnç) ?/,'')||'ana seviye':(c.weak?'zayıf':c.n+' dokunuş');
+  $('sSup').textContent=s0?fp(s0.p):'—';$('sSups').textContent=s0?lab(s0):TF_AD[tf];
+  $('sRes').textContent=r0?fp(r0.p):'—';$('sRess').textContent=r0?lab(r0):TF_AD[tf];
   if(key===srKey)return;srKey=key;
   for(const l of srLines){try{cs.removePriceLine(l)}catch(e){}}srLines=[];
-  const add=(c,res)=>srLines.push(cs.createPriceLine({price:c.p,color:res?C.dn:C.up,lineWidth:c.n>=3?2:1,lineStyle:2,axisLabelVisible:true,
-    title:`${TF_AD[tf]} ${res?'Direnç':'Destek'}${c.weak?'':' ×'+c.n}`}));
+  const add=(c,res)=>srLines.push(cs.createPriceLine(sv?{price:c.p,color:res?C.dn:C.up,lineWidth:c.w||1,lineStyle:0,axisLabelVisible:true,title:c.t}:
+    {price:c.p,color:res?C.dn:C.up,lineWidth:c.n>=3?2:1,lineStyle:2,axisLabelVisible:true,title:`${TF_AD[tf]} ${res?'Direnç':'Destek'}${c.weak?'':' ×'+c.n}`}));
   r.res.forEach(c=>add(c,1));r.sup.forEach(c=>add(c,0))}
+// formasyon çizimi: dönüş noktalarını birleştiren çizgi, boyun çizgisi (sarı kesikli), hedef fiyat
+const patS=[],patPL=[];let patKey='';
+function lineData(pts){const m=new Map();for(const[t,p]of pts){const tt=bk(t);m.set(tt,{time:tt,value:p})}return[...m.values()].sort((x,y)=>x.time-y.time)}
+function drawPat(){const P=(opt.fx&&!isD()&&LV.fx)?(LV.fx.pat||[]):[];
+  const key=tf+cur+JSON.stringify(P.map(p=>[p.ad,p.durum,p.neck_now,p.t1,p.hedef]));if(key===patKey)return;patKey=key;
+  for(const x of patS){try{chart.removeSeries(x)}catch(e){}}patS.length=0;for(const l of patPL){try{cs.removePriceLine(l)}catch(e){}}patPL.length=0;
+  const first=raw.length?raw[0][0]:0;
+  for(const p of P){const col=p.bull?C.up:C.dn;
+    const mk=(pts,o)=>{const d=lineData(pts.filter(x=>x[0]>=first));if(d.length<2)return null;
+      const x=chart.addLineSeries(Object.assign({color:col,lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},o));x.setData(d);patS.push(x);return x};
+    const ps=mk(p.pts,{});mk(p.neck,{color:C.wa,lineStyle:2});if(p.alt)mk(p.alt,{lineStyle:2,lineWidth:1});
+    if(ps){const d=lineData(p.pts.filter(x=>x[0]>=first));try{ps.setMarkers([{time:d[d.length-1].time,position:p.bull?'belowBar':'aboveBar',color:col,shape:p.bull?'arrowUp':'arrowDown',text:p.ad+(p.durum==='kırıldı'?' (kırıldı)':'')}])}catch(e){}}
+    patPL.push(cs.createPriceLine({price:p.hedef,color:col,lineWidth:1,lineStyle:1,axisLabelVisible:true,title:'Hedef: '+p.ad}))}}
 
 // ---------------- hacim profili (POC / değer alanı) + RVOL + OBV
 function vpCalc(a){let b;
@@ -496,8 +538,14 @@ let vpRaf=0;
 function drawVPCanvas(){if(vpRaf)return;vpRaf=requestAnimationFrame(()=>{vpRaf=0;const cv=$('vpc'),host=$('chart');if(!cv||!host)return;
   const w=host.clientWidth,h=host.clientHeight,dpr=window.devicePixelRatio||1;
   if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);cv.style.width=w+'px';cv.style.height=h+'px'}
-  const g=cv.getContext&&cv.getContext('2d');if(!g)return;g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);if(!VP)return;
+  const g=cv.getContext&&cv.getContext('2d');if(!g)return;g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
   let psw=60;try{psw=chart.priceScale('right').width()||60}catch(e){}
+  const Z=(opt.zn&&!isD()&&LV.fx)?(LV.fx.zones||[]):[];
+  for(const z of Z){const y0=cs.priceToCoordinate(z.hi),y1=cs.priceToCoordinate(z.lo);if(y0==null||y1==null)continue;
+    const top=Math.min(y0,y1),hh=Math.max(2,Math.abs(y1-y0));g.fillStyle='rgba(61,220,151,.10)';g.fillRect(0,top,w-psw,hh);
+    g.strokeStyle='rgba(61,220,151,.5)';g.setLineDash([4,4]);g.beginPath();g.moveTo(0,top+.5);g.lineTo(w-psw,top+.5);g.moveTo(0,top+hh-.5);g.lineTo(w-psw,top+hh-.5);g.stroke();g.setLineDash([]);
+    g.fillStyle='rgba(61,220,151,.9)';g.font='600 12px Barlow, sans-serif';g.fillText(`Alıcı bölgesi · alımların %${z.alici}'i`,8,top+13)}
+  if(!VP)return;
   const right=w-psw-2,maxW=Math.min(110,(w-psw)*.24);
   for(let i=0;i<VP.bins.length;i++){if(!VP.bins[i])continue;const y1=cs.priceToCoordinate(VP.lo+(i+1)*VP.st),y0=cs.priceToCoordinate(VP.lo+i*VP.st);
     if(y1==null||y0==null)continue;const bw=VP.bins[i]/VP.max*maxW,inVA=i>=VP.a0&&i<=VP.a1;
@@ -511,13 +559,16 @@ function volStats(a,ma){const n=a.length;if(n<3){$('vRv').textContent='—';$('v
   $('vRvs').textContent=`${TF_AD[tf]} · ${fvol(a[n-1][5])} / ort. ${fvol(avg)}`;
   let num=0,den=0;for(let i=Math.max(1,n-10);i<n;i++){const v=a[i][5];den+=v;num+=a[i][4]>a[i-1][4]?v:a[i][4]<a[i-1][4]?-v:0}
   const ob=den?num/den:0,o=$('vObv');o.textContent=ob>=.25?'Alıcı ▲ '+Math.round(ob*100)+'%':ob<=-.25?'Satıcı ▼ '+Math.round(-ob*100)+'%':'Nötr';o.className=ob>=.25?'up':ob<=-.25?'dn':''}
-function legend(){const L=[];if(opt.sr)L.push(`<span><i style="color:${C.dn}"></i>${TF_AD[tf]} direnç</span><span><i style="color:${C.up}"></i>${TF_AD[tf]} destek</span>`);
+function legend(){const L=[];if(opt.sr)L.push(`<span><i style="color:${C.dn};border-top-style:solid"></i>Direnç</span><span><i style="color:${C.up};border-top-style:solid"></i>Destek</span>`);
+  if(opt.fx&&!isD())L.push(`<span><i style="color:${C.wa}"></i>Formasyon boyun çizgisi</span>`);
+  if(opt.rsi)L.push('<span><i style="color:#b9afff;border-top-style:solid"></i>RSI 14 (70 aşırı alım, 30 aşırı satım)</span>');
+  if(opt.macd)L.push('<span><i style="color:#5cc8ff;border-top-style:solid"></i>MACD 12/26/9</span>');
   if(opt.vp)L.push(`<span><i style="color:${C.wa};border-top-style:solid"></i>POC</span>`);if(opt.vwap&&!isD())L.push(`<span><i style="color:#fb923c;border-top-style:solid"></i>VWAP</span>`);
   if(opt.vol)L.push(`<span><i style="color:${C.wa};border-top-style:solid"></i>Hacim ort. (parlak çubuk = 2× hacim)</span>`);
   if(!isD())L.push('<span>Soluk mumlar: öncesi/sonrası · Saatler TR</span>');$('legend').innerHTML=L.join('')}
 
 let auxT=null;
-function aux(a){const ma=volMA(a);drawInd(a,ma);drawSR(a);drawVP(a);volStats(a,ma);drawLevels()}
+function aux(a){const ma=volMA(a);drawInd(a,ma);drawSR(a);drawVP(a);volStats(a,ma);drawLevels();drawPat();drawVPCanvas()}
 function render(reset){const a=curBars(),ma=volMA(a);
   $('cload').style.display=isD()&&!daily[cur]?'flex':'none';
   chart.applyOptions({timeScale:{timeVisible:!isD()}});
@@ -556,11 +607,11 @@ let lvKey='';
 function drawLevels(){const L=(opt.kl&&!isD())?(LV.lv||[]).filter(x=>LVC[x.k]):[];const key=JSON.stringify(L);if(key===lvKey)return;lvKey=key;
   for(const l of lvLines){try{cs.removePriceLine(l)}catch(e){}}lvLines=[];
   for(const x of L)lvLines.push(cs.createPriceLine({price:x.p,color:LVC[x.k],lineWidth:1,lineStyle:3,axisLabelVisible:false,title:String(x.t||'').replace(/ · güçlü.*$/,'')}))}
-function setLV(v){if(!v)return;LV=v;drawLevels()}
+function setLV(v){if(!v)return;LV=v;drawLevels();drawPat();drawSR(curBars());drawVPCanvas()}
 function markTools(){for(const b of $('tools').querySelectorAll('button'))if(b.dataset.k!=='fs')b.classList.toggle('on',!!opt[b.dataset.k])}
 $('tools').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const k=b.dataset.k;
   if(k==='fs'){const w=$('cwrap');w.classList.toggle('fs');b.textContent=w.classList.contains('fs')?'Kapat':'Tam ekran';setTimeout(drawVPCanvas,80);return}
-  opt[k]=opt[k]?0:1;ls('opt2',JSON.stringify(opt));markTools();srKey='';vpKey='';render(false)});
+  opt[k]=opt[k]?0:1;ls('opt2',JSON.stringify(opt));markTools();srKey='';vpKey='';patKey='';render(false)});
 markTools();
 
 // ---------------- yardımcılar
@@ -686,6 +737,13 @@ function renderRuns(){$('scst').textContent='Durum: '+(runStatus||'—');nb('nbR
     +(runDrop.length?`<div class="meta" style="margin:14px 2px 6px;font-weight:600">Listeden çıkarılanlar</div>`+runDrop.map(d=>`<div class="meta" style="padding:4px 2px"><b>${esc(d.sym)}</b> · ${tTR(d.t)} · ${esc(d.why)}${d.back>0?` · ${Math.ceil(d.back/60)} dk sonra tekrar aday`:' · tekrar aday'}</div>`).join(''):'')}
 $('runs').addEventListener('click',e=>{const g=e.target.closest('.go');if(g)select(g.dataset.sym)});
 
+function renderPats(){const P=runPats.filter(p=>p.durum==='oluşuyor').concat(runPats.filter(p=>p.durum!=='oluşuyor')).slice(0,30);
+  $('pats').innerHTML=P.length?P.map(p=>`<div class="run" data-s="${esc(p.sym)}" style="cursor:pointer"><div class="top"><span class="sn">${esc(p.sym)}</span>
+    <span class="dirb ${p.bull?'al':'sat'}">${esc(p.ad)}</span><span class="stt ${p.durum==='kırıldı'?(p.bull?'win':'loss'):'live'}" style="margin-left:auto">${p.durum==='kırıldı'?'kırıldı':'oluşuyor'}</span></div>
+    <div class="lv"><div>Boyun<b>${fp(p.neck_now)}</b></div><div>Hedef<b class="${p.bull?'up':'dn'}">${fp(p.hedef)}</b></div><div>Uzaklık<b>${p.uzak==null?'—':(p.uzak>0?'+':'')+p.uzak.toFixed(2)+'%'}</b></div></div></div>`).join('')
+    :empty('Şu an belirgin bir formasyon yok. Tarama seans içinde dakikada bir yenilenir.')}
+$('pats').addEventListener('click',e=>{const r=e.target.closest('.run');if(r)select(r.dataset.s)});
+
 // ---------------- öğrenme
 function tbl(id,head,rowsHtml){$(id).innerHTML='<tr>'+head.map(h=>'<th>'+h+'</th>').join('')+'</tr>'+rowsHtml}
 function renderLearn(){const T=sigStats.find(r=>r.k==='Tümü'),n=T?T.n:0;$('pn').textContent=n;$('pbar').style.width=Math.min(100,n)+'%';
@@ -781,7 +839,7 @@ function connect(){if(document.hidden||ws)return;
           toast(`<b>Yeni sinyal: ${esc(s.sym)} ${al?'AL':'SAT'}</b> · güven ${s.conf}<br><span class="meta">${SETUP[s.setup]||s.setup} · Giriş ${fp(s.e)} · Stop ${fp(s.s)} · Hedef ${fp(s.h)}</span>`,al?'':'sat',()=>select(s.sym))}}
       renderSigs();renderLearn();drawSignals();renderOv()}
     else if(m.type==='bot'){botD=m.d;renderBot();renderOv();if(tab==='sinyal')renderSigs()}
-    else if(m.type==='scan'){runRows=m.rows||[];runDrop=m.dropped||[];runStatus=m.status;renderRuns();renderOv()}
+    else if(m.type==='scan'){runRows=m.rows||[];runDrop=m.dropped||[];runPats=m.pats||[];runStatus=m.status;renderRuns();renderPats();renderOv()}
     else if(m.type==='feed')onFeed(m)};
   ws.onclose=()=>{ws=null;setConn(false);if(document.hidden)return;retry++;
     if(retry===5)toast('<b>Bağlantı yok</b><br><span class="meta">Dokun: sayfayı yenile</span>','sat',()=>location.reload());

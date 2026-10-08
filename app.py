@@ -34,6 +34,7 @@ import websockets
 import yfinance as yf
 
 import bot as botmod
+import formasyon
 import ikon
 import ogrenme
 import sinyal
@@ -736,9 +737,17 @@ def levels(sym):
             lv.append({"p": round(p, 4), "k": "sup", "t": f"Destek ×{n}"})
     ab = [x for x in lv if x["p"] > last * 1.0005]
     be = [x for x in lv if x["p"] < last * 0.9995]
+    # Grafik okuma (5 dk mumlar, son ~3 gün): ana destek/direnç, formasyonlar, alıcı bölgeleri
+    try:
+        rows = [(t, *bars[t][:5]) for t in tss[-1100:] if bar_info(t)[1] != 3]
+        fx = formasyon.analyze(formasyon.to5m(rows)[-260:])
+    except Exception as e:
+        log.debug("Grafik analizi hatası %s: %s", sym, e)
+        fx = {"lv": [], "pat": [], "zones": [], "atr": 0}
     out = {"lv": lv,
            "res": min(ab, key=lambda x: x["p"]) if ab else None,
-           "sup": max(be, key=lambda x: x["p"]) if be else None}
+           "sup": max(be, key=lambda x: x["p"]) if be else None,
+           "fx": fx}
     _lv_cache[sym] = (key, out)
     return out
 
@@ -1187,7 +1196,9 @@ async def send_bot(cl):
 
 async def send_scan(cl):
     cl.scanv = scanner.ver
-    await cl.send({"type": "scan", "rows": scanner.rows(), "status": scanner.status, "dropped": scanner.dropped_rows()})
+    cl.patv = _pat_ver[0]
+    await cl.send({"type": "scan", "rows": scanner.rows(), "status": scanner.status, "dropped": scanner.dropped_rows(),
+                   "pats": PATS})
 
 
 async def send_wl(cl, full=False):
@@ -1232,7 +1243,7 @@ async def broadcaster():
                     await send_sig(cl)
                 if cl.botv != bot.ver or (tick % 3 == 0 and bot.open_positions()):
                     await send_bot(cl)
-                if cl.scanv != scanner.ver:
+                if cl.scanv != scanner.ver or getattr(cl, "patv", -1) != _pat_ver[0]:
                     await send_scan(cl)
                 if tick % 3 == 0:
                     await send_wl(cl)
@@ -1343,6 +1354,43 @@ async def fast_loop():
                     log.warning("Hızlı kırılım hatası %s: %s", sym, e)
 
 
+PATS = []          # bütün hisselerdeki güncel formasyonlar (Tarayıcı sekmesi)
+_pat_ver = [0]
+
+
+async def pattern_loop():
+    """Her dakika bütün hisselerde formasyon tara; yeni oluşan formasyonu akışa yaz."""
+    while True:
+        await asyncio.sleep(60)
+        if cal.session(time.time()) == "closed" and PATS:
+            continue
+        found = []
+        for sym in all_syms():
+            try:
+                fx = (levels(sym) or {}).get("fx") or {}
+            except Exception:
+                continue
+            last = (summary(sym) or {}).get("p")
+            for p in fx.get("pat", []):
+                row = dict(p, sym=sym, last=last, runner=sym in scanner.runners)
+                row["uzak"] = round((p["neck_now"] / last - 1) * 100, 2) if last else None
+                found.append(row)
+                if p["durum"] == "oluşuyor" and last:
+                    yon = "üstünü" if p["bull"] else "altını"
+                    feed_add("plan", sym, f"{p['ad']} oluşuyor: {fp_(p['neck_now'])} {yon} kırarsa hedef {fp_(p['hedef'])}",
+                             sub=f"şu an {fp_(last)}   boyun çizgisine {row['uzak']:+.2f}%   formasyon yüksekliği {fp_(p['boy'])}",
+                             tone="bilgi" if p["bull"] else "sat",
+                             key=f"p:{sym}:{p['ad']}:{p['t1']}", extra={"pat": p["ad"]})
+            for z in fx.get("zones", [])[:1]:
+                if last and z["hi"] < last <= z["hi"] * 1.01:
+                    feed_add("plan", sym, f"Alıcı bölgesine yaklaştı: {fp_(z['lo'])}–{fp_(z['hi'])}",
+                             sub=f"bu bantta hacmin %{z['alici']}'i alıcı mumlarında   şu an {fp_(last)}",
+                             tone="bilgi", key=f"z:{sym}:{z['lo']}:{datetime.now(ET).date()}")
+        found.sort(key=lambda r: (r["durum"] != "oluşuyor", abs(r["uzak"] or 99)))
+        PATS[:] = found[:80]
+        _pat_ver[0] += 1
+
+
 async def bot_loop():
     while True:
         await asyncio.sleep(2)
@@ -1410,7 +1458,7 @@ async def lifespan(app):
     except Exception as e:
         log.warning("Bot senkron hatası: %s", e)
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
-                                                  scan_loop, bot_loop, fast_loop, news_loop)]
+                                                  scan_loop, bot_loop, fast_loop, news_loop, pattern_loop)]
     yield
     for t in tasks:
         t.cancel()
