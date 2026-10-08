@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<title>ABD Canlı Grafik</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{--bg:#0b1220;--panel:#111a2b;--line:#1e2a3e;--txt:#e6edf6;--mut:#8a97ab;--up:#22c55e;--dn:#ef4444;--acc:#38bdf8;--warn:#f59e0b}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+header{position:sticky;top:0;z-index:5;background:rgba(11,18,32,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:10px 14px 8px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.logo{font-weight:800;letter-spacing:.5px}
+.logo span{color:var(--acc)}
+.badge{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+.badge.pre{color:#c4b5fd;border-color:#4c3d8f}
+.badge.regular{color:var(--up);border-color:#14532d}
+.badge.post{color:#fdba74;border-color:#7c3e12}
+.badge.ok{color:var(--up)} .badge.bad{color:var(--dn);border-color:#7f1d1d}
+.clock{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--mut);font-size:12px;text-align:right;line-height:1.3}
+main{padding:10px 12px 40px;max-width:900px;margin:0 auto}
+.quote{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:4px 2px 8px}
+.sym{font-size:22px;font-weight:800}
+.px{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;transition:color .3s}
+.ch{font-weight:700;font-variant-numeric:tabular-nums}
+.up{color:var(--up)} .dn{color:var(--dn)}
+.tf{margin-left:auto;display:flex;gap:4px}
+.tf button,.seg button{background:var(--panel);color:var(--mut);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-weight:600;font-size:13px}
+.tf button.on,.seg button.on{color:var(--txt);border-color:var(--acc)}
+.warn{display:none;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);color:#fcd34d;padding:8px 10px;border-radius:10px;margin:6px 0;font-size:13px}
+#chart{height:52vh;min-height:300px;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 9px;min-width:0}
+.stat b{display:block;font-size:11px;color:var(--mut);font-weight:500}
+.stat span{font-variant-numeric:tabular-nums;font-weight:600;font-size:13px}
+.legend{font-size:12px;color:var(--mut);margin:6px 2px 4px}
+h3{margin:16px 2px 8px;font-size:15px;display:flex;align-items:center;gap:8px}
+.seg{margin-left:auto;display:flex;gap:4px}
+.list{display:flex;flex-direction:column;gap:4px}
+.it{display:grid;grid-template-columns:64px 1fr 72px 62px;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 10px;cursor:pointer}
+.it.sel{border-color:var(--acc)}
+.it .n{font-weight:700}
+.it .p{text-align:right;font-variant-numeric:tabular-nums}
+.it .c{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+.it .s{text-align:right;font-size:11px;color:var(--mut);white-space:nowrap}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;vertical-align:middle;background:#64748b}
+.dot.iex{background:var(--up);box-shadow:0 0 6px var(--up);animation:pulse 1.6s infinite}
+.dot.yahoo{background:var(--acc)}
+.dot.old{background:var(--warn)}
+@keyframes pulse{50%{opacity:.35}}
+.fu{animation:fu .7s}.fd{animation:fd .7s}
+@keyframes fu{from{background:rgba(34,197,94,.22)}}@keyframes fd{from{background:rgba(239,68,68,.22)}}
+footer{color:var(--mut);font-size:12px;margin-top:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <div class="logo">ABD<span>·</span>BOT</div>
+    <span id="ses" class="badge">—</span>
+    <span id="conn" class="badge">bağlanıyor…</span>
+    <div class="clock"><div id="trc">TR --:--:--</div><div id="etc">NY --:--</div></div>
+  </div>
+</header>
+<main>
+  <div class="quote">
+    <div class="sym" id="qsym">—</div>
+    <div class="px" id="qpx">—</div>
+    <div class="ch" id="qch"></div>
+    <div class="tf" id="tf"><button data-m="1">1dk</button><button data-m="5">5dk</button><button data-m="15">15dk</button></div>
+  </div>
+  <div class="warn" id="warn"></div>
+  <div id="chart"></div>
+  <div class="legend">Soluk mumlar: piyasa öncesi/sonrası · Kesikli çizgi: önceki kapanış · Saatler Türkiye saati</div>
+  <div class="stats">
+    <div class="stat"><b>Önceki kapanış</b><span id="sPc">—</span></div>
+    <div class="stat"><b>Gün tepe / dip</b><span id="sHl">—</span></div>
+    <div class="stat"><b>Öncesi tepe / dip</b><span id="sPhl">—</span></div>
+    <div class="stat"><b>Veri kaynağı</b><span id="sSrc">—</span></div>
+    <div class="stat"><b>Son veri</b><span id="sAge">—</span></div>
+    <div class="stat"><b>Veri günü (NY)</b><span id="sDay">—</span></div>
+  </div>
+  <h3>Hisseler <div class="seg" id="sort"><button data-k="hare">En çok hareket</button><button data-k="liste">Liste</button></div></h3>
+  <div class="list" id="list"></div>
+  <footer id="foot"></footer>
+</main>
+<script>
+const TR_OFF=3*3600;
+const SES_TR={pre:'Piyasa öncesi',regular:'Normal seans',post:'Piyasa sonrası',closed:'Kapalı'};
+const $=id=>document.getElementById(id);
+function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
+
+let ws=null,retry=0,symbols=[],iexSet=new Set(),rows={},status={},offset=0;
+let cur=ls('sym')||'SPY',tf=+(ls('tf')||1),sortKey=ls('sort')||'hare',raw=[],info=null,prevLine=null,lastPx={};
+if(![1,5,15].includes(tf))tf=1;
+
+// ---------- grafik
+const chart=LightweightCharts.createChart($('chart'),{autoSize:true,
+  layout:{background:{type:'solid',color:'transparent'},textColor:'#8a97ab',fontSize:11},
+  grid:{vertLines:{color:'rgba(255,255,255,.04)'},horzLines:{color:'rgba(255,255,255,.04)'}},
+  rightPriceScale:{borderColor:'#1e2a3e'},
+  timeScale:{borderColor:'#1e2a3e',timeVisible:true,secondsVisible:false,rightOffset:4},
+  crosshair:{mode:0}});
+const cs=chart.addCandlestickSeries({upColor:'#22c55e',downColor:'#ef4444',borderVisible:false,wickUpColor:'#22c55e',wickDownColor:'#ef4444',priceLineColor:'#38bdf8'});
+cs.priceScale().applyOptions({scaleMargins:{top:.06,bottom:.24}});
+const vs=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'v',lastValueVisible:false,priceLineVisible:false});
+chart.priceScale('v').applyOptions({scaleMargins:{top:.8,bottom:0}});
+
+function agg(b,m){if(m===1)return b;const o=[];let c=null;
+  for(const x of b){const t=Math.floor(x[0]/(m*60))*m*60;
+    if(!c||c[0]!==t){c&&o.push(c);c=[t,x[1],x[2],x[3],x[4],x[5],x[6]]}
+    else{if(x[2]>c[2])c[2]=x[2];if(x[3]<c[3])c[3]=x[3];c[4]=x[4];c[5]+=x[5];if(x[6]===1)c[6]=1}}
+  c&&o.push(c);return o}
+function col(up,ext){return up?(ext?'rgba(34,197,94,.42)':'#22c55e'):(ext?'rgba(239,68,68,.42)':'#ef4444')}
+function toC(x){const c=col(x[4]>=x[1],x[6]!==1);return{time:x[0]+TR_OFF,open:x[1],high:x[2],low:x[3],close:x[4],color:c,wickColor:c,borderColor:c}}
+function toV(x){const up=x[4]>=x[1],ext=x[6]!==1;return{time:x[0]+TR_OFF,value:x[5],color:up?(ext?'rgba(34,197,94,.18)':'rgba(34,197,94,.45)'):(ext?'rgba(239,68,68,.18)':'rgba(239,68,68,.45)')}}
+function render(reset){const a=agg(raw,tf);cs.setData(a.map(toC));vs.setData(a.map(toV));
+  if(reset&&a.length){const n=a.length,show=tf===1?150:tf===5?110:70;chart.timeScale().setVisibleLogicalRange({from:Math.max(0,n-show),to:n+4})}}
+function applyBars(bs){let minT=Infinity;
+  for(const b of bs){let i=raw.length-1;while(i>=0&&raw[i][0]>b[0])i--;
+    if(i>=0&&raw[i][0]===b[0]){if(raw[i].join()===b.join())continue;raw[i]=b}else raw.splice(i+1,0,b);
+    if(b[0]<minT)minT=b[0]}
+  if(minT===Infinity)return;
+  const a=agg(raw,tf);if(!a.length)return;const last=a[a.length-1];
+  const bucket=Math.floor(minT/(tf*60))*tf*60;
+  if(bucket>=last[0]){try{cs.update(toC(last));vs.update(toV(last));return}catch(e){}}
+  render(false)}
+function setPrevLine(){if(prevLine){cs.removePriceLine(prevLine);prevLine=null}
+  if(info&&info.pc)prevLine=cs.createPriceLine({price:info.pc,color:'#94a3b8',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Önc. kapanış'})}
+
+// ---------- yardımcılar
+function fp(x){if(x==null)return'—';return x>=1?x.toFixed(2):x.toFixed(4)}
+function fch(x){return x==null?'':(x>0?'+':'')+x.toFixed(2)+'%'}
+function nowS(){return Date.now()/1000+offset}
+function fage(t){if(!t)return'—';const s=Math.max(0,nowS()-t);if(s<60)return Math.round(s)+' sn';if(s<3600)return Math.round(s/60)+' dk';if(s<86400)return Math.round(s/3600)+' sa';return Math.round(s/86400)+' gün'}
+function setConn(t,c){const e=$('conn');e.textContent=t;e.className='badge '+(c||'')}
+
+// ---------- ekran
+function updateQuote(){
+  $('qsym').textContent=cur;
+  const r=rows[cur];const lastBar=raw[raw.length-1];
+  let p=r?r.p:null;if(lastBar&&(!r||lastBar[0]+60>=r.t-1))p=lastBar[4];
+  const pc=info&&info.pc;const ch=(p!=null&&pc)?(p/pc-1)*100:(r?r.ch:null);
+  $('qpx').textContent=fp(p);$('qch').textContent=fch(ch);$('qch').className='ch '+(ch>0?'up':ch<0?'dn':'');
+  $('qpx').className='px '+(ch>0?'up':ch<0?'dn':'');
+  if(info){$('sPc').textContent=fp(info.pc);
+    $('sHl').textContent=info.dh!=null?fp(info.dh)+' / '+fp(info.dl):'—';
+    $('sPhl').textContent=info.ph!=null?fp(info.ph)+' / '+fp(info.pl):'—';
+    $('sDay').textContent=info.day||'—'}
+  const src=r?r.src:(info&&info.src);
+  $('sSrc').textContent=src==='iex'?'IEX canlı':iexSet.has(cur)?'Yahoo ~1dk (IEX sessiz)':'Yahoo ~1dk';
+  $('sAge').textContent=fage(r?r.t:(info&&info.t));
+  const w=[];
+  if(r&&r.wd)w.push('Seans açık ama bu hissede bugünün verisi henüz yok — grafik önceki işlem gününü gösteriyor, değişim yüzdesi yanıltıcı olabilir.');
+  else if(r&&r.st)w.push('Bu hissede '+fage(r.t)+'dır yeni veri yok. Uzatılmış seansta işlem seyrek olabilir ya da akış durmuş olabilir.');
+  if(status.ses&&status.ses!=='closed'&&status.yAge!=null&&status.yAge>300)w.push('Yahoo verisi '+Math.round(status.yAge/60)+' dk\'dır güncellenmedi.'+(status.yErr?' ('+status.yErr+')':''));
+  $('warn').style.display=w.length?'block':'none';$('warn').innerHTML=w.map(x=>'⚠ '+x).join('<br>')}
+
+function renderList(){
+  let s=symbols.slice();
+  if(sortKey==='hare')s.sort((a,b)=>Math.abs((rows[b]||{}).ch||0)-Math.abs((rows[a]||{}).ch||0));
+  const h=[];
+  for(const k of s){const r=rows[k];if(!r)continue;
+    const cls=r.ch>0?'up':r.ch<0?'dn':'';
+    let fl='';if(lastPx[k]!=null&&r.p!==lastPx[k])fl=r.p>lastPx[k]?' fu':' fd';lastPx[k]=r.p;
+    const dot=(r.st||r.wd)?'old':r.src;
+    const tag=(r.st||r.wd)?fage(r.t):(r.src==='iex'?'canlı':'~1dk');
+    h.push(`<div class="it${k===cur?' sel':''}${fl}" data-s="${k}"><span class="n">${k}</span><span class="p">${fp(r.p)}</span><span class="c ${cls}">${fch(r.ch)}</span><span class="s"><i class="dot ${dot}"></i>${tag}</span></div>`)}
+  $('list').innerHTML=h.join('')}
+
+function renderStatus(){
+  const s=status.ses||'closed';const b=$('ses');b.textContent=SES_TR[s]||s;b.className='badge '+s;
+  const p=status.plan;let t='';
+  if(p)t+=`<b>${p.today?'Bugün':p.d}</b> (TR saati): Öncesi ${p.pre} · Açılış ${p.open} · Kapanış ${p.close}${p.early?' (erken kapanış)':''} · Sonrası biter ${p.post}<br>`;
+  t+=`IEX canlı akış: ${status.iex||'—'} (${status.iexN||0} sembol, sadece NY 08:00–17:00 arası veri gelir)<br>`;
+  t+=`Yahoo son çekim: ${status.yAge==null?'henüz yok':fage(nowS()-status.yAge)+' önce'}${status.ySec?' · '+status.ySec+' sn sürdü':''}${status.yErr?' · ⚠ '+status.yErr:''}<br>`;
+  t+=`Takvim: ${status.cal==='alpaca'?'Alpaca (tatiller dahil)':'hafta içi kuralı (tatiller hariç değil)'} · Elenen hatalı tick: ${status.bad||0}<br>`;
+  t+=`Sunucu açık: ${status.up!=null?fage(nowS()-status.up):'—'}${status.rs7!=null?' · Son 7 günde yeniden başlama: '+status.rs7:''}<br>`;
+  t+=`GitHub yedeği: ${status.bk||'—'}${status.bkAge!=null?' · son kayıt '+fage(nowS()-status.bkAge)+' önce':''}`;
+  $('foot').innerHTML=t}
+
+function select(sym){cur=sym;ls('sym',sym);raw=[];info=null;render(true);setPrevLine();updateQuote();renderList();
+  if(ws&&ws.readyState===1)ws.send(JSON.stringify({sub:sym}))}
+
+$('list').addEventListener('click',e=>{const it=e.target.closest('.it');if(it){select(it.dataset.s);window.scrollTo({top:0,behavior:'smooth'})}});
+function markBtns(){for(const b of $('tf').children)b.classList.toggle('on',+b.dataset.m===tf);
+  for(const b of $('sort').children)b.classList.toggle('on',b.dataset.k===sortKey)}
+$('tf').addEventListener('click',e=>{const m=+e.target.dataset.m;if(!m)return;tf=m;ls('tf',m);markBtns();render(true)});
+$('sort').addEventListener('click',e=>{const k=e.target.dataset.k;if(!k)return;sortKey=k;ls('sort',k);markBtns();renderList()});
+markBtns();
+
+// ---------- bağlantı
+function connect(){if(document.hidden||ws)return;
+  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
+  setConn('bağlanıyor…');
+  ws.onopen=()=>{retry=0;setConn('bağlı','ok');ws.send(JSON.stringify({sub:cur}))};
+  ws.onmessage=e=>{const m=JSON.parse(e.data);
+    if(m.type==='hello'){symbols=m.symbols;iexSet=new Set(m.iex);if(!symbols.includes(cur)){cur=symbols[0];ws.send(JSON.stringify({sub:cur}))}}
+    else if(m.type==='wl'){Object.assign(rows,m.rows);status=m.status;offset=status.now-Date.now()/1000;renderList();renderStatus();updateQuote()}
+    else if(m.type==='snap'&&m.sym===cur){raw=m.bars;info=m.i;render(true);setPrevLine();updateQuote()}
+    else if(m.type==='bar'&&m.sym===cur){const pc=info&&info.pc;info=m.i;applyBars(m.bars);if(info&&info.pc!==pc)setPrevLine();updateQuote()}};
+  ws.onclose=()=>{ws=null;if(document.hidden){setConn('beklemede');return}
+    retry++;setConn(retry>4?'bağlantı yok · dokun = yenile':'yeniden bağlanıyor…','bad');
+    setTimeout(connect,Math.min(15000,1000*retry))}}
+document.addEventListener('visibilitychange',()=>{if(document.hidden){if(ws)ws.close()}else connect()});
+$('conn').onclick=()=>{if(retry>4)location.reload()};
+
+setInterval(()=>{const d=new Date(nowS()*1000);
+  $('trc').textContent='TR '+d.toLocaleTimeString('tr-TR',{timeZone:'Europe/Istanbul'});
+  $('etc').textContent='NY '+d.toLocaleTimeString('tr-TR',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit'});
+  if(info||rows[cur])$('sAge').textContent=fage((rows[cur]||info).t)},1000);
+
+$('qsym').textContent=cur;
+connect();
+</script>
+</body>
+</html>

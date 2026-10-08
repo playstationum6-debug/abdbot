@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+httpx>=0.27
+websockets>=12
+yfinance>=0.2.54
+pandas>=2.0
+tzdata
