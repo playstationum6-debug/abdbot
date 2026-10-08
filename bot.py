@@ -60,6 +60,7 @@ class Bot:
         self.journal = []
         self.on_note = None      # app.py: canlı akışa mesaj düşürmek için
         self.extra_mult = None   # app.py: piyasa havası / bilanço günü lot çarpanı → (çarpan, not)
+        self.sector_of = None    # app.py: sembol → sektör adı (sektör yoğunluğu sınırı için)
         self.ver = 0
         self.dirty_days = set()
         self.seen = set()
@@ -204,6 +205,13 @@ class Bot:
             return skip("bu hissede zaten pozisyon var")
         if len(self.open_positions()) >= self.cfg["max_open"]:
             return skip(f"en fazla {self.cfg['max_open']} açık pozisyon")
+        # Sektör yoğunluğu: aynı sektörde en fazla N açık pozisyon (piyasa tek yöne sert giderse hepsi birden yanmasın)
+        sec = self.sector_of(sym) if self.sector_of else None
+        lim_s = int(self.cfg.get("sektor_max", 2) or 0)
+        if sec and lim_s > 0:
+            same = [p for p in self.open_positions() if self.sector_of(p["sym"]) == sec]
+            if len(same) >= lim_s:
+                return skip(f"{sec} sektöründe zaten {len(same)} açık pozisyon var (sınır {lim_s})")
         if d < 0 and ses != "regular":
             return skip("uzatılmış seansta açığa satış yapılmıyor")
         if d < 0 and sig.get("runner"):
