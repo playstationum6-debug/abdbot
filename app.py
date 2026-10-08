@@ -741,17 +741,63 @@ def authorized(request: Request) -> bool:
 
 
 def ask_login():
-    return Response("Giriş gerekli", status_code=401, headers={"WWW-Authenticate": 'Basic realm="ABD Bot"'})
+    return Response("Giriş gerekli", status_code=401)
+
+
+LOGIN_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1220">
+<title>ABD Bot · Giriş</title><style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b1220;color:#e6edf6;
+font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+form{width:100%;max-width:340px;margin:16px;background:#111a2b;border:1px solid #1e2a3e;border-radius:16px;padding:24px}
+h1{margin:0 0 4px;font-size:22px}h1 span{color:#38bdf8}p{margin:0 0 18px;color:#8a97ab;font-size:14px}
+input{width:100%;box-sizing:border-box;font-size:17px;padding:13px;border-radius:10px;border:1px solid #1e2a3e;background:#0b1220;color:#e6edf6;margin-bottom:12px}
+button{width:100%;font-size:17px;font-weight:700;padding:13px;border:0;border-radius:10px;background:#38bdf8;color:#0b1220}
+.err{color:#f87171;font-size:14px;margin:0 0 12px}</style></head><body>
+<form method="post" action="/giris"><h1>ABD<span>·</span>BOT</h1><p>Devam etmek için şifreni gir.</p>
+__ERR__<input type="password" name="sifre" placeholder="Şifre" autocomplete="current-password" autofocus required>
+<button type="submit">Giriş</button></form></body></html>"""
+
+
+def login_page(err=""):
+    msg = f'<div class="err">{err}</div>' if err else ""
+    return HTMLResponse(LOGIN_HTML.replace("__ERR__", msg), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/")
 async def index(request: Request):
     if not authorized(request):
-        return ask_login()
+        return login_page()
     resp = HTMLResponse((BASE / "index.html").read_text(encoding="utf-8"),
                         headers={"Cache-Control": "no-store"})
     if SITE_PASSWORD:
-        resp.set_cookie("tk", TOKEN, max_age=30 * 86400, httponly=True, samesite="lax")
+        resp.set_cookie("tk", TOKEN, max_age=30 * 86400, httponly=True, samesite="lax",
+                        secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https")
+    return resp
+
+
+_login_fail = {"n": 0, "t": 0.0}
+
+
+@app.post("/giris")
+async def giris(request: Request):
+    from urllib.parse import parse_qs
+    if not SITE_PASSWORD:
+        return Response(status_code=303, headers={"Location": "/"})
+    # Kaba kuvvet denemelerine karşı: üst üste 5 hatalı denemeden sonra 60 sn bekletir
+    if _login_fail["n"] >= 5 and time.time() - _login_fail["t"] < 60:
+        return login_page("Çok fazla hatalı deneme. 1 dakika sonra tekrar dene.")
+    body = (await request.body()).decode("utf-8", "ignore")
+    pw = (parse_qs(body).get("sifre") or [""])[0]
+    if not secrets.compare_digest(pw, SITE_PASSWORD):
+        _login_fail["n"] += 1
+        _login_fail["t"] = time.time()
+        await asyncio.sleep(1)
+        return login_page("Şifre yanlış.")
+    _login_fail["n"] = 0
+    resp = Response(status_code=303, headers={"Location": "/"})
+    resp.set_cookie("tk", TOKEN, max_age=30 * 86400, httponly=True, samesite="lax",
+                    secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https")
     return resp
 
 
