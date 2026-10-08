@@ -14,6 +14,7 @@ ABD Trade Botu — Adım 1: Canlı veri + grafik
 import asyncio
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -1074,13 +1075,17 @@ AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd"
             "yarim_kapat": (int, 0, 1), "yarim_r": (float, 0.5, 3), "kalan_r": (float, 1, 8)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1,
-             "tg_kosan": 1, "tg_tablo": 1}
+             "tg_kosan": 1, "tg_tablo": 1, "tg_uyari": 1}
 
 TG_TOKEN = os.getenv("TG_TOKEN", "")
 TG_CHAT = os.getenv("TG_CHAT", "")
 
 
-TG_ADMIN = os.getenv("TG_ADMIN", "")          # isteğe bağlı: komutları özelden yazabilecek Telegram kullanıcı numaran
+TG_ADMIN = os.getenv("TG_ADMIN", "")
+MINI_APP = os.getenv("TG_MINI_APP", "1") == "1"   # BotFather'da Mini App ayarlandıysa düğmeler Telegram içinde açılır
+TG_KONULAR = {"sinyal": ("🎯 Sinyaller", 0x6FB9F0), "bot": ("🤖 Bot işlemleri", 0x8EEE98), "plan": ("👀 Planlar", 0xFFD67E),
+              "kosan": ("🚀 Koşan hisseler", 0xFF93B2), "haber": ("📰 Haberler", 0xCB86DB),
+              "uyari": ("⚠️ Piyasa uyarıları", 0xFB6F5F), "rapor": ("📋 Raporlar ve yorum", 0x6FB9F0)}          # isteğe bağlı: komutları özelden yazabilecek Telegram kullanıcı numaran
 SITE_URL = (os.getenv("SITE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "https://abdbot.onrender.com").rstrip("/")
 
 
@@ -1101,6 +1106,11 @@ class Telegram:
         self.offset = 0
         self.cmd_st = "—"
         self.meta = {}         # anahtar -> {"base", "photo", "durum"}: mesajı sonradan güncellemek için
+        self.username = ""     # botun kullanıcı adı (Mini App bağlantısı için)
+        self.forum = False     # TG_CHAT konulu (forum) bir grup mu
+        self.chat_type = ""
+        self.topics = {}       # konu -> message_thread_id
+        self.msg_topic = {}    # mesaj anahtarı -> konu
         self.tr_cache = {}     # haber başlığı -> Türkçe çeviri + özet
 
     @property
@@ -1112,6 +1122,8 @@ class Telegram:
         d = (data or {}).get("tg") or {}
         self.msg = {k: v for k, v in (d.get("msg") or {}).items()}
         self.meta = d.get("meta") or {}
+        self.topics = d.get("topics") or {}
+        self.msg_topic = d.get("mt") or {}
         self.done = set(d.get("done") or [])
         self.alarms = d.get("alarm") or []
         self.table = d.get("table") or {}
@@ -1123,15 +1135,18 @@ class Telegram:
             self.done = set(list(self.done)[-400:])
         if len(self.meta) > 120:
             self.meta = dict(list(self.meta.items())[-80:])
+        if len(self.msg_topic) > 500:
+            self.msg_topic = dict(list(self.msg_topic.items())[-400:])
         backup.data["tg"] = {"msg": self.msg, "done": list(self.done), "alarm": self.alarms, "table": self.table,
-                             "meta": self.meta}
+                             "meta": self.meta, "topics": self.topics, "mt": self.msg_topic}
         backup.dirty = True
 
     def send(self, html, chart=None, key=None, reply=None, sym=None, chat=None, quiet=False, haber=None,
-             durum=None):
+             durum=None, konu=None, thread=None):
         if self.ok:
             self.queue.append({"html": html[:3600], "chart": chart, "key": key, "reply": reply, "sym": sym,
-                               "chat": chat, "quiet": quiet, "haber": haber, "durum": durum})
+                               "chat": chat, "quiet": quiet, "haber": haber, "durum": durum, "konu": konu,
+                               "thread": thread})
             del self.queue[:-40]
 
     async def ceviri(self, c, headline):
@@ -1169,7 +1184,8 @@ class Telegram:
     def _markup(self, sym):
         if not sym:
             return None
-        return {"inline_keyboard": [[{"text": f"📈 #{sym} grafiği aç", "url": f"{SITE_URL}/?s={sym}"}]]}
+        url = f"https://t.me/{self.username}?startapp=s_{sym}" if self.username and MINI_APP else f"{SITE_URL}/?s={sym}"
+        return {"inline_keyboard": [[{"text": f"📈 #{sym} grafiği aç", "url": url}]]}
 
     def _chart_data(self, ch):
         """Ana döngüde (veri değişmeden) grafik için 5 dk mumları ve çizimleri topla."""
@@ -1200,6 +1216,13 @@ class Telegram:
         base = {"chat_id": chat, "parse_mode": "HTML"}
         if item.get("quiet"):
             base["disable_notification"] = True
+        konu = item.get("konu")
+        if self.forum and not item.get("chat") and konu and self.topics.get(konu):
+            base["message_thread_id"] = self.topics[konu]
+        if item.get("thread"):
+            base["message_thread_id"] = item["thread"]
+        if item.get("key"):
+            self.msg_topic[item["key"]] = konu
         html = item["html"]
         if item.get("haber"):
             tr = await self.ceviri(c, item["haber"])
@@ -1212,6 +1235,8 @@ class Telegram:
         if item.get("key"):
             self.meta[item["key"]] = {"base": meta_base, "durum": item.get("durum"), "photo": False, "sym": item.get("sym")}
         rid = self.msg.get(item["reply"]) if item.get("reply") else None
+        if rid and self.forum and self.msg_topic.get(item["reply"]) != konu:
+            rid = None                                   # başka konudaki mesaja yanıt verilemez
         if rid:
             base.update(reply_to_message_id=rid, allow_sending_without_reply=True)
         mk = self._markup(item.get("sym"))
@@ -1481,24 +1506,31 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
             html = f"{icon} <b>{tags}</b> · {_h(txt)}" + (f"\n<i>{_h(sub)}</i>" if sub else "")
         loud = k == "bot" and tone in ("al", "sat", "kar", "zarar") or (k == "sinyal" and ex.get("conf", 0) >= 80)
         tg.send(html, chart, key=tk, reply=tr, sym=sym1, quiet=not loud, haber=ex.get("tg_haber"),
-                durum=ex.get("tg_durum"))
+                durum=ex.get("tg_durum"), konu="sinyal" if k == "sinyal" else "bot")
     elif k == "plan" and PUSH_PREF["tg_plan"]:
         html = (f"👀 <b>PLAN · {tags}</b>\n🎯 {_h(txt)}" + seviye_satiri(lines) + rr_satiri(lines, 1 if tone != "sat" else -1)
                 + (f"\n<i>{_h(sub)}</i>" if sub and not lines.get("stop") else ""))
-        tg.send(html, chart, sym=sym1, quiet=True)
-    elif k == "haber" and PUSH_PREF["tg_haber"] and tone in ("iyi", "kötü") and ex.get("watched"):
-        acik = any(p["sym"] in it["sym"] for p in bot.open_positions())
+        tg.send(html, chart, sym=sym1, quiet=True, konu="plan")
+    elif k == "haber" and tone in ("iyi", "kötü") and ex.get("watched"):
+        acik = next((p for p in bot.open_positions() if p["sym"] in it["sym"]), None)
         html = (f"📰 <b>{tags} · {'OLUMLU' if tone == 'iyi' else 'OLUMSUZ'} HABER</b>"
                 + (" · 💼 açık pozisyon var" if acik else "") + f"\n{_h(txt)}"
                 + (f'\n<a href="{_h(url)}">Habere git →</a>' if url else ""))
-        tg.send(html, sym=sym1, quiet=not acik, haber=txt)
+        if PUSH_PREF["tg_haber"]:
+            tg.send(html, sym=sym1, quiet=not acik, haber=txt, konu="haber")
+        if acik and tone == "kötü" and PUSH_PREF.get("tg_uyari", 1):
+            # açık pozisyonda olumsuz haber: işlem mesajına yanıt olarak sesli uyarı
+            tg.send(f"🚨 <b>DİKKAT · #{_h(acik['sym'])} açık pozisyonda OLUMSUZ haber</b>\n{_h(txt)}\n"
+                    f"🛑 Stop {fp_(acik['stop'])} · bot stopu takip ediyor", sym=acik["sym"], reply=f"p:{acik['id']}",
+                    haber=txt, konu="bot")
     elif k == "tara" and PUSH_PREF.get("tg_kosan", 1) and (ex.get("news") or (ex.get("pct") or 0) >= 30):
         html = (f"🚀 <b>KOŞAN · {tags} {ex.get('pct') or 0:+.0f}%</b>\n{_h(txt.split(': ', 1)[-1] if '(' in txt else '')}"
                 + (f"\n📰 {_h(sub)}" if sub and sub != "Haber bulunamadı" else "")
                 + (f'\n<a href="{_h(ex["url"])}">Habere git →</a>' if ex.get("url") else ""))
-        tg.send(html, sym=sym1, quiet=not ex.get("news"), haber=sub if sub and sub != "Haber bulunamadı" else None)
-    elif k == "rapor" and PUSH_PREF["tg_rapor"]:
-        tg.send(f"📋 <b>{_h(txt)}</b>\n{_h(sub)}", ex.get("chart"), quiet=True)
+        tg.send(html, sym=sym1, quiet=not ex.get("news"), haber=sub if sub and sub != "Haber bulunamadı" else None,
+                konu="kosan")
+    elif k == "rapor" and PUSH_PREF["tg_rapor"] and not ex.get("tg_skip"):
+        tg.send(f"📋 <b>{_h(txt)}</b>\n{_h(sub)}", ex.get("chart"), quiet=True, konu="rapor")
 
 
 def seviye_satiri(lines):
@@ -2302,19 +2334,268 @@ async def rapor_loop():
             feed_add("rapor", "", t_, sub=s_, tone="bilgi")
             if PUSH_PREF["push_rapor"]:
                 push.notify(t_, s_.replace("\n", " · "), tag="sabah")
+            if tg.ok and PUSH_PREF["tg_rapor"]:
+                try:
+                    png = sabah_kolaj()
+                    if png:
+                        tg.send("🌅 <b>Sabah hazırlığı</b> · öncesi seansta en çok hareket edenler", {"png": png},
+                                quiet=True, konu="rapor")
+                    y = await ai_yorum(False)
+                    if y:
+                        tg.send(y, quiet=True, konu="rapor")
+                except Exception as e:
+                    log.warning("Sabah ekleri hatası: %s", e)
         if last == "regular" and ses == "post":
             await asyncio.sleep(120)        # son işlemler kapansın
             t_, s_ = gun_sonu_raporu()
             feed_add("rapor", "", t_, sub=s_, tone="bilgi")
             if PUSH_PREF["push_rapor"]:
                 push.notify(t_, s_, tag="rapor")
+            if tg.ok and PUSH_PREF["tg_rapor"]:
+                try:
+                    k_ = kacan_ozet()
+                    if k_:
+                        tg.send(k_, quiet=True, konu="rapor")
+                    y = await ai_yorum(True)
+                    if y:
+                        tg.send(y, quiet=True, konu="rapor")
+                except Exception as e:
+                    log.warning("Akşam ekleri hatası: %s", e)
             if datetime.now(ET).weekday() == 4 and tg.ok and PUSH_PREF["tg_rapor"]:   # cuma: haftalık rapor
                 try:
                     w_txt, w_png = tg_karne(gun=7)
-                    tg.send(w_txt, {"png": w_png} if w_png else None)
+                    tg.send(w_txt, {"png": w_png} if w_png else None, konu="rapor")
+                    tg.send(ogrenme_haftalik(), quiet=True, konu="rapor")
                 except Exception as e:
                     log.warning("Haftalık rapor hatası: %s", e)
         last = ses
+
+
+# ----------------------------------------------------------------- Telegram ekleri: uyarılar, yapay zeka yorumu, kolaj
+async def ai_metin(prompt, maxlen=900):
+    """Gemini'den düz Türkçe metin (GEMINI_API_KEY yoksa None)."""
+    if not scanner.ai_key:
+        return None
+    now = time.time()
+    scanner.ai_calls = [t for t in scanner.ai_calls if now - t < 60]
+    if len(scanner.ai_calls) >= 8:
+        await asyncio.sleep(20)
+    scanner.ai_calls.append(time.time())
+    try:
+        async with httpx.AsyncClient(timeout=40) as c:
+            r = await c.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{scanner.ai_model}:generateContent",
+                headers={"x-goog-api-key": scanner.ai_key, "Content-Type": "application/json"},
+                json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.4}})
+            if r.status_code != 200:
+                return None
+            return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()[:maxlen]
+    except Exception:
+        return None
+
+
+def piyasa_ozeti(aksam=False):
+    """Yapay zekaya verilecek piyasa verisi (düz metin)."""
+    sp = summary("SPY") or {}
+    qq = summary("QQQ") or {}
+    lines = [f"SPY {sp.get('ch', 0) or 0:+.2f}%, QQQ {qq.get('ch', 0) or 0:+.2f}%",
+             f"Piyasa havası: {HAVA.get('etiket')} ({', '.join(HAVA.get('neden') or [])})"]
+    g = [f"{x['s']} {x['ch']:+.0f}%" for x in (MARKET.get("gain") or [])[:6] if x.get("ch") is not None]
+    if g:
+        lines.append("En çok yükselenler: " + ", ".join(g))
+    hs = [f"{r['sym']}: {(r.get('news') or {}).get('headline', '')[:100]}" for r in scanner.rows()[:6] if r.get("news")]
+    if hs:
+        lines.append("Haberli koşan hisseler: " + " | ".join(hs))
+    bil = [x["s"] for x in bilanco_hafta() if x["bugun"]][:10]
+    if bil:
+        lines.append("Bugün bilanço: " + ", ".join(bil))
+    if aksam:
+        td = bot.today_closed()
+        lines.append(f"Bot bugün: {len(td)} işlem, {sum(p['pnl'] for p in td):+.2f} $, "
+                     f"{sum(1 for p in td if p['pnl'] > 0)} kazanan")
+    return "\n".join(lines)
+
+
+async def ai_yorum(aksam=False):
+    veri = piyasa_ozeti(aksam)
+    prompt = (("Bugün ABD borsası kapandı. " if aksam else "ABD borsası birazdan açılacak. ")
+              + "Aşağıdaki verilere bakarak Türkçe, sade, 4 cümlelik bir piyasa yorumu yaz: "
+              + ("bugün ne oldu, öne çıkan hisseler ve sebepleri, botun günü, yarın nelere dikkat edilmeli. "
+                 if aksam else "genel hava, öne çıkan haberli hisseler, bugün nelere dikkat edilmeli. ")
+              + "Abartma, tahmin verme, yatırım tavsiyesi verme. Madde işareti kullanma.\n\nVeri:\n" + veri)
+    txt = await ai_metin(prompt)
+    if not txt:
+        return None
+    return f"🧠 <b>{'Akşam' if aksam else 'Sabah'} yorumu (yapay zeka)</b>\n{_h(txt)}\n<i>Yatırım tavsiyesi değildir.</i>"
+
+
+def sabah_kolaj():
+    if not grafik:
+        return None
+    cand = sorted(scanner.rows(), key=lambda r: -abs(r.get("pct_now") if r.get("pct_now") is not None else (r.get("pct") or 0)))
+    syms = [r["sym"] for r in cand] + [x["s"] for x in (MARKET.get("gain") or [])]
+    items = []
+    for sym in dict.fromkeys(syms):
+        bars = store.bars.get(sym) or {}
+        if len(bars) < 30:
+            continue
+        rows = [(t, *bars[t][:5]) for t in sorted(bars)[-600:] if bar_info(t)[1] != 3]
+        b5 = formasyon.to5m(rows)
+        s_ = summary(sym) or {}
+        items.append((sym, s_.get("ch"), b5))
+        if len(items) >= 6:
+            break
+    if len(items) < 2:
+        return None
+    return grafik.kolaj(items, "Sabah hazırlığı · öncesi seans", "En çok hareket eden hisseler · 5 dk mumlar · TR saati")
+
+
+def kacan_ozet():
+    """Bot girmedi ama hedefe giden sinyaller (bugün)."""
+    today = datetime.now(ET).date().isoformat()
+    taken = {p.get("sig") for p in bot.positions}
+    kac = [x for x in engine.signals if x.get("day") == today and x["id"] not in taken and x.get("st") == "hedef"
+           and (x.get("r") or 0) > 0 and x["conf"] >= BOT_CFG.get("min_conf", 55)]
+    if not kac:
+        return None
+    neden = {}
+    for x in kac:
+        n = next((j["msg"].split("atlandı:", 1)[1].strip() for j in reversed(bot.journal[-2000:])
+                  if j.get("sym") == x["sym"] and j["typ"] == "atla" and "atlandı:" in j["msg"]
+                  and abs(j["t"] - (x.get("created") or x["t"])) < 600), "bilinmiyor")
+        key = re.sub(r"[-+]?\d+([.,]\d+)?", "#", n).split(" (")[0].split(":")[0]
+        neden.setdefault(key, []).append(x)
+    tot = sum(x["r"] for x in kac)
+    out = [f"🙈 <b>Bot girmedi ama tuttu</b> · {len(kac)} sinyal, toplam {tot:+.1f}R kaçtı"]
+    for k, xs in sorted(neden.items(), key=lambda kv: -len(kv[1]))[:4]:
+        out.append(f"• {_h(k[:60])}: {len(xs)} sinyal ({', '.join('#' + x['sym'] for x in xs[:5])})")
+    sermaye = sum(len(v) for k, v in neden.items() if "sermaye" in k)
+    if sermaye >= 2:
+        cap = bot.capital()[0]
+        n_now = max(1, int(cap // max(1, BOT_CFG["notional"])))
+        yeni = max(20, int(cap // (n_now + 2)))
+        out.append(f"💡 Öneri: {sermaye} sinyal 'sermaye dolu' yüzünden kaçtı. Ayarlar'da 'İşlem başı en fazla'yı "
+                   f"{BOT_CFG['notional']:.0f} $'dan {yeni} $'a indirirsen aynı anda {n_now} yerine {int(cap // yeni)} işlem sığar.")
+    if any("güven" in k for k in neden):
+        out.append("💡 Güven eşiği yüzünden kaçanlar var; eşiği düşürmeden önce Öğrenme sayfasında o kurgunun sonucuna bak.")
+    return "\n".join(out)
+
+
+def ogrenme_haftalik():
+    """Bu hafta bot ne öğrendi: işe yarayan / yaramayan koşullar ve lot değişen kurgular."""
+    ins = learner.insights(top=3)
+    rows = {r["k"]: r["durum"] for r in learner.group_rows()}
+    eski = backup.data.get("ogren_hafta") or {}
+    out = ["🎓 <b>Bu hafta bot ne öğrendi</b>"]
+    if ins["good"]:
+        out.append("✅ İşe yarayanlar: " + "; ".join(f"{_h(r['k'])} ({r['avg']:+.2f}R, {r['n']})" for r in ins["good"]))
+    if ins["bad"]:
+        out.append("❌ Kaçınılanlar: " + "; ".join(f"{_h(r['k'])} ({r['avg']:+.2f}R, {r['n']})" for r in ins["bad"]))
+    deg = [f"{_h(k)}: {_h(eski[k].split(' · ')[0])} → {_h(v.split(' · ')[0])}" for k, v in rows.items()
+           if k in eski and eski[k] != v][:6]
+    if deg:
+        out.append("🔁 Lotu değişen kurgular:\n" + "\n".join("• " + x for x in deg))
+    elif eski:
+        out.append("🔁 Bu hafta kurgu değerlendirmelerinde değişiklik olmadı.")
+    out.append(f"📚 Toplam öğrenilen sonuç: {ins['n']} · ortalama {(ins['avg'] or 0):+.2f}R")
+    backup.data["ogren_hafta"] = rows
+    backup.dirty = True
+    return "\n".join(out)
+
+
+# ---- anlık piyasa uyarıları
+_UY = {"spy": deque(maxlen=80), "son": {}, "hava": None, "vix": set(), "vix_gun": None, "halt": {}, "bil": set()}
+
+
+def _uyari(key, html, cooldown=2700, loud=True, sym=None):
+    now = time.time()
+    if now - _UY["son"].get(key, 0) < cooldown:
+        return
+    _UY["son"][key] = now
+    feed_add("rapor", sym or "", re.sub(r"<[^>]+>", "", html.split("\n")[0]), sub=re.sub(r"<[^>]+>", "", "\n".join(html.split("\n")[1:])),
+             tone="bilgi", extra={"tg_skip": 1})
+    if tg.ok and PUSH_PREF.get("tg_uyari", 1):
+        tg.send(html, sym=sym, quiet=not loud, konu="uyari")
+    if PUSH_PREF.get("push_islem"):
+        push.notify(re.sub(r"<[^>]+>", "", html.split("\n")[0]), re.sub(r"<[^>]+>", "", " ".join(html.split("\n")[1:]))[:180],
+                    tag=f"uyari-{key}")
+
+
+async def piyasa_uyari_loop():
+    await asyncio.sleep(60)
+    while True:
+        await asyncio.sleep(30)
+        try:
+            now = time.time()
+            ses = cal.session(now)
+            # 1) SPY 15 dakikada %1
+            p = _px("SPY")
+            if p and ses == "regular":
+                _UY["spy"].append((now, p))
+                old = [x for x in _UY["spy"] if 840 <= now - x[0] <= 960]
+                if old:
+                    ch = (p / old[0][1] - 1) * 100
+                    if ch <= -1.0:
+                        _uyari("spy-", f"📉 <b>PİYASA SERT DÜŞÜYOR</b>\nSPY son 15 dakikada {ch:+.2f}% ({fp_(p)}). "
+                                       "Bot yeni alışlarda temkinli; açık pozisyonların stopları takipte.")
+                    elif ch >= 1.0:
+                        _uyari("spy+", f"📈 <b>PİYASA SERT YÜKSELİYOR</b>\nSPY son 15 dakikada {ch:+.2f}% ({fp_(p)}).", loud=False)
+            elif ses != "regular":
+                _UY["spy"].clear()
+            # 2) piyasa havası değişti
+            et = HAVA.get("etiket")
+            if et and et != "bilinmiyor":
+                if _UY["hava"] and et != _UY["hava"] and ses in ("pre", "regular"):
+                    ikon = {"Riskli": "🌧", "Güçlü": "☀️", "Normal": "⛅"}.get(et, "")
+                    _uyari("hava", f"{ikon} <b>Piyasa havası: {_h(_UY['hava'])} → {_h(et)}</b>\n{_h(', '.join(HAVA.get('neden') or []))}"
+                                   + ("\nBot riskli havada lotu küçültür." if et == "Riskli" else ""),
+                           cooldown=1800, loud=et == "Riskli")
+                _UY["hava"] = et
+            # 3) VIX eşikleri
+            v = HAVA.get("vix")
+            gun = datetime.now(ET).date()
+            if _UY["vix_gun"] != gun:
+                _UY["vix_gun"], _UY["vix"] = gun, set()
+            if v:
+                for esik in (20, 25, 30, 40):
+                    if v >= esik and esik not in _UY["vix"]:
+                        _UY["vix"].add(esik)
+                        if ses != "closed":
+                            _uyari(f"vix{esik}", f"😨 <b>Korku endeksi VIX {v:.1f}</b> ({esik} üstüne çıktı)\n"
+                                                 "Oynaklık yüksek: stoplar daha kolay patlar, bot lotu küçültür.", cooldown=0)
+            # 4) olası işlem durdurma (halt): koşan / açık pozisyonlu hissede fiyat aniden kesildi
+            if ses == "regular":
+                izle = set(scanner.runners) | {q["sym"] for q in bot.open_positions()}
+                for sym in izle:
+                    lv = store.live.get(sym)
+                    if not lv:
+                        continue
+                    h = _UY["halt"].setdefault(sym, {"ts": deque(maxlen=40), "on": False, "px": None})
+                    if not h["ts"] or lv["t"] != h["ts"][-1]:
+                        if h["on"]:
+                            ch = (lv["p"] / h["px"] - 1) * 100 if h["px"] else 0
+                            h["on"] = False
+                            _uyari(f"halt-{sym}", f"▶️ <b>#{_h(sym)} işleme yeniden açıldı</b>\nŞimdi {fp_(lv['p'])} "
+                                                  f"(durmadan öncekine göre {ch:+.1f}%)", cooldown=60, sym=sym)
+                        h["ts"].append(lv["t"])
+                    aktif = len({int(t // 60) for t in h["ts"] if now - t < 900})
+                    if not h["on"] and now - lv["t"] > 300 and aktif >= 7:
+                        h["on"], h["px"] = True, lv["p"]
+                        _uyari(f"halt-{sym}", f"⛔ <b>#{_h(sym)} işlemi durdurulmuş olabilir</b>\n5 dakikadır işlem gelmiyor "
+                                              f"(son fiyat {fp_(lv['p'])}). Sert hareketlerden sonra borsa geçici durdurma yapar.",
+                               cooldown=600, sym=sym)
+            # 5) açık pozisyonda bilanço
+            for q in bot.open_positions():
+                b = bilanco_durum(q["sym"])
+                k = (q["sym"], str(gun))
+                if b in ("bugün", "yarın") and k not in _UY["bil"]:
+                    _UY["bil"].add(k)
+                    z = ((EARN.get(q["sym"]) or {}).get((gun if b == "bugün" else gun + timedelta(days=1)).isoformat()) or "")
+                    tg.send(f"📅 <b>#{_h(q['sym'])} bilanço {b}</b>" + (f" ({'açılıştan önce' if z == 'önce' else 'kapanıştan sonra'})" if z else "")
+                            + "\nAçık pozisyon var: bilanço saatinde fiyat sert oynar.", sym=q["sym"], reply=f"p:{q['id']}",
+                            konu="bot")
+        except Exception as e:
+            log.warning("Piyasa uyarısı hatası: %s", e)
 
 
 def spy_karsilastir(eq, cap0):
@@ -2461,7 +2742,7 @@ async def tg_analiz(sym):
 
 YARDIM = ("<b>Komutlar</b>\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
           "/analiz QNME — 15 dk analiz ve plan (grafikli)\n/alarm QNME 0.90 — fiyat alarmı\n/alarmlar — kurulu alarmlar\n"
-          "/alarmsil QNME — alarmı sil\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
+          "/alarmsil QNME — alarmı sil\n/yorum — yapay zekalı piyasa yorumu\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
           "/basla — yeni işlem açmaya devam\nSadece paper (sanal) hesap.")
 
 
@@ -2473,8 +2754,8 @@ async def _yetkili(msg):
     chat = msg.get("chat") or {}
     frm = msg.get("from") or {}
     ids = {str(chat.get("id")), "@" + str(chat.get("username") or "")}
-    if TG_CHAT and TG_CHAT in ids:
-        return True
+    if TG_CHAT and TG_CHAT in ids and chat.get("type") == "channel":
+        return True                                   # kanala sadece yöneticiler yazabilir
     uid = str(frm.get("id") or "")
     if not uid:
         return False
@@ -2496,15 +2777,19 @@ def _ayar_kaydet():
     bot.ver += 1
 
 
-async def tg_komut(text, chat):
+async def tg_komut(text, chat, thread=None):
     parts = text.strip().split()
     cmd = parts[0].split("@")[0].lower().lstrip("/")
     arg = [x.upper() for x in parts[1:]]
-    send = lambda html, png=None, sym=None: tg.send(html, {"png": png} if png else None, sym=sym, chat=chat)
+    send = lambda html, png=None, sym=None: tg.send(html, {"png": png} if png else None, sym=sym, chat=chat,
+                                                    thread=thread)
     if cmd in ("start", "yardim", "yardım", "help"):
         send(YARDIM)
     elif cmd == "durum":
         send(tg_durum())
+    elif cmd == "yorum":
+        y = await ai_yorum(cal.session(time.time()) in ("post", "closed"))
+        send(y or "Yapay zeka yorumu için Render'da GEMINI_API_KEY girili olmalı (ya da kota doldu, birazdan tekrar dene).")
     elif cmd == "panel":
         tg.table = {}
         await tg_panel(force=True)
@@ -2567,6 +2852,46 @@ async def tg_komut(text, chat):
         send("Bilinmeyen komut. /yardim yaz.")
 
 
+KOMUTLAR = (("panel", "Kontrol panelini yeniden kur"), ("durum", "Bot ve para durumu"), ("pozisyon", "Açık pozisyonlar"),
+            ("karne", "Sonuçlar + grafik"), ("analiz", "Hisse analizi: /analiz QNME"),
+            ("alarm", "Fiyat alarmı: /alarm QNME 0.90"), ("alarmlar", "Kurulu alarmlar"), ("rapor", "Gün sonu raporu"),
+            ("yorum", "Yapay zekalı piyasa yorumu"), ("dur", "Yeni işlemleri durdur"), ("basla", "Yeni işlemlere devam"),
+            ("yardim", "Komut listesi"))
+
+
+async def tg_kurulum():
+    """Bot adı, sohbet türü (kanal / konulu grup), konular, komut menüsü ve Mini App menü düğmesi."""
+    me = await tg.api("getMe")
+    tg.username = ((me or {}).get("result") or {}).get("username") or ""
+    ch = ((await tg.api("getChat", chat_id=_chat_id())) or {}).get("result") or {}
+    tg.chat_type = ch.get("type", "")
+    tg.forum = bool(ch.get("is_forum"))
+    cmds = [{"command": c, "description": d} for c, d in KOMUTLAR]
+    await tg.api("deleteMyCommands")                       # botun özelinde menü yok
+    if tg.chat_type in ("group", "supergroup"):            # grupta "/" menüsü sadece yöneticilere görünür
+        await tg.api("setMyCommands", commands=cmds, scope={"type": "chat_administrators", "chat_id": _chat_id()})
+    if MINI_APP:
+        await tg.api("setChatMenuButton", menu_button={"type": "web_app", "text": "ABD·BOT",
+                                                       "web_app": {"url": SITE_URL}})
+    if tg.forum:
+        changed = False
+        for k, (ad, renk) in TG_KONULAR.items():
+            if tg.topics.get(k):
+                continue
+            js = await tg.api("createForumTopic", chat_id=_chat_id(), name=ad, icon_color=renk)
+            tid = ((js or {}).get("result") or {}).get("message_thread_id")
+            if tid:
+                tg.topics[k] = tid
+                changed = True
+            else:
+                log.warning("Telegram konusu açılamadı (%s): %s", ad, (js or {}).get("description"))
+                break
+        if changed:
+            tg.persist()
+    tg.kur_st = f"{'konulu grup' if tg.forum else tg.chat_type or '?'} · @{tg.username or '?'}"
+    tg.cmd_st = tg.kur_st
+
+
 async def tg_komut_loop():
     """Telegram'dan gelen komutları dinler (uzun sorgu, ücretsiz)."""
     await asyncio.sleep(15)
@@ -2575,7 +2900,7 @@ async def tg_komut_loop():
         return
     try:
         await tg.api("deleteWebhook")
-        await tg.api("deleteMyCommands")          # menü botun özelinde değil, kanaldaki panelde
+        await tg_kurulum()
     except Exception:
         pass
     async with httpx.AsyncClient(timeout=40) as c:
@@ -2589,7 +2914,7 @@ async def tg_komut_loop():
                     tg.cmd_st = "başka bir yer de bu botu dinliyor (409)"
                     await asyncio.sleep(60)
                     continue
-                tg.cmd_st = "dinliyor"
+                tg.cmd_st = "dinliyor · " + getattr(tg, "kur_st", "")
                 for u in js.get("result", []):
                     tg.offset = u["update_id"] + 1
                     if u.get("callback_query"):
@@ -2605,7 +2930,7 @@ async def tg_komut_loop():
                     if not await _yetkili(m):
                         continue
                     try:
-                        await tg_komut(text, m["chat"]["id"])
+                        await tg_komut(text, m["chat"]["id"], m.get("message_thread_id") if m.get("is_topic_message") else None)
                     except Exception as e:
                         log.warning("Telegram komut hatası: %s", e)
             except Exception as e:
@@ -2642,7 +2967,7 @@ async def tg_takip_loop():
                 tg.send(f"{'✅' if r_ > 0 else '❌'} <b>#{_h(sig['sym'])} sinyal sonucu: {ST_TR_[sig['st']]} {r_:+.2f}R</b>"
                         + (f" ({sig.get('pct'):+.1f}%)" if sig.get("pct") is not None else "")
                         + (f"\nBot bu işleme girmedi: {_h(neden[:140])}" if neden else "\nBot bu işleme girmedi."),
-                        reply=key, quiet=True)
+                        reply=key, quiet=True, konu="sinyal")
                 tg.persist()
             # 2) fiyat alarmları
             hit = []
@@ -2656,7 +2981,8 @@ async def tg_takip_loop():
                 tg.send(f"⏰ <b>#{_h(a['sym'])} alarm: {fp_(a['p'])} {'üstüne çıktı' if a['yon'] == 'üst' else 'altına indi'}</b>"
                         f"\nŞu an {fp_(p)}",
                         {"sym": a["sym"], "title": f"#{a['sym']}  alarm {fp_(a['p'])}", "sub": f"şu an {fp_(p)}",
-                         "lines": {"giris": a["p"]}}, sym=a["sym"], chat=a.get("chat"))
+                         "lines": {"giris": a["p"]}}, sym=a["sym"], chat=a.get("chat") if a.get("chat") != _chat_id() else None,
+                        konu="uyari")
             if hit:
                 tg.persist()
             # 3) canlı pozisyon tablosu (dakikada bir, seans açıkken)
@@ -2674,6 +3000,13 @@ PANEL_GORUNUM = {"poz": "💼 Pozisyonlar", "durum": "📊 Durum", "karne": "�
                  "kosan": "🚀 Koşanlar"}
 
 
+def _chat_id():
+    try:
+        return int(TG_CHAT)
+    except (TypeError, ValueError):
+        return TG_CHAT
+
+
 def panel_klavye():
     dur = BOT_CFG.get("yeni_islem", 1)
     return {"inline_keyboard": [
@@ -2683,7 +3016,8 @@ def panel_klavye():
         [{"text": "⏸ Yeni işlemleri durdur" if dur else "▶️ Yeni işlemlere başla",
           "callback_data": "p:dur" if dur else "p:basla"},
          {"text": "🔄 Yenile", "callback_data": "p:yenile"}],
-        [{"text": "🌐 Uygulamayı aç", "url": SITE_URL}]]}
+        ([{"text": "📱 Uygulama (Telegram içinde)", "url": f"https://t.me/{tg.username}?startapp=panel"}]
+         if tg.username and MINI_APP else []) + [{"text": "🌐 Tarayıcıda aç", "url": SITE_URL}]]}
 
 
 def panel_sinyaller():
@@ -3034,7 +3368,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, font_task, tg_komut_loop, tg_takip_loop)]
+                                                  rapor_loop, font_task, tg_komut_loop, tg_takip_loop, piyasa_uyari_loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -3083,7 +3417,13 @@ button:active{opacity:.85}
 .err{color:#fca5a5;background:rgba(239,68,68,.12);border-radius:12px;padding:9px;font-size:14px;margin:0 0 12px}</style></head><body>
 <form method="post" action="/giris"><img src="/ikon-192.png" alt=""><h1>ABD·BOT</h1><p>Canlı sinyal ve sanal işlem botu</p>
 __ERR__<input type="password" name="sifre" placeholder="Şifre" autocomplete="current-password" autofocus required>
-<button type="submit">Giriş yap</button></form></body></html>"""
+<button type="submit">Giriş yap</button></form>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>try{const W=window.Telegram&&Telegram.WebApp;if(W&&W.initData){W.ready();W.expand();const f=document.querySelector('form');
+f.innerHTML='<img src="/ikon-192.png" alt=""><h1>ABD·BOT</h1><p>Telegram ile giriş yapılıyor…</p>';
+fetch('/tg/webapp',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:W.initData})})
+.then(r=>r.json()).then(j=>{if(j.ok)location.replace('/'+(location.search||''));else f.innerHTML+='<div class="err">'+(j.hata||'Giriş olmadı')+'</div>'})
+.catch(()=>{f.innerHTML+='<div class="err">Bağlantı hatası</div>'})}}catch(e){}</script></body></html>"""
 
 
 def login_page(err=""):
@@ -3098,12 +3438,51 @@ async def index(request: Request):
     resp = HTMLResponse((BASE / "index.html").read_text(encoding="utf-8"),
                         headers={"Cache-Control": "no-store"})
     if SITE_PASSWORD:
-        resp.set_cookie("tk", TOKEN, max_age=30 * 86400, httponly=True, samesite="lax",
-                        secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https")
+        tgw = bool(request.cookies.get("tgw"))      # Telegram Web (iframe) içinde: çerez üçüncü taraf bağlamında da gitsin
+        resp.set_cookie("tk", TOKEN, max_age=30 * 86400, httponly=True, samesite="none" if tgw else "lax",
+                        secure=tgw or request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https")
     return resp
 
 
 _login_fail = {"n": 0, "t": 0.0}
+
+
+def tg_initdata(init):
+    """Telegram Mini App kimlik doğrulaması (initData HMAC). Geçerliyse kullanıcı bilgisi, değilse None."""
+    from urllib.parse import parse_qsl
+    if not TG_TOKEN or not init:
+        return None
+    pairs = dict(parse_qsl(init, keep_blank_values=True))
+    h = pairs.pop("hash", "")
+    dcs = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
+    secret = hmac.new(b"WebAppData", TG_TOKEN.encode(), hashlib.sha256).digest()
+    if not hmac.compare_digest(hmac.new(secret, dcs.encode(), hashlib.sha256).hexdigest(), h):
+        return None
+    try:
+        if time.time() - int(pairs.get("auth_date", "0")) > 86400:
+            return None
+        return json.loads(pairs.get("user") or "{}")
+    except Exception:
+        return None
+
+
+@app.post("/tg/webapp")
+async def tg_webapp(request: Request):
+    """Telegram içinden açılan uygulama: şifre sormadan, Telegram hesabıyla giriş (sadece kanal yöneticileri)."""
+    try:
+        d = await request.json()
+    except Exception:
+        d = {}
+    u = tg_initdata(d.get("initData", ""))
+    if not u:
+        return JSONResponse({"ok": 0, "hata": "Telegram doğrulaması geçmedi"})
+    if not await _admin_mi(u.get("id")):
+        return JSONResponse({"ok": 0, "hata": "Bu uygulamayı sadece kanal yöneticileri açabilir"})
+    resp = JSONResponse({"ok": 1})
+    if SITE_PASSWORD:
+        resp.set_cookie("tk", TOKEN, max_age=30 * 86400, httponly=True, samesite="none", secure=True)
+        resp.set_cookie("tgw", "1", max_age=30 * 86400, httponly=True, samesite="none", secure=True)
+    return resp
 
 
 @app.post("/giris")

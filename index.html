@@ -15,6 +15,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{--bg:#000;--bg2:#0c0c0f;--card:#141417;--card2:#1f1f24;--line:#1c1c21;--line2:#2c2c33;--tx:#fff;--mut:#8e8e99;--dim:#5f5f6b;
   --up:#30d27b;--upb:rgba(48,210,123,.14);--dn:#ff5a5f;--dnb:rgba(255,90,95,.14);--ac:#7b83f7;--ac2:#a196ff;--acb:rgba(123,131,247,.15);--wa:#ffb547;--wab:rgba(255,181,71,.14);
@@ -488,6 +489,7 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
     <div class="fld"><label>Planlar</label><button class="tg" data-p="tg_plan"></button></div>
     <div class="fld"><label>Haberler</label><button class="tg" data-p="tg_haber"></button></div>
     <div class="fld"><label>Sabah listesi, gün sonu ve haftalık rapor</label><button class="tg" data-p="tg_rapor"></button></div>
+    <div class="fld"><label>Anlık piyasa uyarıları<small>SPY 15 dk'da %1, piyasa havası değişti, VIX sıçradı, işlem durdurma, açık pozisyonda bilanço / olumsuz haber</small></label><button class="tg" data-p="tg_uyari"></button></div>
     <div class="fld"><label>Koşan hisse uyarısı<small>Haberli ya da +%30 üstü hisse listeye girince 🚀</small></label><button class="tg" data-p="tg_kosan"></button></div>
     <div class="fld"><label>Kanal kontrol paneli<small>Kanalın başına sabitlenen düğmeli mesaj: pozisyonlar, durum, karne, sinyaller, koşanlar, durdur/başlat. Bot yönetici olmalı</small></label><button class="tg" data-p="tg_tablo"></button></div>
     <div class="fld" style="border:0"><label>Mesajlara grafik resmi ekle<small>Plan, sinyal ve işlemlerde çizgili grafik: giriş, stop, hedef, formasyon</small></label><button class="tg" data-p="tg_grafik"></button></div>
@@ -559,7 +561,9 @@ function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorag
 function esc(x){return String(x==null?'':x).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 
 let ws=null,retry=0,symbols=[],iexSet=new Set(),rows={},status={},offset=0;
-const QS=(()=>{try{const q=new URLSearchParams(location.search).get('s');return q?q.toUpperCase().replace(/[^A-Z.\-]/g,'').slice(0,8):''}catch(e){return''}})();
+const TGW=(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.initData)?Telegram.WebApp:null;
+try{if(TGW){TGW.ready();TGW.expand();TGW.setHeaderColor&&TGW.setHeaderColor('#0a0e17');TGW.setBackgroundColor&&TGW.setBackgroundColor('#0a0e17')}}catch(e){}
+const QS=(()=>{try{const sp=TGW&&TGW.initDataUnsafe&&TGW.initDataUnsafe.start_param;if(sp&&sp.startsWith('s_'))return sp.slice(2).toUpperCase().replace(/[^A-Z.\-]/g,'').slice(0,8);const q=new URLSearchParams(location.search).get('s');return q?q.toUpperCase().replace(/[^A-Z.\-]/g,'').slice(0,8):''}catch(e){return''}})();
 let cur=QS||ls('sym')||'SPY',tf=String(ls('tf')||'1'),sortKey=ls('sort')||'hare',raw=[],info=null,prevLine=null,lastPx={};
 let sigList=[],sigStats=[],mine=[],learn=null,sigFilter=ls('sigf')||'hepsi',sigShow=15,knownIds=null,sigLines=[],openIds=new Set();
 let botD=null,knownJ=null,runRows=[],runDrop=[],runPats=[],runStatus='',tab=ls('v2')?(ls('tab')||'akis'):'akis';ls('v2','1');

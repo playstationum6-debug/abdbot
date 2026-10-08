@@ -423,3 +423,42 @@ def ciz_karne(eq, spy, cap0, title="", sub=""):
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
     return buf.getvalue()
+
+
+def kolaj(items, title="", sub=""):
+    """Birden çok hissenin mini grafiği tek resimde (sabah listesi). items: [(sembol, yüzde, mumlar[(t,o,h,l,c,v)])]"""
+    items = [x for x in items if x[2] and len(x[2]) >= 10][:6]
+    if not items:
+        return None
+    cols = 3 if len(items) > 4 else 2
+    rows = (len(items) + cols - 1) // cols
+    cw, ch, top = 360, 250, 96
+    Wk = cols * cw
+    img = Image.new("RGB", (Wk, top + rows * ch), BG)
+    d = ImageDraw.Draw(img, "RGBA")
+    d.rectangle([0, 0, Wk, top - 12], fill=(18, 22, 36))
+    d.text((PAD_L, 14), _t(title[:60]), fill=TXT, font=font(26, True))
+    d.text((PAD_L, 52), _t(sub[:90]), fill=MUT, font=font(16))
+    for n, (sym, pct, bars) in enumerate(items):
+        cx, cy = (n % cols) * cw, top + (n // cols) * ch
+        d.rounded_rectangle([cx + 8, cy + 6, cx + cw - 8, cy + ch - 8], radius=16, fill=(18, 22, 36))
+        col = UP if (pct or 0) >= 0 else DN
+        d.text((cx + 24, cy + 16), _t("#" + sym), fill=TXT, font=font(22, True))
+        d.text((cx + cw - 130, cy + 18), _t(f"{pct:+.1f}%" if pct is not None else ""), fill=col, font=font(20, True))
+        B = bars[-60:]
+        hi = max(b[2] for b in B)
+        lo = min(b[3] for b in B)
+        rg = (hi - lo) or hi * 0.01
+        x0, x1, y0, y1 = cx + 24, cx + cw - 24, cy + 56, cy + ch - 40
+        bw = (x1 - x0) / len(B)
+        Y = lambda p: y1 - (p - lo) / rg * (y1 - y0)
+        for i, b in enumerate(B):
+            c_ = UP if b[4] >= b[1] else DN
+            xm = x0 + (i + 0.5) * bw
+            d.line([(xm, Y(b[2])), (xm, Y(b[3]))], fill=c_, width=1)
+            t_, b_ = Y(max(b[1], b[4])), Y(min(b[1], b[4]))
+            d.rectangle([xm - bw * 0.35, t_, xm + bw * 0.35, max(b_, t_ + 1)], fill=c_)
+        d.text((cx + 24, cy + ch - 34), _t(f"son {fp(B[-1][4])}  ·  tepe {fp(hi)}  ·  dip {fp(lo)}"), fill=MUT, font=font(14))
+    buf = io.BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
