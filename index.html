@@ -789,7 +789,7 @@ body{background:var(--bg);font-feature-settings:"tnum" 1,"cv11" 1}
   <div id="bToday">
   <div class="card">
     <div class="hero"><div style="flex:1"><div class="meta">Bugünkü kâr / zarar</div><div class="big" id="kT">—</div><div class="meta" id="kTn"></div></div><span class="pill" id="bst">—</span></div>
-    <div class="kpis"><div class="kpi"><b>Toplam</b><span id="kA">—</span></div><div class="kpi"><b>İşlem</b><span id="kAn">—</span></div><div class="kpi"><b>Ort. R</b><span id="kR">—</span></div></div>
+    <div class="kpis"><div class="kpi"><b>Toplam</b><span id="kA">—</span></div><div class="kpi"><b>İşlem</b><span id="kAn">—</span></div><div class="kpi"><b>İşlem başı ort.</b><span id="kR">—</span></div></div>
     <div class="meta" style="margin-top:12px;display:flex;justify-content:space-between"><span>Sonuç çıkarmak için 100 işlem</span><span id="bProgT"></span></div><div class="bar"><i id="bProg" style="width:0"></i></div>
     <div class="chips" id="bcfg"></div>
     <div class="meta" id="bacct" style="margin-top:8px"></div>
@@ -835,9 +835,9 @@ body{background:var(--bg);font-feature-settings:"tnum" 1,"cv11" 1}
 <!-- NASIL ÇALIŞIR -->
 <section class="tab rh" id="t-rehber">
   <div class="lt">Nasıl çalışır</div>
-  <h4>R (risk birimi)</h4><p>Bir işlemde göze alınan zarar: giriş ile stop arasındaki fark. 10,00 $'dan alıp stopu 9,90 $'a koyarsan 1R = 10 sent. Hedef 10,20 ise +2R. Botun başarısı dolarla değil ortalama R ile ölçülür: ortalama artıdaysa sistem uzun vadede kazandırır.</p>
+  <h4>Yüzde sonuç</h4><p>Her işlemin sonucu yüzde ile gösterilir: girişten çıkışa fiyat ne kadar değişti (masraf ve kayma dahil). 10,00 $'dan alıp 10,20 $'dan satarsan +%2. "İşlem başı ortalama" artıdaysa sistem uzun vadede kazandırır. Stop ile giriş arasındaki fark işlemin riskidir; K1, K2, K3 bu riskin 1, 2, 3 katı kâr basamaklarıdır.</p>
   <h4>Risk / ödül</h4><p>Hedefe olan uzaklığın stopa olan uzaklığa oranı. 1 : 2 demek, 1 birim riske karşı 2 birim kazanç hedefleniyor. Böyle bir sistem 3 işlemden 1'ini kazanırsa başa baş olur.</p>
-  <h4>Stop ve kâr koruma</h4><p>Stop, fikrin yanlış çıktığı seviyedir; fiyat oraya gelince bot zararı keser. Fiyat +1,5R'ye ulaşınca stop girişe çekilir (artık zarar yazmaz), sonra fiyatı 1R geriden takip eder.</p>
+  <h4>Stop ve kâr koruma</h4><p>Stop, fikrin yanlış çıktığı seviyedir; fiyat oraya gelince bot zararı keser. Fiyat riskinin 1,5 katı kadar kâra geçince stop girişe çekilir (artık zarar yazmaz), sonra fiyatı risk mesafesi kadar geriden takip eder.</p>
   <h4>VWAP</h4><p>Günün hacim ağırlıklı ortalama fiyatı: o gün işlem yapanların ortalama maliyeti. Fiyat VWAP'ın üstündeyse alıcılar, altındaysa satıcılar baskın sayılır.</p>
   <h4>EMA 9 / 21</h4><p>Son 9 ve 21 mumun ağırlıklı ortalaması. 9, 21'in üstündeyse kısa vadeli trend yukarı.</p>
   <h4>RSI</h4><p>0–100 arası momentum ölçüsü. 70 üstü "aşırı alım" (yükseliş yorulmuş olabilir), 30 altı "aşırı satım" (tepki gelebilir).</p>
@@ -876,18 +876,18 @@ body{background:var(--bg);font-feature-settings:"tnum" 1,"cv11" 1}
   <div id="ayBilgi"></div>
   <h3>Bot ayarları</h3>
   <div class="card" style="padding:2px 14px" id="ayf">
-    <div class="fld" style="flex-wrap:wrap"><label>📐 Kırılım planı işlemleri<small>Kanallar gibi seviye çizip "X kırılırsa giriş" der. Otomatik: işlem açar, canlıda 20+ sonuçta ort. −0,2R'nin altına düşerse ya da geçmiş testte zararlı çıkarsa durur</small></label>
+    <div class="fld" style="flex-wrap:wrap"><label>📐 Kırılım planı işlemleri<small>Kanallar gibi seviye çizip "X kırılırsa giriş" der. Otomatik: işlem açar, canlıda 20+ sonuçta ortalaması belirgin zarara düşerse ya da geçmiş testte zararlı çıkarsa durur</small></label>
       <input type="hidden" data-k="kirilim_yetki" id="kirYet"><div class="seg2 yzseg" id="kirSeg" style="width:100%;margin:8px 0 2px"><button class="ff" data-v="0">Kapalı</button><button class="ff" data-v="1">Otomatik</button><button class="ff" data-v="2">Hep açık</button></div></div>
-    <div class="fld" style="flex-wrap:wrap"><label>🧠 Yapay zekâ karar yetkisi<small>Otomatik: kararları önce gölgede ölçülür, karnesi kanıtlanınca (40+ sonuç, AL/PAS farkı +0,15R) botu etkiler</small></label>
+    <div class="fld" style="flex-wrap:wrap"><label>🧠 Yapay zekâ karar yetkisi<small>Otomatik: kararları önce gölgede ölçülür, karnesi kanıtlanınca (40+ sonuç, AL dediklerinin PAS dediklerinden belirgin şekilde iyi çıkması) botu etkiler</small></label>
       <input type="hidden" data-k="yz_yetki" id="yzYet"><div class="seg2 yzseg" id="yzSeg" style="width:100%;margin:8px 0 2px"><button class="ff" data-v="0">Kapalı</button><button class="ff" data-v="1">Otomatik</button><button class="ff" data-v="2">Hep karar versin</button></div></div>
     <div class="fld"><label>Yeni işlem aç<small>Kapatırsan açık pozisyonlar yine yönetilir, sadece yeni işlem açılmaz</small></label><button class="tg" data-k="yeni_islem"></button></div>
     <div class="fld"><label>Botun parası ($)<small>Kâr/zararla büyür ya da küçülür</small></label><input type="number" inputmode="decimal" data-k="capital"></div>
     <div class="fld"><label>İşlem başı en fazla ($)<small>Küçük tutarsan aynı anda daha çok işlem açılır</small></label><input type="number" inputmode="decimal" data-k="notional"></div>
     <div class="fld"><label>İşlem başı en fazla risk ($)<small>Stop olursa kaybedilecek tutar</small></label><input type="number" inputmode="decimal" data-k="risk_usd"></div>
     <div class="fld"><label>En fazla açık işlem</label><input type="number" inputmode="numeric" data-k="max_open"></div>
-    <div class="fld"><label>Yarım kapat<small>Kâr belirlenen R'ye gelince pozisyonun yarısını sat, kalan için stop girişe</small></label><button class="tg" data-k="yarim_kapat"></button></div>
-    <div class="fld"><label>Yarım kapat seviyesi (R)<small>Örn. 1 = risk kadar kâr gelince</small></label><input type="number" inputmode="decimal" step="0.1" data-k="yarim_r"></div>
-    <div class="fld"><label>Kalan kısmın hedefi (R)<small>Yarım kapattıktan sonra; örn. 3 = 3R hedef</small></label><input type="number" inputmode="decimal" step="0.5" data-k="kalan_r"></div>
+    <div class="fld"><label>Yarım kapat<small>Kâr belirlenen seviyeye gelince pozisyonun yarısını sat, kalan için stop girişe</small></label><button class="tg" data-k="yarim_kapat"></button></div>
+    <div class="fld"><label>Yarım kapat seviyesi (risk katı)<small>Örn. 1 = stop mesafesi kadar kâr gelince (K1)</small></label><input type="number" inputmode="decimal" step="0.1" data-k="yarim_r"></div>
+    <div class="fld"><label>Kalan kısmın hedefi (risk katı)<small>Yarım kapattıktan sonra; örn. 3 = K3</small></label><input type="number" inputmode="decimal" step="0.5" data-k="kalan_r"></div>
     <div class="fld"><label>Güçlü sinyale yer aç<small>Para doluyken çok güçlü sinyal gelirse kârda olmayan en zayıf pozisyon kapatılıp yeni işleme girilir</small></label><button class="tg" data-k="yer_ac"></button></div>
     <div class="fld"><label>Yer açmak için en düşük güven<small>85 = sadece A+ sinyaller</small></label><input type="number" inputmode="numeric" data-k="yer_min_guven"></div>
     <div class="fld"><label>Ekonomik veri saatinde dur<small>Fed, enflasyon, istihdam gibi yüksek etkili veride −5/+15 dk yeni işlem açılmaz</small></label><button class="tg" data-k="eko_dur"></button></div>
@@ -978,13 +978,13 @@ body{background:var(--bg);font-feature-settings:"tnum" 1,"cv11" 1}
   <div class="tw"><table class="res" id="cmp"></table></div>
   <div class="note">"Botun seçtikleri" satırı "Tüm sinyaller"den iyiyse seçim mantığı işe yarıyor demektir.</div>
   <h3>Öğrenilenler</h3>
-  <div class="card" style="padding:0;margin-bottom:10px"><div class="ins"><b class="up">İşe yarayan koşullar</b><span class="meta">ort. R · işlem</span></div><div id="insg"></div></div>
-  <div class="card" style="padding:0"><div class="ins"><b class="dn">Kaçınılması gerekenler</b><span class="meta">ort. R · işlem</span></div><div id="insb"></div></div>
+  <div class="card" style="padding:0;margin-bottom:10px"><div class="ins"><b class="up">İşe yarayan koşullar</b><span class="meta">işlem başı ort. · adet</span></div><div id="insg"></div></div>
+  <div class="card" style="padding:0"><div class="ins"><b class="dn">Kaçınılması gerekenler</b><span class="meta">işlem başı ort. · adet</span></div><div id="insb"></div></div>
   <h3>Saatlere göre (TR saati)</h3>
   <div class="card"><div class="hrs" id="hrs"></div><div class="note" style="margin-top:10px">Canlı sinyaller + geçmiş test. Çubuk uzunluğu sinyal sayısı, renk ortalama sonuç.</div></div>
   <h3>Kurgu × seans</h3>
   <div class="tw"><table class="res" id="grp"></table></div>
-  <div class="note">Model her sinyale "beklenen R" verir; bot sadece en iyi dilimdeki sinyallerde işlem açar. Atlanan sinyaller de takip edilir ve öğrenmeye girer. Az veride sonuçlar sıfıra doğru çekilir.</div>
+  <div class="note">Model her sinyale "beklenen sonuç" verir; bot sadece en iyi dilimdeki sinyallerde işlem açar. Atlanan sinyaller de takip edilir ve öğrenmeye girer. Az veride sonuçlar sıfıra doğru çekilir.</div>
   <h3>Model sınavı</h3>
   <div class="card" id="msinav"><div class="note">Model henüz kendini sınamadı.</div></div>
   <h3>Telegram kanalları</h3>
@@ -993,7 +993,7 @@ body{background:var(--bg);font-feature-settings:"tnum" 1,"cv11" 1}
   <div class="tw"><table class="res" id="disson"></table></div>
   <h3>Tüm sonuçlar</h3>
   <div class="tw"><table class="res" id="res"></table></div>
-  <div class="note">Net sonuçlarda kayma (normal %0,03, uzatılmış %0,10, koşan küçük hisseler %0,5–0,8 her yön) ve masraf payı var. R = planlanan risk birimi.</div>
+  <div class="note">Net sonuçlarda kayma (normal %0,03, uzatılmış %0,10, koşan küçük hisseler %0,5–0,8 her yön) ve masraf payı var. Sonuçlar işlem başı yüzde.</div>
   <h3>Sistem durumu</h3>
   <div class="card note" id="foot" style="margin:0"></div>
   <h3>Hata kaydı</h3>
@@ -1378,7 +1378,7 @@ function bk(t){return Math.floor(t/(+tf*60))*(+tf*60)+TR_OFF}
 function drawSignals(){const first=raw.length?raw[0][0]:0,last=raw.length?raw[raw.length-1][0]:0,mk=[];
   if(!isD())for(const s of mine){if(s.t<first||s.t>last+60)continue;const al=s.dir>0;
     mk.push({time:bk(s.t),position:al?'belowBar':'aboveBar',shape:al?'arrowUp':'arrowDown',color:al?C.up:C.dn,text:SETUP_K[s.setup]+' '+s.conf});
-    if(s.xt&&s.r!=null&&s.xt<=last+60)mk.push({time:bk(s.xt),position:al?'aboveBar':'belowBar',shape:'circle',color:s.r>0?C.up:C.dn,text:(s.r>0?'+':'')+s.r.toFixed(2)+'R'})}
+    if(s.xt&&s.r!=null&&s.xt<=last+60)mk.push({time:bk(s.xt),position:al?'aboveBar':'belowBar',shape:'circle',color:s.r>0?C.up:C.dn,text:fS(s)})}
   mk.sort((a,b)=>a.time-b.time);try{cs.setMarkers(opt.mk?mk:[])}catch(e){}
   for(const l of sigLines){try{cs.removePriceLine(l)}catch(e){}}sigLines=[];
   const bp=botD&&botD.open.find(p=>p.sym===cur&&p.entry);
@@ -1409,7 +1409,14 @@ const _nf={};function trn(x,d,mx){const k=d+'-'+(mx||d);return(_nf[k]||(_nf[k]=n
 function fp(x){if(x==null)return'—';const a=Math.abs(x);return a>=10?trn(x,2):a>=1?trn(x,2,3):trn(x,2,4)}
 function fch(x){return x==null?'':(x>0?'+':x<0?'−':'')+trn(Math.abs(x),2)+'%'}
 function fusd(x){return x==null?'—':(x>0?'+':x<0?'−':'')+trn(Math.abs(x),2)+' $'}
-function fR(x,d=2){return x==null?'—':(x>0?'+':x<0?'−':'')+trn(Math.abs(x),d)+'R'}
+function fPc(x,d){if(x==null||isNaN(x))return'—';const a=Math.abs(x);d=d==null?(a<10?2:1):d;return (x>0?'+':x<0?'−':'')+trn(a,d)+'%'}
+function rpK(t){const r=learn&&learn.rp;return (r&&(t?r.test:r.canli))||0.6}
+function fR(x){return x==null?'—':fPc(x*rpK())}            // eski R sayısı → işlem başı % (ortalama stop mesafesiyle)
+function fRt(x){return x==null?'—':fPc(x*rpK(1))}          // geçmiş test verisi için
+function fA(o,k){if(!o)return'—';k=k||'avg';return o[k+'_p']!=null?fPc(o[k+'_p']):fR(o[k])}
+function fS(o){if(!o)return'—';return o.pct!=null?fPc(o.pct):fR(o.r)}     // tek işlem / sinyal: gerçek yüzde
+function pS(o){return o.pct!=null?o.pct:(o.r!=null?o.r*rpK():null)}
+function fU(p){return p&&p.last&&p.entry?fPc(p.dir*(p.last/p.entry-1)*100):fR(p&&p.ur)}  // açık pozisyon: şu an
 function cls(x){return x>0?'up':x<0?'dn':''}
 function nowS(){return Date.now()/1000+offset}
 function fage(t){if(!t)return'—';const s=Math.max(0,nowS()-t);if(s<60)return Math.round(s)+' sn';if(s<3600)return Math.round(s/60)+' dk';if(s<86400)return Math.round(s/3600)+' sa';return Math.round(s/86400)+' gün'}
@@ -1489,7 +1496,7 @@ function cizEq(el,rng,isaret){const d=botD;if(!d||!d.karne){el.innerHTML='<div c
   const ax=[hi-pad,lo+pad].map(v=>`<span class="ax" style="top:${(Y(v)/H*100).toFixed(1)}%">${trn(v,dec)} $</span>`).join('');
   let mk='';if(isaret){const p=(d.recent||[]).find(p=>p.st==='kapandı'&&p.xt>=t0&&p.pnl!=null);
     if(p){const x=X(p.xt);if(x/W<.82&&x/W>.08){let v=bas;for(const q of pts)if(q[0]<=p.xt)v=q[1];const kaz=p.pnl>0;
-      mk=`<span class="mk ${kaz?'y':'k'}" style="left:${(x/W*100).toFixed(1)}%;top:${(Y(v)/H*100).toFixed(1)}%">${esc(p.sym)} ${fR(p.r,1)}</span>`}}}
+      mk=`<span class="mk ${kaz?'y':'k'}" style="left:${(x/W*100).toFixed(1)}%;top:${(Y(v)/H*100).toFixed(1)}%">${esc(p.sym)} ${fS(p)}</span>`}}}
   el._eq={pts,X,Y,W,H};
   el.innerHTML=`<div class="ahd"><span>${RNG_AD[rng]||''}</span><b class="${up?'up':'dn'}">${fusd(fark)} · ${fch(yuz)}</b></div>
    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><defs><linearGradient id="agr${el.id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".28"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient>
@@ -1522,7 +1529,7 @@ function anaBot(){const d=botD,el=$('aBot');if(!d){el.innerHTML='<div class="tx"
   const sayi=(n,l)=>`<div class="bst"><b>${n}</b><small>${l}</small></div>`;
   if(!d.active){b='Bot duraklatıldı';sub=esc(d.status||'Yeni işlem açmıyor, açık pozisyonları yönetiyor');sag=sayi((d.open||[]).length,'açık')}
   else if(acik){b=`${esc(acik.sym)} pozisyonunu yönetiyor`;sub=`${esc(SETUP_K[acik.setup]||acik.setup)} · stop ${fp(acik.stop)} · hedef ${fp(acik.target)}`;
-    sag=`<div class="bst"><b class="${cls(acik.ur)}">${acik.ur!=null?fR(acik.ur,1):'—'}</b><small>şu an</small></div>`}
+    sag=`<div class="bst"><b class="${cls(acik.ur)}">${acik.ur!=null||acik.last?fU(acik):'—'}</b><small>şu an</small></div>`}
   else if(dbk){b=`${esc(dbk.sym)}'de onay bekliyor`;sub=`Fiyat girişin biraz üstüne çıkarsa girecek`;sag=ringH(dbk.conf,C.wa,'/100')}
   else if(bek){b=`${esc(bek.sym)} için giriş bekliyor`;sub=`${esc(SETUP_K[bek.setup]||bek.setup)} · giriş ${fp(bek.e)} · hedef ${fp(bek.h)}`;sag=ringH(bek.conf,C.up,'/100')}
   else{b=dc.al?'Fırsat kolluyor':'Fırsat kolluyor';const n=(dc.al||0)+(dc.atla||0);
@@ -1536,7 +1543,7 @@ function anaAcik(){const d=botD;const L=d?(d.open||[]):[];$('aOpenN').textConten
   $('aOpen').innerHTML=L.map(p=>{const al=p.dir>0,e=p.entry||p.plan,last=p.last||e,lo=Math.min(p.stop,p.target),hi=Math.max(p.stop,p.target),rg=(hi-lo)||1;
     const pos=v=>Math.max(0,Math.min(100,(al?(v-lo):(hi-v))/rg*100)),pe=pos(e),pl=pos(last),kaz=(p.ur||0)>=0;
     const bar=kaz?`<i style="left:${pe}%;width:${Math.max(0,pl-pe)}%;background:${C.up}"></i>`:`<i style="left:${pl}%;width:${Math.max(0,pe-pl)}%;background:${C.dn}"></i>`;
-    return `<div class="ac" data-s="${esc(p.sym)}"><div class="h">${logo(p.sym)}<div><b>${esc(p.sym)}</b><small>${al?'AL':'SAT'} · ${SETUP_K[p.setup]||p.setup}</small></div><span class="r ${cls(p.ur)}">${p.ur!=null?fR(p.ur):'—'}</span></div>
+    return `<div class="ac" data-s="${esc(p.sym)}"><div class="h">${logo(p.sym)}<div><b>${esc(p.sym)}</b><small>${al?'AL':'SAT'} · ${SETUP_K[p.setup]||p.setup}</small></div><span class="r ${cls(p.ur)}">${p.ur!=null||p.last?fU(p):'—'}</span></div>
       <div class="g"><span>Alış fiyatı<b>${fp(e)}</b></span><span class="rt">Mevcut fiyat<b class="${cls(p.upnl)}">${fp(last)}</b></span></div>
       <div class="pb">${bar}<u style="left:${pe}%"></u></div>
       <div class="g"><span>Stop<b>${fp(p.stop)}</b></span><span class="rt">Hedef<b>${fp(p.target)}</b></span></div></div>`}).join('')}
@@ -1585,7 +1592,7 @@ function DRC(c){return c>=85?'ap':c>=75?'a':c>=65?'b':'c'}
 function sigCard(s){const al=s.dir>0;
   const done=['hedef','stop','süre'].includes(s.st),k=done?(s.r>0?'win':'loss'):(s.st==='dolmadı'?'':'live');
   const taken=botD&&(botD.open.concat(botD.recent)).some(p=>p.sig===s.id&&p.st!=='iptal');
-  const sag=done?`<b class="sr ${cls(s.r)}">${fR(s.r,1)}</b>`:`<span class="stt ${k}">${ST_TR[s.st]||s.st}</span>`;
+  const sag=done?`<b class="sr ${cls(s.r)}">${fS(s)}</b>`:`<span class="stt ${k}">${ST_TR[s.st]||s.st}</span>`;
   return `<div class="sig sg2${openIds.has(s.id)?' open':''}${s.super?' sup':''}" data-id="${esc(s.id)}">
   <div class="h">${logo(s.sym)}<div class="hn"><div><b>${esc(s.sym)}</b><span class="hp ${al?'al':'sat'}">${al?'AL':'SAT'}</span>${s.super?'<span class="dk dk-SUP">💎 SÜPER</span>':s.den?`<span class="dk dk-${s.den.karar}">${DKAD[s.den.karar]||s.den.karar}</span>`:''}${taken?'<span class="tag">BOT</span>':''}</div>
     <small>${SETUP_K[s.setup]||s.setup} · ${SES_K[s.ses]||s.ses}${s.runner?' · koşan':''}</small></div>
@@ -1607,10 +1614,10 @@ function denMods(d,yz){return '<div class="mods">'+Object.keys(MODAD).filter(k=>
   (yz&&(yz.karar==='AL'||yz.karar==='PAS')?`<div class="modr"><b>🧠 Yapay Zekâ</b><span>olasılık %${yz.p} · eşik %${yz.esik}</span><i class="mk2 mk-${yz.karar==='AL'?'olumlu':'olumsuz'}">${yz.karar==='AL'?'AL':'PAS'}</i></div>`:'')+'</div>'}
 function renderDenetci(){const L=learn||{},k=L.den,p=L.perf||{};
   if(k){const kr=k.kararlar||{},c=x=>(kr[x]||{});$('denT').textContent=`${k.n} sinyal`;
-    $('denK').innerHTML=superKarne()+`<div class="sh"><b>Denetçi kararları</b></div><div class="dkk">${['AL','BEKLE','PAS'].map(x=>`<div><small class="${x==='AL'?'up':x==='PAS'?'dn':''}" style="${x==='BEKLE'?'color:var(--wa)':''}">${DKAD[x]}</small><b class="${cls(c(x).avg)}">${c(x).avg==null?'—':fR(c(x).avg)}</b><span>${c(x).n||0} sinyal · %${c(x).wr==null?'—':c(x).wr}</span></div>`).join('')}</div>
+    $('denK').innerHTML=superKarne()+`<div class="sh"><b>Denetçi kararları</b></div><div class="dkk">${['AL','BEKLE','PAS'].map(x=>`<div><small class="${x==='AL'?'up':x==='PAS'?'dn':''}" style="${x==='BEKLE'?'color:var(--wa)':''}">${DKAD[x]}</small><b class="${cls(c(x).avg)}">${c(x).avg==null?'—':fRt(c(x).avg)}</b><span>${c(x).n||0} sinyal · %${c(x).wr==null?'—':c(x).wr}</span></div>`).join('')}</div>
       <div class="note">Denetçinin her kararından sonra sinyal yine gölgede takip edildi: PAS GEÇ dediklerinin sonucu AL dediklerinden kötüyse denetçi işe yarıyor demektir.</div>`;
     $('denM').innerHTML='<div class="kmr h"><span>MODÜL</span><span style="text-align:right">OLUMLU</span><span style="text-align:right">OLUMSUZ</span><span style="text-align:center">GÜÇ</span></div>'+
-      k.moduller.map(r=>`<div class="kmr"><b style="font-weight:600">${esc(r.ad)}</b><span style="text-align:right" class="${cls(r.olumlu)}">${r.olumlu==null?'—':fR(r.olumlu)}</span><span style="text-align:right" class="${cls(r.olumsuz)}">${r.olumsuz==null?'—':fR(r.olumsuz)}</span>${r.guc==null?'<span class="g hapG" style="font-size:10px">veri az</span>':`<span class="g ${r.guc>=0.1?'hapY':r.guc>0.03?'hapG':'hapK'}">${r.guc.toFixed(2)}</span>`}</div>`).join('')}
+      k.moduller.map(r=>`<div class="kmr"><b style="font-weight:600">${esc(r.ad)}</b><span style="text-align:right" class="${cls(r.olumlu)}">${r.olumlu==null?'—':fRt(r.olumlu)}</span><span style="text-align:right" class="${cls(r.olumsuz)}">${r.olumsuz==null?'—':fRt(r.olumsuz)}</span>${r.guc==null?'<span class="g hapG" style="font-size:10px">veri az</span>':`<span class="g ${r.guc>=0.1?'hapY':r.guc>0.03?'hapG':'hapK'}">${r.guc.toFixed(2)}</span>`}</div>`).join('')}
   if(p&&p.n){$('perfK').innerHTML=`<div><small>Beklenen getiri</small><b class="${cls(p.beklenen_r)}">${fR(p.beklenen_r)}</b><i>işlem başına · ${fusd(p.beklenen_usd)}</i></div>
     <div><small>Kâr faktörü</small><b>${p.kar_faktoru==null?'—':p.kar_faktoru.toFixed(2)}</b><i>kazanç ÷ kayıp</i></div>
     <div><small>Maks. düşüş</small><b class="dn">−${(p.mdd||0).toFixed(2)} $</b><i>en yüksekten</i></div>
@@ -1629,7 +1636,7 @@ $('sigs').addEventListener('click',e=>{const g=e.target.closest('.go');if(g){sel
 function posCard(p){const al=p.dir>0,live=p.st==='açık'||p.st==='çıkış';
   const head=`<div class="top"><span class="sn">${esc(p.sym)}</span><span class="dirb ${al?'al':'sat'}">${al?'AL':'SAT'}</span>${p.runner?'<span class="tag run">koşan</span>':''}`;
   const sub=`<div class="meta" style="margin-top:4px">${SETUP[p.setup]||p.setup} · ${SES_K[p.ses]||p.ses} · ${tTR(p.opened)}</div>`;
-  if(p.st==='kapandı'||p.st==='iptal'){const res=p.pnl!=null?`<span class="rr ${cls(p.pnl)}">${fusd(p.pnl)} · ${fR(p.r)}</span>`:'';
+  if(p.st==='kapandı'||p.st==='iptal'){const res=p.pnl!=null?`<span class="rr ${cls(p.pnl)}">${fusd(p.pnl)} · ${fS(p)}</span>`:'';
     return `<div class="pos">${head}<span class="conf ${p.conf>=70?'hi':'mid'}">${p.conf}</span></div>${sub}
     <div class="lv"><div>Giriş<b>${fp(p.entry)}</b></div><div>Çıkış<b>${fp(p.exit)}</b></div><div>Adet<b>${p.qty}</b></div></div>
     <div class="bot"><span class="stt ${p.st==='iptal'?'':p.pnl>0?'win':'loss'}">${p.st==='iptal'?'İptal':esc(p.xr||'Kapandı')}</span>${res}${p.st==='kapandı'?`<span class="go" data-rp="${esc(p.id)}">İşlemi izle</span>`:''}</div>
@@ -1638,14 +1645,14 @@ function posCard(p){const al=p.dir>0,live=p.st==='açık'||p.st==='çıkış';
   return `<div class="pos">${head}<span class="stt live" style="margin-left:auto">${BST_TR[p.st]||p.st}</span></div>${sub}
   <div class="lv"><div>Giriş<b>${p.entry?fp(p.entry):'('+fp(p.plan)+')'}</b></div><div>Son<b>${fp(p.last)}</b></div><div>Anlık<b class="${cls(p.upnl)}">${live&&p.upnl!=null?fusd(p.upnl):'—'}</b></div>
   <div>Stop${st}<b class="dn">${fp(p.stop)}</b></div><div>Hedef<b class="up">${fp(p.target)}</b></div><div>Adet<b>${p.qty}</b></div></div>
-  <div class="bot"><span class="meta">${live&&p.ur!=null?fR(p.ur)+' · ':''}${esc(p.why||'')}</span><span class="go" data-sym="${esc(p.sym)}">Grafik →</span></div></div>`}
+  <div class="bot"><span class="meta">${live&&(p.ur!=null||p.last)?fU(p)+' · ':''}${esc(p.why||'')}</span><span class="go" data-sym="${esc(p.sym)}">Grafik →</span></div></div>`}
 function renderBot(){const d=botD;if(!d)return;try{renderBasariMini();if(tab==='basari')renderBasari()}catch(e){}
   $('bst').textContent=d.status;$('bst').className='pill '+(d.status==='çalışıyor'?'regular':'');
   const c=d.cfg;$('bcfg').innerHTML=[`sermaye ${(c.capital||250).toFixed(0)} $`,`${c.notional.toFixed(0)} $ / işlem`,`öncesi/sonrası ${(c.notional/2).toFixed(0)} $ + limit`,`en fazla ${c.max_open} açık`,`günlük limit −${c.daily_loss.toFixed(0)} $`,`güven ≥ ${c.min_conf} (uzatılmış ${c.min_conf_ext!=null?c.min_conf_ext:c.min_conf})`].map(x=>`<span class="chip">${x}</span>`).join('');
   const a=d.account||{},k=d.capital;$('bacct').textContent=(k?`Botun parası: ${k.total.toFixed(2)} $ · pozisyonlarda ${k.used.toFixed(2)} $ · boşta ${k.free.toFixed(2)} $`:'')+(d.left!=null?` · bugün kalan zarar hakkı ${d.left.toFixed(0)} $`:'')+(a.equity?` (Alpaca sanal hesap: ${(+a.equity).toLocaleString('tr-TR',{maximumFractionDigits:0})} $)`:'');
   $('blim').style.display=d.limit_hit?'block':'none';$('blim').textContent='Günlük zarar limiti doldu — bot bugün yeni işlem açmıyor.';
   $('kT').textContent=fusd(d.today.pnl);$('kT').className='big '+cls(d.today.pnl);$('kTn').textContent=`${d.today.n} işlem · ${d.today.w} kazanç`;
-  $('kA').textContent=fusd(d.total.pnl);$('kA').className=cls(d.total.pnl);$('kAn').textContent=d.total.n;$('kR').textContent=fR(d.total.avg_r);
+  $('kA').textContent=fusd(d.total.pnl);$('kA').className=cls(d.total.pnl);$('kAn').textContent=d.total.n;$('kR').textContent=d.total.avg_p!=null?fPc(d.total.avg_p):fR(d.total.avg_r);
   $('bProg').style.width=Math.min(100,d.total.n)+'%';$('bProgT').textContent=Math.min(d.total.n,100)+' / 100';
   const dc=d.dec||{al:0,atla:0,reasons:[]},seen=dc.al+dc.atla;
   $('bwhy').innerHTML=!d.active?`<div class="meta">Bot kapalı: ${esc(d.status)}</div>`:seen===0?
@@ -1688,8 +1695,8 @@ function renderBT(){const B=(learn&&learn.bt)||{},S=B.sum;let h='';
   if(B.running)h+=`<div class="hava n"><i></i><span><b>Test çalışıyor</b> ${esc(B.prog||'')}</span></div>`;
   else if(B.bekliyor)h+=`<div class="hava n"><i></i><span><b>Sırada:</b> ${B.bekliyor} günlük test, normal seans kapanınca başlayacak</span></div>`;
   if(B.hata)h+=`<div class="bozul" style="margin-bottom:10px">Son test hatası: ${esc(B.hata)}</div>`;
-  if(S&&S.tum&&S.tum.n){const tb=(rows,lab)=>`<div class="tw" style="margin-top:8px"><table class="res"><tr><th>${lab}</th><th>Adet</th><th>Kazanma</th><th>Ort. R</th></tr>${rows.filter(r=>r.n>=5).map(r=>`<tr><td>${esc(SETUP[r.k]||r.k)}</td><td>${r.n}</td><td>${r.wr}%</td><td class="${cls(r.avg)}">${fR(r.avg)}</td></tr>`).join('')}</table></div>`;
-    h+=`<div class="kpis"><div class="kpi"><b>Sinyal</b><span>${S.tum.n}</span></div><div class="kpi"><b>Kazanma</b><span>${S.tum.wr}%</span></div><div class="kpi"><b>Ort. R</b><span class="${cls(S.tum.avg)}">${fR(S.tum.avg)}</span></div></div>
+  if(S&&S.tum&&S.tum.n){const tb=(rows,lab)=>`<div class="tw" style="margin-top:8px"><table class="res"><tr><th>${lab}</th><th>Adet</th><th>Kazanma</th><th>İşlem başı</th></tr>${rows.filter(r=>r.n>=5).map(r=>`<tr><td>${esc(SETUP[r.k]||r.k)}</td><td>${r.n}</td><td>${r.wr}%</td><td class="${cls(r.avg)}">${fRt(r.avg)}</td></tr>`).join('')}</table></div>`;
+    h+=`<div class="kpis"><div class="kpi"><b>Sinyal</b><span>${S.tum.n}</span></div><div class="kpi"><b>Kazanma</b><span>${S.tum.wr}%</span></div><div class="kpi"><b>İşlem başı</b><span class="${cls(S.tum.avg)}">${fRt(S.tum.avg)}</span></div></div>
       <div class="meta" style="margin-top:8px">${S.ilk} – ${S.son} · ${S.gun} işlem günü · ${Math.round(S.sure/60)} dk sürdü · ${B.t?tTR(B.t):''}</div>
       ${tb(S.kurgu,'Kurgu')}${tb(S.hacim.map(r=>({...r,k:'Hacim '+r.k+' kat'})),'Hacim')}${tb(S.seans.map(r=>({...r,k:{pre:'Piyasa öncesi',regular:'Normal seans',post:'Piyasa sonrası'}[r.k]||r.k})),'Seans')}`}
   else if(!B.running)h+='<div class="meta">Henüz geçmiş test yapılmadı.</div>';
@@ -1708,18 +1715,18 @@ function renderHava(){const H=status.hava||MKT.hava;if(!H||!H.etiket||H.etiket==
 function renderLearn(){try{renderYZ()}catch(e){}try{renderPlanKarne()}catch(e){}try{renderDenetci()}catch(e){}renderBT();try{renderKT()}catch(e){}renderHours();const T=sigStats.find(r=>r.k==='Tümü'),n=T?T.n:0;$('pn').textContent=n;$('pbar').style.width=Math.min(100,n)+'%';
   $('resnote').textContent=n<100?`Henüz ${n}/100 sonuç var. En az 100 işlem görmeden bu sayfadan sonuç çıkarma.`:'';$('resnote').style.display=n<100?'block':'none';
   const main=new Set(['Tümü','Piyasa öncesi','Normal seans','Piyasa sonrası','Güven ≥ 70','Güven < 70','Koşan küçük hisseler']);
-  tbl('res',['Grup','Adet','Kazanma','Ort. R','Toplam R','Dolmadı','Açık'],sigStats.length?sigStats.map(r=>`<tr class="${main.has(r.k)?'main':''}"><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr.toFixed(0)+'%'}</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td class="${cls(r.tot)}">${fR(r.tot,1)}</td><td>${r.nf}</td><td>${r.open}</td></tr>`).join(''):'<tr><td colspan="7">Henüz sonuç yok.</td></tr>');
+  tbl('res',['Grup','Adet','Kazanma','İşlem başı','Toplam %','Dolmadı','Açık'],sigStats.length?sigStats.map(r=>`<tr class="${main.has(r.k)?'main':''}"><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr.toFixed(0)+'%'}</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td class="${cls(r.tot)}">${fR(r.tot,1)}</td><td>${r.nf}</td><td>${r.open}</td></tr>`).join(''):'<tr><td colspan="7">Henüz sonuç yok.</td></tr>');
   if(!learn)return;
-  tbl('cmp',['','Adet','Kazanma','Ort. R','Toplam'],learn.cmp.map(r=>`<tr class="main"><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr.toFixed(0)+'%'}</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td class="${cls(r.usd!=null?r.usd:r.tot)}">${r.usd!=null?fusd(r.usd):fR(r.tot,1)}</td></tr>`).join(''));
+  tbl('cmp',['','Adet','Kazanma','İşlem başı','Toplam'],learn.cmp.map(r=>`<tr class="main"><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr.toFixed(0)+'%'}</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td class="${cls(r.usd!=null?r.usd:r.tot)}">${r.usd!=null?fusd(r.usd):fR(r.tot,1)}</td></tr>`).join(''));
   const ins=x=>`<div class="ins"><span>${esc(x.k)}</span><span class="${cls(x.avg)}"><b>${fR(x.avg)}</b> <span class="meta">· ${x.n}</span></span></div>`;
   $('insg').innerHTML=learn.ins.good.length?learn.ins.good.map(ins).join(''):'<div class="note" style="padding:0 12px 10px">Henüz yeterli veri yok (her koşul için en az 15 sonuç).</div>';
   $('insb').innerHTML=learn.ins.bad.length?learn.ins.bad.map(ins).join(''):'<div class="note" style="padding:0 12px 10px">Henüz yeterli veri yok.</div>';
-  tbl('grp',['Kurgu','Adet','Kazanma','Ort. R','Durum'],learn.groups.length?learn.groups.map(r=>`<tr><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr.toFixed(0)}%</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td>${esc(r.durum)}</td></tr>`).join(''):'<tr><td colspan="5">Henüz sonuç yok.</td></tr>');
+  tbl('grp',['Kurgu','Adet','Kazanma','İşlem başı','Durum'],learn.groups.length?learn.groups.map(r=>`<tr><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr.toFixed(0)}%</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td>${esc(r.durum)}</td></tr>`).join(''):'<tr><td colspan="5">Henüz sonuç yok.</td></tr>');
   const M=learn.ins&&learn.ins.model,S=M&&M.sinav;
   $('msinav').innerHTML=S&&S.secilen!=null?`<div class="meta">Görmediği son ${S.n} sinyalde</div><div class="ins"><span>Hepsi</span><span class="${cls(S.hepsi)}"><b>${fR(S.hepsi)}</b></span></div><div class="ins"><span>Modelin seçtikleri (${S.secilen_n})</span><span class="${cls(S.secilen)}"><b>${fR(S.secilen)}</b></span></div><div class="ins"><span>Modelin eledikleri (${S.elenen_n})</span><span class="${cls(S.elenen)}"><b>${fR(S.elenen)}</b></span></div><div class="note" style="margin-top:8px">${S.secilen>S.elenen?'Model iyi sinyali kötüsünden ayırabiliyor.':'Model henüz ayırt edemiyor.'}${S.secilen<=0?' Seçilen dilim de eksi: kurallar avantaj üretmiyor, model sadece zararı küçültüyor.':''} Hafıza: ${M.hafiza_gun} gün yarı ömür.</div>`:'<div class="note">Model en az 500 sonuçtan sonra kendini sınar.</div>';
   const D=learn.dis||{kanallar:[],son:[]};
-  tbl('diskan',['Kanal','Sonuç','Tutma','Ort. R','Önce','Açık'],D.kanallar.length?D.kanallar.map(r=>`<tr><td>${esc(r.kanal)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr+'%'}</td><td class="${cls(r.avg)}">${r.avg==null?'—':fR(r.avg)}</td><td>${r.once==null?'—':'%'+r.once.toFixed(1)}</td><td>${r.acik}</td></tr>`).join(''):'<tr><td colspan="6">Henüz iletilen sinyal yok.</td></tr>');
-  tbl('disson',['Hisse','Kanal','Yön','Durum','R'],D.son.length?D.son.map(r=>`<tr><td>${esc(r.sym)}</td><td>${esc(r.kanal)}</td><td>${r.dir>0?'AL':'SAT'}</td><td>${esc(r.st)}</td><td class="${cls(r.r)}">${r.r==null?'—':fR(r.r)}</td></tr>`).join(''):'')}
+  tbl('diskan',['Kanal','Sonuç','Tutma','İşlem başı','Önce','Açık'],D.kanallar.length?D.kanallar.map(r=>`<tr><td>${esc(r.kanal)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr+'%'}</td><td class="${cls(r.avg)}">${r.avg==null?'—':fR(r.avg)}</td><td>${r.once==null?'—':'%'+r.once.toFixed(1)}</td><td>${r.acik}</td></tr>`).join(''):'<tr><td colspan="6">Henüz iletilen sinyal yok.</td></tr>');
+  tbl('disson',['Hisse','Kanal','Yön','Durum','%'],D.son.length?D.son.map(r=>`<tr><td>${esc(r.sym)}</td><td>${esc(r.kanal)}</td><td>${r.dir>0?'AL':'SAT'}</td><td>${esc(r.st)}</td><td class="${cls(r.r)}">${r.r==null?'—':fR(r.r)}</td></tr>`).join(''):'')}
 function renderStatus(){const s=status.ses||'closed',b=$('ses');b.textContent=SES_TR[s]||s;b.className='pill '+s;
   const p=status.plan;let t='';
   if(p)t+=`<b>${p.today?'Bugün':p.d}</b> (TR): Öncesi ${p.pre} · Açılış ${p.open} · Kapanış ${p.close}${p.early?' (erken kapanış)':''} · Sonrası biter ${p.post}<br>`;
@@ -1849,8 +1856,8 @@ function renderDusun(){const D=DSN[cur];if(!D){$('dsn').innerHTML='<div class="m
   const L=[],ln=(c,t,s)=>L.push(`<div class="ln ${c}"><i></i><div>${t}${s?`<small>${s}</small>`:''}</div></div>`);
   for(const p of D.pos||[])ln(p.dir>0?'up':'dn',`<b>Pozisyonda:</b> ${p.dir>0?'alış':'açığa satış'} ${p.qty} adet${p.entry?' @ '+fp(p.entry):''}`,`stop ${fp(p.stop)} · hedef ${fp(p.target)} · ${esc(BST_TR[p.st]||p.st||'')}`);
   const sg=D.sigs||[];
-  if(sg.length){const s=sg[sg.length-1];ln(s.dir>0?'up':'dn',`<b>Son sinyal:</b> ${esc(SETUP[s.setup]||s.setup)} · güven ${s.conf}`,`${tTR(s.t)} · ${esc(ST_TR[s.st]||s.st||'')}${s.r!=null?' · '+fR(s.r):''}${s.why?' · '+esc(Array.isArray(s.why)?s.why.join(', '):s.why):''}`);
-    const done=sg.filter(x=>x.r!=null);if(sg.length>1)ln('','Bugün '+sg.length+' sinyal',done.length?`sonuçlanan ${done.length}, ort. ${fR(done.reduce((a,x)=>a+x.r,0)/done.length)}`:'')}
+  if(sg.length){const s=sg[sg.length-1];ln(s.dir>0?'up':'dn',`<b>Son sinyal:</b> ${esc(SETUP[s.setup]||s.setup)} · güven ${s.conf}`,`${tTR(s.t)} · ${esc(ST_TR[s.st]||s.st||'')}${s.r!=null?' · '+fS(s):''}${s.why?' · '+esc(Array.isArray(s.why)?s.why.join(', '):s.why):''}`);
+    const done=sg.filter(x=>x.r!=null);if(sg.length>1)ln('','Bugün '+sg.length+' sinyal',done.length?`sonuçlanan ${done.length}, işlem başı ort. ${fPc(done.reduce((a,x)=>a+(pS(x)||0),0)/done.length)}`:'')}
   else ln('','Bugün bu hissede sinyal yok','Bot kurulum bekliyor: kırılım, geri çekilme ya da alıcı bölgesinden dönüş.');
   const jr=(D.jr||[]).slice(-4).reverse();
   for(const j of jr)ln(j.typ==='al'||j.typ==='dolum'?'up':j.typ==='atla'||j.typ==='hata'?'wa':'',`<b>${esc(JTR[j.typ]||j.typ)}:</b> ${esc(j.msg)}`,tTR(j.t));
@@ -1879,8 +1886,8 @@ function renderOzet(){const d=botD;if(!d){$('ozet').style.display='none';return}
   const H=status.hava||MKT.hava||{};const now=Date.now()/1000;
   const ev=(MKT.eko||[]).filter(e=>e.etki==='yüksek'&&e.t>now-900)[0];const bil=(MKT.bilhafta||[]).find(x=>x.bugun);
   $('ozet').innerHTML=`<div class="oz1"><span class="meta">Botun parası</span><b>${(c.total||0).toFixed(2)} $</b><span class="${cls(td.pnl)}" style="font-weight:700">bugün ${fusd(td.pnl)}</span>${op.length?`<span class="meta">açıkta ${fusd(up)}</span>`:''}</div>
-    <div class="og"><div class="tap" data-go="bot">Açık pozisyon<b>${op.length?op.map(p=>p.sym+(p.ur!=null?' '+(p.ur>0?'+':'')+p.ur.toFixed(1)+'R':'')).join(' · '):'yok'}</b></div>
-    <div class="tap" ${best?`data-s="${esc(best.sym)}"`:''}>Günün en iyi sinyali<b>${best?`${esc(best.sym)} · ${DR(best.conf)} ${best.conf}${best.r!=null?' · '+fR(best.r,1):''}`:'henüz yok'}</b></div>
+    <div class="og"><div class="tap" data-go="bot">Açık pozisyon<b>${op.length?op.map(p=>p.sym+(p.ur!=null||p.last?' '+fU(p):'')).join(' · '):'yok'}</b></div>
+    <div class="tap" ${best?`data-s="${esc(best.sym)}"`:''}>Günün en iyi sinyali<b>${best?`${esc(best.sym)} · ${DR(best.conf)} ${best.conf}${best.r!=null?' · '+fS(best):''}`:'henüz yok'}</b></div>
     <div>Piyasa havası<b>${esc(H.etiket&&H.etiket!=='bilinmiyor'?H.etiket:'—')}</b></div>
     <div class="tap" data-go="${ev?'takvim':'tara'}">${ev?'Sıradaki önemli veri':'Bugün bilanço'}<b>${ev?`${hm(ev.t)} ${esc(ev.ad)}`:bil?esc(bil.s)+(bil.z?' ('+(bil.z==='önce'?'açılış öncesi':'kapanış sonrası')+')':''):'—'}</b></div></div>`}
 $('ozet').addEventListener('click',e=>{const t=e.target.closest('[data-go],[data-s]');if(!t)return;if(t.dataset.s){select(t.dataset.s);return}
@@ -1891,7 +1898,7 @@ let KG=[],kgKap=null;
 async function loadKurgular(){try{const r=await fetch('/api/kurgular?gun=30',{credentials:'same-origin'});KG=(await r.json()).list||[]}catch(e){KG=[]}
   if(kgKap===null)kgKap=new Set(KG.filter(x=>x.kapali).map(x=>x.k));renderKurgular()}
 function renderKurgular(){if(!KG.length){$('kgL').innerHTML='<div class="meta" style="padding:12px 0">Henüz sonuç yok.</div>';return}
-  $('kgL').innerHTML=KG.map(x=>`<div class="kg"><div><b>${esc(x.ad)}</b><small>${x.n?`${x.n} sinyal · kazanma %${x.wr} · ort. <span class="${cls(x.avg)}">${fR(x.avg)}</span> · toplam ${fR(x.tot,1)}`:'henüz sonuç yok'}</small></div>
+  $('kgL').innerHTML=KG.map(x=>`<div class="kg"><div><b>${esc(x.ad)}</b><small>${x.n?`${x.n} sinyal · kazanma %${x.wr} · işlem başı ort. <span class="${cls(x.avg)}">${fA(x)}</span> · toplam ${fA(x,'tot')}`:'henüz sonuç yok'}</small></div>
     <span class="${cls(x.avg)}" style="font-weight:800">${x.avg!=null&&x.n>=20?(x.avg>0.05?'iyi':x.avg<-0.05?'zayıf':'nötr'):''}</span><button class="tg${kgKap.has(x.k)?'':' on'}" data-kg="${esc(x.k)}"></button></div>`).join('')}
 $('kgL').addEventListener('click',e=>{const b=e.target.closest('[data-kg]');if(!b)return;const k=b.dataset.kg;kgKap.has(k)?kgKap.delete(k):kgKap.add(k);b.classList.toggle('on',!kgKap.has(k))});
 $('kgSave').onclick=async()=>{try{await postJSON('/api/ayar',{kapali:[...kgKap]});toast(`<b>Kurgular kaydedildi</b><br><span class="meta">${kgKap.size?kgKap.size+' kurgu kapalı':'Bütün kurgular açık'}</span>`,'info')}catch(e){toast('Kaydedilemedi: '+esc(e.message),'sat')}};
@@ -1923,8 +1930,8 @@ function renderGunluk(){let L=GN.filter(p=>(!gnK||p.setup===gnK)&&(gnF==='hepsi'
   const n=L.length,w=L.filter(p=>p.pnl>0).length,pnl=L.reduce((a,p)=>a+p.pnl,0),rs=L.filter(p=>p.r!=null),ar=rs.length?rs.reduce((a,p)=>a+p.r,0)/rs.length:null;
   $('gnS').innerHTML=`<div class="kpi"><b>İşlem</b><span>${n}</span></div><div class="kpi"><b>Kazanma</b><span>${n?Math.round(100*w/n)+'%':'—'}</span></div><div class="kpi"><b>Toplam</b><span class="${cls(pnl)}">${fusd(pnl)}</span></div>`;
   $('gnL').innerHTML=L.length?'<div class="wl">'+L.slice(0,150).map(p=>{const al=p.dir>0,dk=p.xt&&p.et?Math.round((p.xt-p.et)/60):null;
-    return `<div class="gn2"><div class="ih">${logo(p.sym)}<div class="n"><b>${esc(p.sym)} <i class="${cls(p.r)}">${p.r!=null?fR(p.r,1):''}</i></b><small>Giriş ${fp(p.entry)} · Çıkış ${fp(p.exit)}</small></div><div class="rt"><small>${p.xt?tTR(p.xt).slice(-5):''}</small><b class="${cls(p.pnl)}">${fusd(p.pnl)}</b></div></div>
-      <div class="dt"><div class="m">${al?'AL':'SAT'} · ${esc(SETUP[p.setup]||p.setup)} · ${p.xt?tTR(p.xt):''} · giriş ${fp(p.entry)} → çıkış ${fp(p.exit)} · ${p.r!=null?fR(p.r):''}${dk!=null?' · '+dk+' dk':''} · çıkış: ${esc(p.xr||'')}${p.yarim!=null?' · yarım kapat '+fusd(p.yarim):''} · güven ${p.conf}</div>
+    return `<div class="gn2"><div class="ih">${logo(p.sym)}<div class="n"><b>${esc(p.sym)} <i class="${cls(p.r)}">${p.r!=null?fS(p):''}</i></b><small>Giriş ${fp(p.entry)} · Çıkış ${fp(p.exit)}</small></div><div class="rt"><small>${p.xt?tTR(p.xt).slice(-5):''}</small><b class="${cls(p.pnl)}">${fusd(p.pnl)}</b></div></div>
+      <div class="dt"><div class="m">${al?'AL':'SAT'} · ${esc(SETUP[p.setup]||p.setup)} · ${p.xt?tTR(p.xt):''} · giriş ${fp(p.entry)} → çıkış ${fp(p.exit)} · ${p.r!=null?fS(p):''}${dk!=null?' · '+dk+' dk':''} · çıkış: ${esc(p.xr||'')}${p.yarim!=null?' · yarım kapat '+fusd(p.yarim):''} · güven ${p.conf}</div>
       ${(p.neden||[]).length?`<ul>${p.neden.slice(0,4).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
       ${p.lesson?`<div class="ls">📘 ${esc(p.lesson)}</div>`:''}
       <button class="btnw sec" style="margin:10px 0 0;padding:9px" data-rp="${esc(p.id)}">Grafikte tekrar izle</button></div></div>`}).join('')+'</div>':empty('Bu dönemde kapanmış işlem yok.')}
@@ -1981,12 +1988,12 @@ function renderKarne(){for(const b of $('bseg').children)b.classList.toggle('on'
   const days=k.days.slice(-35);
   $('bKarne').innerHTML=`<div class="card"><div class="meta">Botun parası</div><div class="big ${cls(last-k.cap0)}">${last.toFixed(2)} $</div>
     <div class="meta">başlangıç ${k.cap0.toFixed(0)} $ · toplam ${fusd(T.pnl)} · en büyük düşüş ${k.mdd.toFixed(2)} $</div>${eqSvg(k.eq,k.cap0,k.spy)}
-    <div class="kpis"><div class="kpi"><b>İşlem</b><span>${T.n||0}</span></div><div class="kpi"><b>Kazanma</b><span>${T.n?Math.round(100*T.w/T.n)+'%':'—'}</span></div><div class="kpi"><b>Ort. R</b><span>${fR(T.avg_r)}</span></div></div></div>
+    <div class="kpis"><div class="kpi"><b>İşlem</b><span>${T.n||0}</span></div><div class="kpi"><b>Kazanma</b><span>${T.n?Math.round(100*T.w/T.n)+'%':'—'}</span></div><div class="kpi"><b>İşlem başı ort.</b><span>${T.avg_p!=null?fPc(T.avg_p):fR(T.avg_r)}</span></div></div></div>
     <h3>Günler</h3><div class="cal">${days.length?days.map(d=>`<div style="background:${heat(d.pnl/2.5)}"><b>${d.d.slice(8)}.${d.d.slice(5,7)}</b>${(d.pnl>0?'+':'')+d.pnl.toFixed(2)}</div>`).join(''):'<div style="grid-column:1/-1">Henüz kapanmış gün yok</div>'}</div>
     <h3>En iyi işlemler</h3><div class="card" style="padding:2px 14px">${k.best.length?k.best.map(trow).join(''):'<div class="meta" style="padding:10px 0">—</div>'}</div>
     <h3>En kötü işlemler</h3><div class="card" style="padding:2px 14px">${k.worst.length?k.worst.map(trow).join(''):'<div class="meta" style="padding:10px 0">—</div>'}</div>
-    <h3>Kurgulara göre</h3><div class="tw"><table class="res"><tr><th>Kurgu</th><th>İşlem</th><th>Kazanma</th><th>Ort. R</th><th>Toplam</th></tr>
-    ${k.setups.map(x=>`<tr><td>${esc(SETUP[x.k]||x.k)}</td><td>${x.n}</td><td>${x.wr}%</td><td class="${cls(x.avg_r)}">${fR(x.avg_r)}</td><td class="${cls(x.pnl)}">${fusd(x.pnl)}</td></tr>`).join('')}</table></div>
+    <h3>Kurgulara göre</h3><div class="tw"><table class="res"><tr><th>Kurgu</th><th>İşlem</th><th>Kazanma</th><th>İşlem başı</th><th>Toplam</th></tr>
+    ${k.setups.map(x=>`<tr><td>${esc(SETUP[x.k]||x.k)}</td><td>${x.n}</td><td>${x.wr}%</td><td class="${cls(x.avg_r)}">${x.avg_p!=null?fPc(x.avg_p):fR(x.avg_r)}</td><td class="${cls(x.pnl)}">${fusd(x.pnl)}</td></tr>`).join('')}</table></div>
     <div class="note">Bir işleme dokununca grafikte nasıl açılıp kapandığını izleyebilirsin.</div>`}
 $('bseg').addEventListener('click',e=>{const b=e.target.closest('.ff');if(!b)return;bTab=b.dataset.k;ls('bseg',bTab);renderKarne()});
 
@@ -2000,7 +2007,7 @@ async function shareCard(){const m=RPM;if(!m||!m.pos)return;const p=m.pos,al=p.d
   const F=(w,sz)=>`${w} ${sz}px Inter, -apple-system, sans-serif`;g.fillStyle='#8e8e99';g.font=F(600,34);g.fillText('ABD·BOT · sanal hesap',72,110);
   g.fillStyle='#fff';g.font=F(800,150);g.fillText(p.sym,72,290);g.font=F(700,44);g.fillStyle=al?'#30d27b':'#ff5a5f';g.fillText(al?'ALIŞ':'AÇIĞA SATIŞ',72,360);
   g.fillStyle='#8e8e99';g.font=F(500,36);g.fillText(m.ad||'',72,420);
-  g.fillStyle=col;g.font=F(800,120);g.fillText((p.r>0?'+':'')+(p.r||0).toFixed(2)+'R',72,580);g.font=F(700,56);g.fillText(fusd(p.pnl),72,660);
+  g.fillStyle=col;g.font=F(800,120);g.fillText(fS(p),72,580);g.font=F(700,56);g.fillText(fusd(p.pnl),72,660);
   const cl=(m.bars||[]).map(b=>b[4]);if(cl.length>2){const x0=72,x1=W-72,y0=720,y1=1060,mn=Math.min(...cl),mx=Math.max(...cl),rg=(mx-mn)||1;
     const X=i=>x0+(x1-x0)*i/(cl.length-1),Y=v=>y1-(v-mn)/rg*(y1-y0);g.strokeStyle='#7b83f7';g.lineWidth=6;g.beginPath();cl.forEach((v,i)=>i?g.lineTo(X(i),Y(v)):g.moveTo(X(i),Y(v)));g.stroke();
     const idx=t=>{let k=0;for(let i=0;i<m.bars.length;i++)if(m.bars[i][0]<=t)k=i;return k};
@@ -2009,13 +2016,13 @@ async function shareCard(){const m=RPM;if(!m||!m.pos)return;const p=m.pos,al=p.d
   row('Giriş',fp(p.entry),72,1150);row('Çıkış',fp(p.exit),400,1150);row('Stop',fp(p.init_stop),728,1150);
   g.fillStyle='#5f5f6b';g.font=F(500,30);g.fillText((p.xt?tTR(p.xt):'')+' · yatırım tavsiyesi değildir',72,1300);
   const blob=await new Promise(r=>cv.toBlob(r,'image/png')),file=new File([blob],`abdbot-${p.sym}.png`,{type:'image/png'});
-  try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:`${p.sym} ${fR(p.r)}`});return}}catch(e){if(e&&e.name==='AbortError')return}
+  try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:`${p.sym} ${fS(p)}`});return}}catch(e){if(e&&e.name==='AbortError')return}
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=file.name;a.click();toast('Kart indirildi','info')}
 $('rpShare').onclick=shareCard;
 function renderReplay(m){RPM=m;if(m.hata){$('rph').innerHTML=`<div class="meta">${esc(m.hata)}</div>`;return}
   const p=m.pos,al=p.dir>0;
   $('rph').innerHTML=`<div class="top" style="margin-top:4px"><span class="sn" style="font-size:28px">${esc(p.sym)}</span><span class="dirb ${al?'al':'sat'}">${al?'AL':'SAT'}</span>
-    <span class="rr ${cls(p.pnl)}" style="margin-left:auto;font:700 22px var(--cond)">${fusd(p.pnl)} · ${fR(p.r)}</span></div><div class="meta">${esc(m.ad)} · ${tTR(p.et||p.opened)} → ${p.xt?tTR(p.xt):'açık'} · ${esc(p.xr||'')}</div>`;
+    <span class="rr ${cls(p.pnl)}" style="margin-left:auto;font:700 22px var(--cond)">${fusd(p.pnl)} · ${fS(p)}</span></div><div class="meta">${esc(m.ad)} · ${tTR(p.et||p.opened)} → ${p.xt?tTR(p.xt):'açık'} · ${esc(p.xr||'')}</div>`;
   $('rpb').innerHTML=`<div class="lv"><div>Giriş<b>${fp(p.entry)}</b></div><div>Çıkış<b>${fp(p.exit)}</b></div><div>Adet<b>${p.qty}</b></div>
     <div>İlk stop<b class="dn">${fp(p.init_stop)}</b></div><div>Hedef<b class="up">${fp(p.target)}</b></div><div>Tutar<b>${fusd(p.notional).replace('+','')}</b></div></div>
     ${(m.why||[]).length?`<h3>Neden alındı</h3><ul style="margin:0;padding-left:18px;color:var(--mut);font-size:13.5px">${m.why.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`:''}
@@ -2072,12 +2079,12 @@ function renderStrateji(){for(const b of $('stF').children)b.classList.toggle('o
   const ana=L.slice().sort((a,b)=>(b.n>=5)-(a.n>=5)||b.tot-a.tot)[0],dig=L.filter(x=>x!==ana);
   const kaynak=stF==='test'?'geçmiş test':'son '+gun+' gün';
   $('stH').innerHTML=`<div class="sth"><div class="t"><span class="ik"><svg><use href="#i-${STIK[ana.k]||'trend'}"/></svg></span><div><b>${esc(SETUP[ana.k]||ana.ad)}</b><small>${ana.sym.map(esc).join(', ')||'—'}</small></div></div>
-    <div class="k3"><div><small>${stF==='test'?'Test':'Son '+gun+' gün'}</small><b class="${cls(ana.tot)}">${fR(ana.tot,1)}</b></div><div><small>Başarı Oranı</small><b class="up">%${ana.wr}</b></div><div><small>Toplam Sinyal</small><b class="up">${ana.n}</b></div></div>
+    <div class="k3"><div><small>${stF==='test'?'Test':'Son '+gun+' gün'}</small><b class="${cls(ana.tot)}">${fA(ana,'tot')}</b></div><div><small>Başarı Oranı</small><b class="up">%${ana.wr}</b></div><div><small>Toplam Sinyal</small><b class="up">${ana.n}</b></div></div>
     ${eqSvg(ana.eq,ana.tot>=0)}<button class="btng" data-det="${esc(ana.k)}">Detayları Gör</button></div>`;
   $('stLT').textContent=dig.length?'Diğer Stratejiler':'';$('stLN').textContent=dig.length?kaynak:'';
   $('stL').style.display=dig.length?'block':'none';
-  $('stL').innerHTML=dig.map(x=>`<div class="str" data-det="${esc(x.k)}"><span class="ik"><svg><use href="#i-${STIK[x.k]||'trend'}"/></svg></span><div class="n"><b>${esc(SETUP[x.k]||x.ad)}</b><small>${x.n} sinyal · %${x.wr} başarı${x.kapali?' · kapalı':''}</small></div><div class="v ${cls(x.tot)}">${fR(x.tot,1)}<small>ort ${fR(x.avg)}</small></div></div>`).join('');
-  $('stNot').textContent='Sonuçlar R cinsinden: 1R = sinyalin stop mesafesi kadar risk. Her sinyal bot girmese de gölgede takip edilir.'}
+  $('stL').innerHTML=dig.map(x=>`<div class="str" data-det="${esc(x.k)}"><span class="ik"><svg><use href="#i-${STIK[x.k]||'trend'}"/></svg></span><div class="n"><b>${esc(SETUP[x.k]||x.ad)}</b><small>${x.n} sinyal · %${x.wr} başarı${x.kapali?' · kapalı':''}</small></div><div class="v ${cls(x.tot)}">${fA(x,'tot')}<small>işlem başı ${fA(x)}</small></div></div>`).join('');
+  $('stNot').textContent='Sonuçlar işlem başı yüzde: girişten çıkışa fiyatın yüzde değişimi (masraf ve kayma dahil). Her sinyal bot girmese de gölgede takip edilir.'}
 $('stF').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;stF=b.dataset.k;ls('stf',stF);renderStrateji()});
 $('t-strateji').addEventListener('click',e=>{const g=e.target.closest('.geri');if(g){showTab(g.dataset.go);return}const d=e.target.closest('[data-det]');if(d){gnK=d.dataset.det;showTab(stF==='test'?'ogren':'gunluk')}});
 
@@ -2114,7 +2121,7 @@ function basariHesap(){const d=botD||{},T=d.total||{n:0,w:0,pnl:0},K=d.karne||{}
   const disip=days.filter(x=>x.pnl>-((d.cfg&&d.cfg.daily_loss)||50)).length;
   const R=[
     {i:'bolt',b:'İlk İşlem',a:'Bot ilk paper işlemini açtı',v:Math.min(1,T.n),h:1,c:''},
-    {i:'trophy',b:'İlk +2R İşlem',a:'Riskinin iki katı kazanç',v:iki?1:0,h:1,c:''},
+    {i:'trophy',b:'İlk K2 İşlem',a:'Riskinin iki katı kazanç',v:iki?1:0,h:1,c:''},
     {i:'cal',b:'Günlük Kâr',a:'3 gün üst üste kârlı kapanış',v:Math.min(3,enSeri),h:3,c:'o'},
     {i:'star',b:'En İyi Sinyal',a:'90+ güven skorlu kazanan sinyal',v:iyiSig?1:0,h:1,c:'o'},
     {i:'trend',b:'Haftalık Performans',a:'Son 5 günde +%10',v:Math.max(0,Math.min(10,hafta)),h:10,c:'m',f:x=>'%'+x.toFixed(1)},
@@ -2153,7 +2160,7 @@ function renderSupAna(){const el=$('aSup');if(!el)return;const s=supAktif();if(!
   const r=rows[s.sym]||{},ch=r.ch,ST={hedef:'🎯 Hedef geldi',stop:'🛑 Stop oldu','süre':'⌛ Süre doldu','açık':'🟢 Açık',bekliyor:'⏳ Giriş bekleniyor','dolmadı':'⏸ Gelmedi'};
   const n=s.den&&s.den.mod?Object.values(s.den.mod).filter(m=>m.k==='olumlu').length:0;
   el.innerHTML=`<div class="supk" data-ss="${esc(s.id)}"><div class="r1"><span class="rzg">💎 SÜPER FIRSAT</span><span class="tm">${once(s.t)} · bugün ${supBugun()}/${(learn&&learn.super&&learn.super.gunluk)||3}</span></div>
-    <div class="s">${logo(s.sym)}<div><b>${esc(s.sym)}</b><small>${esc(SETUP_K[s.setup]||s.setup)} · ${n}/5 modül olumlu · ${ST[s.st]||esc(s.st)}${s.r!=null?' '+fR(s.r):''}</small></div><div class="p"><b>${fp(r.p)}</b><span class="${(ch||0)>=0?'up':'dn'}">${ch==null?'':fch(ch)}</span></div></div>
+    <div class="s">${logo(s.sym)}<div><b>${esc(s.sym)}</b><small>${esc(SETUP_K[s.setup]||s.setup)} · ${n}/5 modül olumlu · ${ST[s.st]||esc(s.st)}${s.r!=null?' '+fS(s):''}</small></div><div class="p"><b>${fp(r.p)}</b><span class="${(ch||0)>=0?'up':'dn'}">${ch==null?'':fch(ch)}</span></div></div>
     ${supSkr(r.sp,(ch||0)>=0)}
     <div class="g3"><span>Giriş<b>${fp(s.e)}</b></span><span>Stop<b class="dn">${fp(s.s)}</b></span><span>Hedef<b class="up">${fp(s.h)}</b></span></div>
     <div class="bt"><button class="a" data-sym="${esc(s.sym)}">Grafiği aç</button><button class="b" data-ne="1">Neden süper?</button></div>
@@ -2161,11 +2168,11 @@ function renderSupAna(){const el=$('aSup');if(!el)return;const s=supAktif();if(!
 $('aSup').addEventListener('click',e=>{e.stopPropagation();const b=e.target.closest('[data-sym]');if(b){select(b.dataset.sym);return}
   const k=e.target.closest('.supk');if(k&&e.target.closest('[data-ne]'))k.classList.toggle('open')});
 function superKarne(){const S=(learn&&learn.super)||{},k=(learn&&learn.den&&learn.den.kararlar)||{},c=x=>k[x]||{};
-  const canli=S.n>0,sv=canli?{avg:S.avg,n:S.n,wr:S.wr}:(S.sinif&&S.sinif.n?S.sinif:c('SUPER'));
+  const canli=S.n>0,sv=canli?{avg:S.avg,avg_p:S.avg_p,n:S.n,wr:S.wr}:(S.sinif&&S.sinif.n?S.sinif:c('SUPER'));
   return `<div class="sh"><b>💎 Süper Fırsat karnesi</b><span>${canli?'canlı':'geçmiş test'}</span></div>
-  <div class="skb"><div class="gold"><small>SÜPER</small><b class="${cls(sv.avg)}">${sv.avg==null?'—':fR(sv.avg)}</b><span>${sv.n||0} sinyal${sv.wr!=null?' · %'+sv.wr:''}</span></div>
-    <div><small>ONAYLI</small><b class="${cls(c('AL').avg)}">${c('AL').avg==null?'—':fR(c('AL').avg)}</b><span>${c('AL').n||0} sinyal${c('AL').wr!=null?' · %'+c('AL').wr:''}</span></div>
-    <div><small>PAS GEÇ</small><b class="${cls(c('PAS').avg)}">${c('PAS').avg==null?'—':fR(c('PAS').avg)}</b><span>${c('PAS').n||0} sinyal</span></div></div>
+  <div class="skb"><div class="gold"><small>SÜPER</small><b class="${cls(sv.avg)}">${sv.avg==null?'—':canli?fA(sv):fRt(sv.avg)}</b><span>${sv.n||0} sinyal${sv.wr!=null?' · %'+sv.wr:''}</span></div>
+    <div><small>ONAYLI</small><b class="${cls(c('AL').avg)}">${c('AL').avg==null?'—':fRt(c('AL').avg)}</b><span>${c('AL').n||0} sinyal${c('AL').wr!=null?' · %'+c('AL').wr:''}</span></div>
+    <div><small>PAS GEÇ</small><b class="${cls(c('PAS').avg)}">${c('PAS').avg==null?'—':fRt(c('PAS').avg)}</b><span>${c('PAS').n||0} sinyal</span></div></div>
   <div class="meta" style="margin:8px 2px 0">Süper: denetçi ONAYLI + model en iyi %${Math.round(100*(1-(S.esik||.97)))} + Fırsat, Teknik, Piyasa olumlu, günde en fazla ${S.gunluk||3}. Canlıda tutmazsa eşik kendiliğinden sıkılaşır.</div>`}
 function renderSigSup(){const el=$('sigSup');if(el)el.innerHTML=(learn&&(learn.super||learn.den))?superKarne():''}
 
@@ -2179,9 +2186,9 @@ function renderKT(){const el=$('ktc');if(!el)return;const K=(learn&&learn.kosan)
   if(K.running)h+=`<div class="hava n"><i></i><span><b>Test çalışıyor</b> ${esc(K.prog||'')}</span></div>`;
   else if(K.istek)h+=`<div class="hava n"><i></i><span><b>Sırada:</b> normal seans kapanınca başlayacak</span></div>`;
   if(K.hata)h+=`<div class="bozul" style="margin-bottom:10px">Son test hatası: ${esc(K.hata)}</div>`;
-  if(S&&S.tum&&S.tum.n){h+=`<div class="kpis"><div class="kpi"><b>Hisse-gün</b><span>${S.aday||0}</span></div><div class="kpi"><b>Sinyal</b><span>${S.tum.n}</span></div><div class="kpi"><b>Ort. R</b><span class="${cls(S.tum.avg)}">${fR(S.tum.avg)}</span></div></div>
+  if(S&&S.tum&&S.tum.n){h+=`<div class="kpis"><div class="kpi"><b>Hisse-gün</b><span>${S.aday||0}</span></div><div class="kpi"><b>Sinyal</b><span>${S.tum.n}</span></div><div class="kpi"><b>İşlem başı</b><span class="${cls(S.tum.avg)}">${fRt(S.tum.avg)}</span></div></div>
     <div class="meta" style="margin-top:8px">${esc(S.ilk||'')} – ${esc(S.son||'')} · ${Math.round((S.sure||0)/60)} dk sürdü · ${K.t?tTR(K.t):''}</div>
-    <div class="tw" style="margin-top:8px"><table class="res"><tr><th>Kurgu</th><th>Adet</th><th>Kazanma</th><th>Ort. R</th></tr>${(S.kurgu||[]).map(r=>`<tr${r.k==='sicrama'?' class="main"':''}><td>${esc(SETUP[r.k]||r.k)}</td><td>${r.n}</td><td>${r.wr}%</td><td class="${cls(r.avg)}">${fR(r.avg)}</td></tr>`).join('')}</table></div>`}
+    <div class="tw" style="margin-top:8px"><table class="res"><tr><th>Kurgu</th><th>Adet</th><th>Kazanma</th><th>İşlem başı</th></tr>${(S.kurgu||[]).map(r=>`<tr${r.k==='sicrama'?' class="main"':''}><td>${esc(SETUP[r.k]||r.k)}</td><td>${r.n}</td><td>${r.wr}%</td><td class="${cls(r.avg)}">${fRt(r.avg)}</td></tr>`).join('')}</table></div>`}
   else if(!K.running)h+='<div class="meta">Henüz koşan hisse testi yapılmadı.</div>';
   h+=`<div class="hava ${sic?'n':'g'}" style="margin-top:10px"><i></i><span><b>Dikey sıçrama kurgusu:</b> ${sic?esc(sic):'geçmiş testte kârlı çıktı, bot bu kurguya giriyor'}</span></div>`;
   h+=`<button class="btnw" id="ktGo"${K.running||K.istek?' disabled style="opacity:.5"':''}>${K.running?'Test çalışıyor…':K.istek?'Sırada':'Koşan hisse testini başlat'}</button>`;
@@ -2207,7 +2214,7 @@ function renderYZ(){const el=$('yzK');if(!el)return;const Y=(learn&&learn.yz)||n
     <div class="meta" style="margin-top:6px">Her uygun sinyalde internette araştırır (haber, katalizör, seyreltme), botun rakamlarını ve 5 modülü okur, hedefe ulaşma olasılığını tahmin eder. Kararı öğrenme modeline de özellik olarak girer.</div>
     <div class="skb" style="margin-top:12px"><div><small>YZ AL DEDİ</small><b class="${cls(k.al.avg)}">${k.al.avg==null?'—':fR(k.al.avg)}</b><span>${k.al.n||0} sinyal${k.al.wr!=null?' · %'+k.al.wr:''}</span></div>
       <div><small>YZ PAS DEDİ</small><b class="${cls(k.pas.avg)}">${k.pas.avg==null?'—':fR(k.pas.avg)}</b><span>${k.pas.n||0} sinyal</span></div>
-      <div class="${k.kanit?'gold':''}"><small>AYIRT GÜCÜ</small><b class="${cls(k.guc)}">${k.guc==null?'—':fR(k.guc)}</b><span>${k.kanit?'kanıtlandı ✓':'hedef +'+trn(k.esik||.15,2)+'R'}</span></div></div>
+      <div class="${k.kanit?'gold':''}"><small>AYIRT GÜCÜ</small><b class="${cls(k.guc)}">${k.guc==null?'—':fR(k.guc)}</b><span>${k.kanit?'kanıtlandı ✓':'hedef +'+fR(k.esik||.15)}</span></div></div>
     ${Y.ders?`<div class="sh" style="margin-top:12px"><b style="font-size:14px">Son gün sonu dersi</b><span>${tTR(Y.ders.t)}</span></div><div class="yzm meta">${esc(Y.ders.metin)}</div>`:''}
     ${Y.hata?`<div class="meta" style="margin-top:8px">Son hata: ${esc(Y.hata)}</div>`:''}${Y.hazir&&!Y.arama?'<div class="meta" style="margin-top:4px">Google arama aracı bu anahtarla kullanılamadı: aramasız çalışıyor.</div>':''}</div>`}
 $('yzSeg').addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(!b)return;$('yzYet').value=b.dataset.v;$('yzYet').dataset.dirty=1;for(const x of $('yzSeg').children)x.classList.toggle('on',x===b)});
@@ -2233,8 +2240,8 @@ $('kPlan').addEventListener('click',e=>{const c=e.target.closest('[data-sym]');i
 function renderPlanKarne(){const P=(learn&&learn.plan)||null,el=$('plKarne');if(!el||!P)return;
   $('plK').textContent=P.golge?'gölgede':'işlem açıyor';
   const K=P.karne||[];
-  el.innerHTML=`<div class="card" style="padding:4px 14px"><div class="kmr h" style="grid-template-columns:minmax(0,1fr) 44px 50px 50px 60px"><span>Seviye türü</span><span style="text-align:right">Plan</span><span style="text-align:right">Sahte</span><span style="text-align:right">Sonuç</span><span style="text-align:right">Ort. R</span></div>
-    ${K.length?K.map(r=>`<div class="kmr" style="grid-template-columns:minmax(0,1fr) 44px 50px 50px 60px"><b style="font-weight:600">${esc(r.ad)}</b><span style="text-align:right">${r.plan}</span><span style="text-align:right">${r.sahte}</span><span style="text-align:right">${r.n}</span><span style="text-align:right" class="${cls(r.avg)}">${r.avg==null?'—':fR(r.avg)}</span></div>`).join(''):'<div class="meta" style="padding:10px 0">Plan oldukça hangi seviye türünün tuttuğu burada ölçülür (taban tavanı, kaybedilen seviye, dünkü tepe, kanal seviyesi…).</div>'}</div>
+  el.innerHTML=`<div class="card" style="padding:4px 14px"><div class="kmr h" style="grid-template-columns:minmax(0,1fr) 44px 50px 50px 60px"><span>Seviye türü</span><span style="text-align:right">Plan</span><span style="text-align:right">Sahte</span><span style="text-align:right">Sonuç</span><span style="text-align:right">İşlem başı ort.</span></div>
+    ${K.length?K.map(r=>`<div class="kmr" style="grid-template-columns:minmax(0,1fr) 44px 50px 50px 60px"><b style="font-weight:600">${esc(r.ad)}</b><span style="text-align:right">${r.plan}</span><span style="text-align:right">${r.sahte}</span><span style="text-align:right">${r.n}</span><span style="text-align:right" class="${cls(r.avg)}">${r.avg==null?'—':fA(r)}</span></div>`).join(''):'<div class="meta" style="padding:10px 0">Plan oldukça hangi seviye türünün tuttuğu burada ölçülür (taban tavanı, kaybedilen seviye, dünkü tepe, kanal seviyesi…).</div>'}</div>
     <div class="meta" style="margin:8px 2px 0">${P.golge?esc(P.golge):'Bot onaylanan kırılımlarda işlem açıyor.'} Kanalların verdiği seviyeler de aynı onayla ölçülür.</div>`}
 $('kirSeg').addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(!b)return;$('kirYet').value=b.dataset.v;$('kirYet').dataset.dirty=1;for(const x of $('kirSeg').children)x.classList.toggle('on',x===b)});
 
@@ -2354,7 +2361,7 @@ function v4kart(p,o){
   const chs=ch!=null?`<span class="${cls(ch)}">${fch(ch)}</span>`:'';
   let r2,trk='';
   if(kir){const lo=p.giris,hi=h[2]||h[h.length-1]||p.giris*1.1,pos=v=>Math.max(0,Math.min(100,(v-lo)/((hi-lo)||1)*100));
-    r2=`<b>${fp(px)}</b>${chs}<span>· giriş ${fp(p.giris)}${p.r!=null?' · '+fR(p.r):''}${o&&o.bot&&o.bot!=='kapandı'?' · bot içeride':''}</span>`;
+    r2=`<b>${fp(px)}</b>${chs}<span>· giriş ${fp(p.giris)}${p.r!=null?' · '+fS(p):''}${o&&o.bot&&o.bot!=='kapandı'?' · bot içeride':''}</span>`;
     trk=`<div class="v4trk"><div class="f" style="width:${pos(px).toFixed(0)}%"></div>${h.slice(0,2).map(v=>`<div class="k" style="left:${pos(v).toFixed(0)}%"></div>`).join('')}<div class="d" style="left:${pos(px).toFixed(0)}%"></div></div>
       <div class="v4r3"><span>giriş ${fp(p.giris)}</span>${h.slice(0,3).map((v,i)=>`<span>K${i+1} ${fp(v)}</span>`).join('')}</div>`}
   else{const lo=p.stop||p.giris*0.93,hi=p.giris,pos=v=>Math.max(0,Math.min(100,(v-lo)/((hi-lo)||1)*100)),dist=px?(p.giris/px-1)*100:null;
@@ -2384,7 +2391,7 @@ function renderPlanSayfa(){if(tab!=='plan')return;const P=(learn&&learn.plan)||{
   else{const son=P.son||[];h=son.length?son.map(p=>v4kart(p)).join(''):`<div class="v4bos">Bugün biten plan yok.</div>`}
   $('plL').innerHTML=h;
   const S=(sigList||[]).slice(0,6);
-  $('plSig').innerHTML=S.length?`<div class="v4kutu" style="padding:2px 12px">${S.map(s=>`<div class="v4kg" data-sym="${esc(s.sym)}" style="cursor:pointer"><div><div class="ad">${esc(s.sym)} <span class="meta" style="font-weight:600">${esc(SETUP_K[s.setup]||s.setup)}</span></div><small>giriş ${fp(s.e)} · stop ${fp(s.s)} · hedef ${fp(s.h)}</small></div><div class="rr ${cls(s.r)}">${s.r!=null?fR(s.r):esc(ST_TR[s.st]||s.st)}</div></div>`).join('')}</div>`:'<div class="v4bos">Henüz sinyal yok.</div>'}
+  $('plSig').innerHTML=S.length?`<div class="v4kutu" style="padding:2px 12px">${S.map(s=>`<div class="v4kg" data-sym="${esc(s.sym)}" style="cursor:pointer"><div><div class="ad">${esc(s.sym)} <span class="meta" style="font-weight:600">${esc(SETUP_K[s.setup]||s.setup)}</span></div><small>giriş ${fp(s.e)} · stop ${fp(s.s)} · hedef ${fp(s.h)}</small></div><div class="rr ${cls(s.r)}">${s.r!=null?fS(s):esc(ST_TR[s.st]||s.st)}</div></div>`).join('')}</div>`:'<div class="v4bos">Henüz sinyal yok.</div>'}
 function v4bul(id){const P=(learn&&learn.plan)||{},L=(learn&&learn.liste)||{};
   return [...(P.aktif||[]),...(P.son||[])].find(p=>p.id===id)||(L.liste||[]).find(x=>x.plan===id||x.sym===id)||[...(P.aktif||[]),...(P.son||[])].find(p=>p.sym===id)}
 function v4merdiven(p,px){
@@ -2436,22 +2443,22 @@ function renderKarneV4(){if(tab!=='ogren')return;for(const b of $('krSeg').child
   const K=learn&&learn.kesici;
   if(K){const MOD={oto:'OTO',acik:'AÇIK',kapali:'KAPALI'},L=K.liste.filter(x=>x.n||x.mod!=='oto');
     $('krKes').innerHTML=`<div class="v4kutu" style="padding:4px 12px">
-      <div class="v4kg"><div><div class="ad">Kurgu kesici</div><small>son ${K.esik.gun} günde ${K.esik.n}+ sinyal ve ort. ${fR(K.esik.kes)} altı → gölge · toparlanınca açılır</small></div><button class="v4mod ${K.aktif?'acik':'kapali'}" data-kes="${K.aktif?0:1}">${K.aktif?'AÇIK':'KAPALI'}</button></div>
-      ${L.length?L.map(x=>`<div class="v4kg"><div style="min-width:0"><div class="ad">${esc(SETUP[x.k]||x.ad)}${x.durum==='golge'?' <span class="v4ch r" style="font-size:9.5px;padding:2px 6px;margin-left:4px">GÖLGEDE</span>':''}</div><small>${x.n?`${x.n} sinyal · %${x.wr}`:'veri yok'}${x.durum==='golge'&&x.son_n?` · gölgede son ${x.son_n}: ${fR(x.son)}`:''}</small></div><div class="rr ${cls(x.avg)}">${x.avg!=null&&x.n?fR(x.avg):'—'}</div><button class="v4mod ${x.mod}" data-km="${esc(x.k)}">${MOD[x.mod]}</button></div>`).join(''):'<div class="meta" style="padding:10px 0">Son 20 günde sonuçlanan canlı sinyal yok.</div>'}</div>
+      <div class="v4kg"><div><div class="ad">Kurgu kesici</div><small>son ${K.esik.gun} günde ${K.esik.n}+ sinyal ve ortalaması zarardaysa → gölge · toparlanınca açılır</small></div><button class="v4mod ${K.aktif?'acik':'kapali'}" data-kes="${K.aktif?0:1}">${K.aktif?'AÇIK':'KAPALI'}</button></div>
+      ${L.length?L.map(x=>`<div class="v4kg"><div style="min-width:0"><div class="ad">${esc(SETUP[x.k]||x.ad)}${x.durum==='golge'?' <span class="v4ch r" style="font-size:9.5px;padding:2px 6px;margin-left:4px">GÖLGEDE</span>':''}</div><small>${x.n?`${x.n} sinyal · %${x.wr}`:'veri yok'}${x.durum==='golge'&&x.son_n?` · gölgede son ${x.son_n}: ${fA(x,'son')}`:''}</small></div><div class="rr ${cls(x.avg)}">${x.avg!=null&&x.n?fA(x):'—'}</div><button class="v4mod ${x.mod}" data-km="${esc(x.k)}">${MOD[x.mod]}</button></div>`).join(''):'<div class="meta" style="padding:10px 0">Son 20 günde sonuçlanan canlı sinyal yok.</div>'}</div>
       <div class="meta" style="margin:6px 2px 14px">OTO: kesici karar verir · AÇIK: hep işlem açar · KAPALI: bot girmez (sinyal gölgede ölçülür). Gölgedeki kurguların sinyali Telegram'a gitmez.</div>`}
   const D=learn&&learn.lab;
   if(D){const src=D.canli.A.n>=10?D.canli:D.test,adK=D.canli.A.n>=10?'canlı · son 20 gün':'geçmiş test',Z='ABCD'.split('');
-    const mx=Math.max(0.3,...Z.map(z=>Math.abs(src[z].avg||0)));
-    const en=Z.reduce((a,z)=>(src[z].avg!=null&&(src[a].avg==null||src[z].avg>src[a].avg))?z:a,'A');
-    const bar=z=>{const x=src[z],v=x.avg||0,w=Math.abs(v)/mx*50;return `<div class="v4bar${z===en&&x.n?' en':''}"><span class="l">${z} · ${esc(x.ad)}${z===en&&x.n?' ★':''}</span><div class="t"><i style="left:${v>=0?50:50-w}%;width:${w}%;background:${z===en&&x.n?'var(--wa)':v>=0?'var(--up)':'var(--dn)'}"></i></div><span class="v ${cls(v)}">${x.n?fR(x.avg):'—'}</span></div>`};
+    const pv=z=>src[z].avg_p!=null?src[z].avg_p:(src[z].avg||0)*rpK(src===D.test),mx=Math.max(0.2,...Z.map(z=>Math.abs(pv(z))));
+    const en=Z.reduce((a,z)=>(src[z].avg!=null&&(src[a].avg==null||pv(z)>pv(a)))?z:a,'A');
+    const bar=z=>{const x=src[z],v=pv(z),w=Math.abs(v)/mx*50;return `<div class="v4bar${z===en&&x.n?' en':''}"><span class="l">${z} · ${esc(x.ad)}${z===en&&x.n?' ★':''}</span><div class="t"><i style="left:${v>=0?50:50-w}%;width:${w}%;background:${z===en&&x.n?'var(--wa)':v>=0?'var(--up)':'var(--dn)'}"></i></div><span class="v ${cls(v)}">${x.n?fPc(v):'—'}</span></div>`};
     $('krLab').innerHTML=`<div class="v4h" style="margin:2px 2px 8px"><b style="font-size:16px">Çıkış Laboratuvarı</b><span class="meta">${src.A.n} sinyal · ${adK}</span></div>
       <div class="v4kutu">${Z.map(bar).join('')}<div class="meta" style="margin-top:8px">🤖 Bot şu an <b style="color:var(--tx)">${D.secili} · ${esc(src[D.secili].ad)}</b> ile çıkıyor · ${esc(D.neden||'')}</div></div>
       <div class="v4seg" id="ckSeg">${['Oto','A','B','C','D'].map((t,i)=>`<button data-ck="${i}" class="${(D.mod||0)===i?'on':''}">${t}</button>`).join('')}</div>
-      <div class="meta" style="margin:-4px 2px 12px;line-height:1.5">${Z.map(z=>`<b>${z}</b>: ${esc(src[z].acik)}`).join('<br>')}<br>Oto: canlıda ${D.min}+ sonuç olunca en iyi kural (B'den en az +0,05R iyiyse) kendiliğinden seçilir.</div>
-      ${(D.kurgu||[]).length?`<div class="v4kutu" style="padding:4px 12px">${D.kurgu.map(k=>`<div class="v4kg"><div><div class="ad">${esc(SETUP[k.k]||k.ad)}</div><small>${k.n} sinyal · en iyi ${k.en}</small></div><div class="rr" style="font-size:11.5px;font-weight:700;line-height:1.5">${Z.map(z=>`<span style="${z===k.en?'color:var(--wa)':'color:var(--mut)'}">${z} ${fR(k.r[z])}</span>`).join('<br>')}</div></div>`).join('')}</div>`:''}`}
+      <div class="meta" style="margin:-4px 2px 12px;line-height:1.5">${Z.map(z=>`<b>${z}</b>: ${esc(src[z].acik)}`).join('<br>')}<br>Oto: canlıda ${D.min}+ sonuç olunca en iyi kural (B'den belirgin şekilde iyiyse) kendiliğinden seçilir.</div>
+      ${(D.kurgu||[]).length?`<div class="v4kutu" style="padding:4px 12px">${D.kurgu.map(k=>`<div class="v4kg"><div><div class="ad">${esc(SETUP[k.k]||k.ad)}</div><small>${k.n} sinyal · en iyi ${k.en}</small></div><div class="rr" style="font-size:11.5px;font-weight:700;line-height:1.5">${Z.map(z=>`<span style="${z===k.en?'color:var(--wa)':'color:var(--mut)'}">${z} ${k.p&&k.p[z]!=null?fPc(k.p[z]):fR(k.r[z])}</span>`).join('<br>')}</div></div>`).join('')}</div>`:''}`}
   const LS=learn&&learn.liste;
   if(LS){const k=LS.karne||{};$('krList').innerHTML=`<div class="v4h" style="margin:2px 2px 8px"><b style="font-size:16px">Günün Listesi karnesi</b><span class="meta">${k.gun||0} gün</span></div>
-    <div class="v4ser"><div><small>Listelenen</small><b>${k.hisse||0}</b></div><div><small>Kırılan</small><b>${k.kirildi||0}</b></div><div><small>Ort. sonuç</small><b class="${cls(k.avg)}">${k.n?fR(k.avg):'—'}</b></div></div>
+    <div class="v4ser"><div><small>Listelenen</small><b>${k.hisse||0}</b></div><div><small>Kırılan</small><b>${k.kirildi||0}</b></div><div><small>İşlem başı</small><b class="${cls(k.avg)}">${k.n?fA(k):'—'}</b></div></div>
     ${(LS.liste||[]).map(x=>v4kart(x,{bot:x.bot})).join('')||'<div class="v4bos">Bugünün listesi henüz yok.</div>'}`}}
 $('t-ogren').addEventListener('click',async e=>{const sb=e.target.closest('#krSeg [data-k]');if(sb){krSeg=sb.dataset.k;ls('krseg',krSeg);renderKarneV4();return}
   const pl=e.target.closest('#krList [data-pl]');if(pl){v4detay(pl.dataset.pl);return}

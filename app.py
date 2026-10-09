@@ -648,10 +648,11 @@ def super_ozet():
     bugun = datetime.now(ET).date()
     son = sorted(canli, key=lambda x: -x["t"])[:12]
     return {"n": n, "w": sum(1 for x in done if x["r"] > 0), "avg": round(sum(x["r"] for x in done) / n, 3) if n else None,
+            "avg_p": _ort([sig_yuzde(x) for x in done]),
             "wr": round(100 * sum(1 for x in done if x["r"] > 0) / n) if n else None,
             "sinif": k, "esik": denetci.SUPER["pct"], "gunluk": denetci.SUPER_GUN,
             "bugun": sum(1 for x in canli if datetime.fromtimestamp(x["t"], ET).date() == bugun),
-            "son": [{"id": x["id"], "sym": x["sym"], "t": x["t"], "st": x["st"], "r": x.get("r"), "e": x["e"],
+            "son": [{"id": x["id"], "sym": x["sym"], "t": x["t"], "st": x["st"], "r": x.get("r"), "pct": x.get("pct"), "e": x["e"],
                      "s": x["s"], "h": x["h"], "setup": x["setup"]} for x in son]}
 
 
@@ -1968,7 +1969,10 @@ def feed_bot_note(typ, msg, sym, t):
                           f"{fy((pos['exit'] / pos['entry'] - 1) * 100 * pos['dir'])} · {dk} dk")
             else:
                 sub_tg = ""
-            rt = f"{r:+.2f}R".replace(".", ",").replace("-", "−")
+            pc_ = (pos or {}).get("pct")
+            if pc_ is None and pos and pos.get("entry") and pos.get("exit"):
+                pc_ = pos["dir"] * (pos["exit"] / pos["entry"] - 1) * 100
+            rt = _p_(pc_) if pc_ is not None else f"{r:+.2f}R".replace(".", ",").replace("-", "−")
             ut = f"{usd:+.2f} $".replace(".", ",").replace("-", "−")
             html = (f"🏁 <b>#{_h(sym)} kapandı · {rt}</b>  {'🟢' if usd > 0 else '🔴'} <b>{ut}</b>\n"
                     f"<i>{_h(head)}" + (f" · {_h(sub_tg)}" if sub_tg else "") + "</i>"
@@ -1987,14 +1991,14 @@ def feed_bot_note(typ, msg, sym, t):
                 dk_ = int(((pos.get("xt") or t) - (pos.get("et") or pos["opened"])) // 60) if pos else None
                 ps_ = pos or {}
                 rk_ = abs((ps_.get("entry") or 0) - (ps_.get("init_stop") or 0))
-                veri = {"sym": sym, "ad": sinyal.SETUP_AD.get(ps_.get("setup"), "")[:28], "r": r, "usd": usd,
+                veri = {"sym": sym, "ad": sinyal.SETUP_AD.get(ps_.get("setup"), "")[:28], "r": r, "usd": usd, "pct": pc_,
                         "giris": ps_.get("entry"), "cikis": ps_.get("exit"), "dk": dk_,
                         "seri": seri if seri >= 2 else 0, "stop": ps_.get("init_stop"),
                         "hedefler": [ps_["entry"] + ps_["dir"] * i * rk_ for i in (1, 2, 3)] if rk_ and ps_.get("dir", 1) > 0 else None,
                         "kural": LAB_AD.get(ps_.get("cikis") or "B", ""),
                         "etiket": "HEDEF" if why == "hedef" else "KÂR ALINDI"}
                 ex["chart"] = {"fn": lambda v=veri: kart.sonuc_kart(v)}
-            feed_add("bot", sym, f"{head}: {r:+.2f}R ({usd:+.2f} $)", sub=sub, tone="kar" if usd > 0 else "zarar", t=t,
+            feed_add("bot", sym, f"{head}: {rt} ({usd:+.2f} $)".replace(".", ","), sub=sub, tone="kar" if usd > 0 else "zarar", t=t,
                      extra=ex)
         else:
             feed_add("bot", sym, msg, tone="bilgi", t=t)
@@ -2127,25 +2131,57 @@ async def send_snap(cl):
                    "sigs": engine.for_symbol(sym, since), "lv": levels(sym)})
 
 
-async def send_sig(cl):
-    cl.sigv = engine.ver
-    await cl.send({"type": "sig", "list": engine.recent(60), "stats": engine.stats(),
-                   "mine": engine.for_symbol(cl.sym, time.time() - 4 * 86400) if cl.sym else [],
-                   "learn": {"ins": learner.insights(), "groups": learner.group_rows(), "cmp": compare_rows(),
+_LEARN = {"t": 0, "d": None}
+
+
+def learn_yuku():
+    """Sitenin öğrenme / karne verisi: ağır hesaplar (strateji, plan karnesi, kesici, laboratuvar…) 20 sn önbellekte.
+    Render'ın küçük makinesinde her sinyal değişiminde yeniden hesaplamak olay döngüsünü kilitliyordu
+    (Telegram düğmeleri ve site geç açılıyordu)."""
+    if _LEARN["d"] is not None and time.time() - _LEARN["t"] < 20:
+        return _LEARN["d"]
+    _LEARN["d"] = {"ins": learner.insights(), "groups": learner.group_rows(), "cmp": compare_rows(),
                              "saat": saat_tablosu(), "dis": dis.karne(),
                              "den": DEN["karne"], "perf": denetci.performans(bot.positions), "strat": strateji_ozet(), "super": super_ozet(),
                              "kosan": {k: KT[k] for k in ("sum", "t", "running", "prog", "hata", "istek")},
-                             "sicrama": golge_kurgu("sicrama"), "plan": plan_ozet(), "kesici": kesici_ozet(),
+                             "sicrama": golge_kurgu("sicrama"), "plan": plan_ozet(), "kesici": kesici_ozet(), "rp": rp_ozet(),
                              "liste": liste_ozet(), "lab": lab_ozet(),
                              "yz": {"durum": YZM.durum, "kalan": YZM.kalan(), "gunluk": yzmod.GUNLUK, "karne": yz_karne(),
                                     "yetki": BOT_CFG.get("yz_yetki", 1), "aktif": yz_yetki(), "hazir": YZM.hazir,
                                     "ders": YZM.ders, "hata": YZM.son_hata, "arama": YZM.arama},
-                             "bt": {k: BT[k] for k in ("sum", "t", "running", "bekliyor", "prog", "hata")}}})
+                             "bt": {k: BT[k] for k in ("sum", "t", "running", "bekliyor", "prog", "hata")}}
+    _LEARN["t"] = time.time()
+    return _LEARN["d"]
+
+
+async def send_sig(cl):
+    now = time.time()
+    if now - getattr(cl, "sig_t", 0) < 4 and cl.sigv != -1:
+        return                                   # çok sık değişiyor: 4 sn'de bir gönder (sürüm farkı kalır, sonra gider)
+    cl.sig_t = now
+    cl.sigv = engine.ver
+    await cl.send({"type": "sig", "list": engine.recent(60), "stats": engine.stats(),
+                   "mine": engine.for_symbol(cl.sym, time.time() - 4 * 86400) if cl.sym else [],
+                   "learn": learn_yuku()})
 
 
 async def send_bot(cl):
     cl.botv = bot.ver
     d = bot.summary()
+    try:
+        kap = [p for p in bot.positions if p["st"] == "kapandı" and p.get("pct") is not None]
+        d["total"]["avg_p"] = _ort([p["pct"] for p in kap])
+        byk = {}
+        for p in kap:
+            byk.setdefault(p["setup"], []).append(p["pct"])
+        for x in (d.get("karne") or {}).get("setups") or []:
+            x["avg_p"] = _ort(byk.get(x["k"]) or [])
+        pid = {p["id"]: p.get("pct") for p in bot.positions}
+        for key in ("best", "worst"):
+            for x in (d.get("karne") or {}).get(key) or []:
+                x["pct"] = pid.get(x.get("id"))
+    except Exception:
+        pass
     try:
         k = d.get("karne") or {}
         k["spy"] = spy_karsilastir(k.get("eq") or [], k.get("cap0") or 250)
@@ -2643,8 +2679,8 @@ async def bt_run(n_days):
             BT.update(sigs=sigs, sum=summ, t=int(time.time()))
             learner._sig = None
             learner.rebuild(engine.signals + BT["sigs"] + dis.as_signals())
-            feed_add("bot", "", f"Geçmiş test bitti: {summ['gun']} günde {summ['tum']['n']} sinyal, ortalama "
-                     f"{summ['tum'].get('avg', 0):+.2f}R", sub="Öğren sekmesinde sonuçlar. Bot artık bu verilerle de öğreniyor.",
+            feed_add("bot", "", f"Geçmiş test bitti: {summ['gun']} günde {summ['tum']['n']} sinyal, işlem başı ortalama "
+                     f"{_p_((summ['tum'].get('avg') or 0) * rp_ozet()['test'])}", sub="Öğren sekmesinde sonuçlar. Bot artık bu verilerle de öğreniyor.",
                      tone="bilgi")
             if backup.enabled:
                 async with httpx.AsyncClient(timeout=120) as c:
@@ -2727,14 +2763,14 @@ def gun_sonu_raporu():
     sg = [x for x in engine.signals if x.get("day") == today and x.get("r") is not None and x["st"] in ("hedef", "stop", "süre")]
     by = {}
     for x in sg:
-        by.setdefault(x["setup"], []).append(x["r"])
+        by.setdefault(x["setup"], []).append(sig_yuzde(x) or 0)
     rows = sorted(((k, sum(v) / len(v), len(v)) for k, v in by.items() if len(v) >= 3), key=lambda r: -r[1])
-    best = f"en iyi kurgu {sinyal.SETUP_AD.get(rows[0][0], rows[0][0])} ({rows[0][1]:+.2f}R)" if rows else ""
-    worst = f"en zayıf {sinyal.SETUP_AD.get(rows[-1][0], rows[-1][0])} ({rows[-1][1]:+.2f}R)" if len(rows) > 1 else ""
+    best = f"en iyi kurgu {sinyal.SETUP_AD.get(rows[0][0], rows[0][0])} ({_p_(rows[0][1])})" if rows else ""
+    worst = f"en zayıf {sinyal.SETUP_AD.get(rows[-1][0], rows[-1][0])} ({_p_(rows[-1][1])})" if len(rows) > 1 else ""
     avg = sum(x["r"] for x in sg) / len(sg) if sg else 0
     cap = bot.capital()[0]
     txt = f"Gün sonu: {len(tc)} işlem, {pnl:+.2f} $ ({w} kazanan)"
-    sub = (f"Botun parası {cap:.2f} $. Gölge sinyaller: {len(sg)} sonuç, ort. {avg:+.2f}R"
+    sub = (f"Botun parası {cap:.2f} $. Gölge sinyaller: {len(sg)} sonuç, işlem başı ort. {_p_(_ort([sig_yuzde(x) for x in sg]))}"
            + (f"; {best}" if best else "") + (f"; {worst}" if worst else "") + ".")
     return txt, sub
 
@@ -2945,8 +2981,8 @@ def kacan_ozet():
                   and abs(j["t"] - (x.get("created") or x["t"])) < 600), "bilinmiyor")
         key = re.sub(r"[-+]?\d+([.,]\d+)?", "#", n).split(" (")[0].split(":")[0]
         neden.setdefault(key, []).append(x)
-    tot = sum(x["r"] for x in kac)
-    out = [f"🙈 <b>Bot girmedi ama tuttu</b> · {len(kac)} sinyal, toplam {tot:+.1f}R kaçtı"]
+    tot = sum(sig_yuzde(x) or 0 for x in kac)
+    out = [f"🙈 <b>Bot girmedi ama tuttu</b> · {len(kac)} sinyal, toplam {_p_(tot, 1)} kaçtı"]
     for k, xs in sorted(neden.items(), key=lambda kv: -len(kv[1]))[:4]:
         out.append(f"• {_h(k[:60])}: {len(xs)} sinyal ({', '.join('#' + x['sym'] for x in xs[:5])})")
     sermaye = sum(len(v) for k, v in neden.items() if "sermaye" in k)
@@ -3289,6 +3325,42 @@ async def karsilastir_payload(syms, donem):
 
 
 # ----------------------------------------------------------------- kurgu istatistikleri + "ya öyle olsaydı" hesaplayıcı
+def sig_yuzde(s_, rp=None):
+    """Sinyalin yüzde sonucu: canlıda gerçek (masraf + kayma dahil), geçmiş testte R × stop mesafesi."""
+    if s_.get("pct") is not None:
+        return float(s_["pct"])
+    if s_.get("r") is None:
+        return None
+    if rp is None:
+        rp = s_.get("rp")
+        if rp is None and s_.get("e") and s_.get("s"):
+            rp = abs(s_["e"] - s_["s"]) / s_["e"]
+    return round(s_["r"] * (rp or 0.01) * 100, 3)
+
+
+def _ort(v):
+    v = [x for x in v if x is not None]
+    return round(sum(v) / len(v), 3) if v else None
+
+
+_RP = {"t": 0, "d": None}
+
+
+def rp_ozet():
+    """Ortalama stop mesafesi (%): eski R sayılarını yüzdeye çevirmek için (canlı / geçmiş test). 10 dk önbellek."""
+    if _RP["d"] and time.time() - _RP["t"] < 600:
+        return _RP["d"]
+    _RP["d"] = _rp_hesap()
+    _RP["t"] = time.time()
+    return _RP["d"]
+
+
+def _rp_hesap():
+    c = [s_["rp"] * 100 for s_ in _sim_sinyaller(30) if not s_["bt"]]
+    t = [s_["rp"] * 100 for s_ in _sim_sinyaller(90) if s_["bt"]]
+    return {"canli": _ort(c[-500:]) or 0.6, "test": _ort(t[-2000:]) or _ort(c) or 0.6}
+
+
 def _sim_sinyaller(gun):
     """Son N günün sonuçlanmış sinyalleri: canlı (yeni kurallar) + geçmiş test."""
     cut = time.time() - gun * 86400
@@ -3303,7 +3375,7 @@ def _sim_sinyaller(gun):
             rp = abs(s_["e"] - s_["s"]) / s_["e"]
         out.append({"t": s_["t"], "xt": s_.get("xt") or s_["t"] + 1800, "setup": s_["setup"], "ses": s_.get("ses"),
                     "conf": s_.get("conf0", s_.get("conf", 0)), "r": s_["r"], "rp": rp or 0.01, "sym": s_["sym"],
-                    "bt": bool(s_.get("bt"))})
+                    "bt": bool(s_.get("bt")), "p": sig_yuzde(s_, rp)})
     out.sort(key=lambda x: x["t"])
     return out
 
@@ -3311,13 +3383,14 @@ def _sim_sinyaller(gun):
 def kurgu_istat(gun=30):
     rows = {}
     for s_ in _sim_sinyaller(gun):
-        x = rows.setdefault(s_["setup"], [0, 0, 0.0])
+        x = rows.setdefault(s_["setup"], [0, 0, 0.0, 0.0])
         x[0] += 1
         x[1] += 1 if s_["r"] > 0 else 0
         x[2] += s_["r"]
+        x[3] += s_["p"] or 0
     kap = set(BOT_CFG.get("kapali") or [])
     return [{"k": k, "ad": sinyal.SETUP_AD.get(k, k), "n": v[0], "wr": round(100 * v[1] / v[0]), "avg": round(v[2] / v[0], 3),
-             "tot": round(v[2], 1), "kapali": k in kap} for k, v in sorted(rows.items(), key=lambda kv: -kv[1][0])] + \
+             "tot": round(v[2], 1), "avg_p": round(v[3] / v[0], 3), "tot_p": round(v[3], 1), "kapali": k in kap} for k, v in sorted(rows.items(), key=lambda kv: -kv[1][0])] + \
            [{"k": k, "ad": a, "n": 0, "wr": None, "avg": None, "tot": 0, "kapali": k in kap}
             for k, a in sinyal.SETUP_AD.items() if k not in rows]
 
@@ -3333,10 +3406,12 @@ def strateji_ozet(gun=30):
     kap = set(BOT_CFG.get("kapali") or [])
     canli, test = {}, {}
     for s_ in _sim_sinyaller(gun):
-        g = (test if s_["bt"] else canli).setdefault(s_["setup"], {"n": 0, "w": 0, "tot": 0.0, "eq": [], "sym": {}, "son": 0})
+        g = (test if s_["bt"] else canli).setdefault(s_["setup"], {"n": 0, "w": 0, "tot": 0.0, "eq": [], "sym": {}, "son": 0,
+                                                                   "totp": 0.0})
         g["n"] += 1
         g["w"] += 1 if s_["r"] > 0 else 0
         g["tot"] += s_["r"]
+        g["totp"] += s_["p"] or 0
         g["eq"].append(round(g["tot"], 2))
         g["sym"][s_["sym"]] = g["sym"].get(s_["sym"], 0) + 1
         g["son"] = max(g["son"], s_["t"])
@@ -3350,6 +3425,7 @@ def strateji_ozet(gun=30):
                 eq = [eq[int(i * adim)] for i in range(40)] + [eq[-1]]
             out.append({"k": k, "ad": sinyal.SETUP_AD.get(k, k), "n": g["n"], "wr": round(100 * g["w"] / g["n"]),
                         "tot": round(g["tot"], 1), "avg": round(g["tot"] / g["n"], 3), "eq": eq,
+                        "tot_p": round(g["totp"], 1), "avg_p": round(g["totp"] / g["n"], 3),
                         "sym": [x for x, _ in sorted(g["sym"].items(), key=lambda kv: -kv[1])[:3]],
                         "son": int(g["son"]), "kapali": k in kap})
         out.sort(key=lambda x: -x["tot"])
@@ -3397,6 +3473,13 @@ KESICI = {"t": 0, "d": {}}
 KESICI_ESIK = {"gun": 20, "n": 30, "kes": -0.15, "ac_n": 20, "ac": 0.0}
 
 
+def _p_(v, d=2):
+    """Yüzde: +0,42% · −1,10%"""
+    if v is None:
+        return "—"
+    return ("+" if v > 0 else "−" if v < 0 else "") + f"{abs(v):.{d}f}".replace(".", ",") + "%"
+
+
 def _r_(v):
     return "—" if v is None else f"{v:+.2f}R".replace(".", ",").replace("-", "−")
 
@@ -3410,10 +3493,11 @@ def kesici_guncelle(zorla=False):
     KESICI["t"] = now
     if not KESICI["d"] and isinstance(backup.data.get("kesici"), dict):
         KESICI["d"] = backup.data["kesici"]
-    rows = {}
+    rows, ps = {}, {}
     for s_ in _sim_sinyaller(KESICI_ESIK["gun"]):
         if not s_["bt"]:
             rows.setdefault(s_["setup"], []).append(s_["r"])
+            ps.setdefault(s_["setup"], []).append(s_["p"])
     eski, yeni, olay = KESICI["d"], {}, []
     for k, rs in rows.items():
         n = len(rs)
@@ -3429,8 +3513,10 @@ def kesici_guncelle(zorla=False):
         elif dur == "golge" and len(son) >= KESICI_ESIK["ac_n"] and savg > KESICI_ESIK["ac"]:
             dur, t_ = "acik", now
             olay.append((k, "acik", len(son), savg))
+        pp = ps.get(k) or []
         yeni[k] = {"durum": dur, "n": n, "avg": round(avg, 3), "wr": round(100 * sum(1 for r in rs if r > 0) / n),
-                   "son": round(savg, 3), "son_n": len(son), "t": t_}
+                   "son": round(savg, 3), "son_n": len(son), "t": t_,
+                   "avg_p": _ort(pp), "son_p": _ort(pp[-KESICI_ESIK["ac_n"]:])}
     for k, v in eski.items():
         if k not in yeni:
             yeni[k] = dict(v, n=0)
@@ -3441,14 +3527,14 @@ def kesici_guncelle(zorla=False):
             ad = sinyal.SETUP_AD.get(k, k)
             if ne == "golge":
                 txt = f"Kurgu kesici: {ad} gölgeye alındı"
-                sub = (f"Son {KESICI_ESIK['gun']} günde {n} sinyal, ortalama {_r_(avg)}. Sinyal üretmeye devam eder, "
+                sub = (f"Son {KESICI_ESIK['gun']} günde {n} sinyal, işlem başı ortalama {_p_(yeni[k].get('avg_p'))}. Sinyal üretmeye devam eder, "
                        "bot girmez. Toparlanırsa kendiliğinden açılır.")
-                html = (f"🧭 <b>Kurgu kesici</b>\n<b>{_h(ad)}</b> gölgeye alındı: {n} sinyal, ort. <b>{_r_(avg)}</b>.\n"
+                html = (f"🧭 <b>Kurgu kesici</b>\n<b>{_h(ad)}</b> gölgeye alındı: {n} sinyal, işlem başı ort. <b>{_p_(yeni[k].get('avg_p'))}</b>.\n"
                         "<i>Sinyal üretmeye devam eder, bot girmez. Toparlanırsa kendiliğinden açılır.</i>")
             else:
                 txt = f"Kurgu kesici: {ad} yeniden açıldı"
-                sub = f"Gölgedeki son {n} sinyalin ortalaması {_r_(avg)}."
-                html = f"🧭 <b>Kurgu kesici</b>\n<b>{_h(ad)}</b> yeniden açıldı: gölgedeki son {n} sinyal ort. <b>{_r_(avg)}</b>."
+                sub = f"Gölgedeki son {n} sinyalin ortalaması {_p_(yeni[k].get('son_p'))}."
+                html = f"🧭 <b>Kurgu kesici</b>\n<b>{_h(ad)}</b> yeniden açıldı: gölgedeki son {n} sinyal ort. <b>{_p_(yeni[k].get('son_p'))}</b>."
             feed_add("bot", "", txt, sub=sub, tone="bilgi", extra={"tg_skip": 1})
             if tg.ok and PUSH_PREF.get("tg_rapor", 1):
                 tg.send(html, quiet=True, konu="rapor")
@@ -3462,7 +3548,7 @@ def kesici_golge(setup):
     k = kesici_guncelle().get(setup)
     if k and k.get("durum") == "golge":
         return (f"kurgu kesici: {sinyal.SETUP_AD.get(setup, setup)} son {KESICI_ESIK['gun']} günde {k['n']} sinyalde "
-                f"ort. {_r_(k['avg'])} → gölgede (toparlanınca kendiliğinden açılır)")
+                f"işlem başı ort. {_p_(k.get('avg_p'))} → gölgede (toparlanınca kendiliğinden açılır)")
     return None
 
 
@@ -3477,6 +3563,7 @@ def kesici_ozet():
         if not BOT_CFG.get("kesici", 1) and mod == "oto":
             dur = "acik"
         out.append({"k": k, "ad": ad, "n": v.get("n", 0), "avg": v.get("avg"), "wr": v.get("wr"), "son": v.get("son"),
+                    "avg_p": v.get("avg_p"), "son_p": v.get("son_p"),
                     "son_n": v.get("son_n", 0), "mod": mod, "durum": dur, "t": v.get("t", 0)})
     sira = {"acik": 0, "golge": 1, "kapali": 2}
     out.sort(key=lambda x: (sira.get(x["durum"], 3), -(x["avg"] if x["avg"] is not None and x["n"] else -9)))
@@ -3487,10 +3574,10 @@ def kesici_ozet():
 
 # ----------------------------------------------------------------- 🧪 çıkış laboratuvarı: aynı girişler, 4 çıkış kuralı
 LAB_AD = {"A": "Sabit hedef", "B": "K1 yarı + maliyet + iz", "C": "İz süren stop", "D": "Hızlı: K1'de tamamı"}
-LAB_ACIK = {"A": "Stop ya da sinyalin hedefi (2R, koşanlarda 3R)",
-            "B": "1R'de yarısı satılır, stop maliyete; 1,5R'den sonra zirvenin 1R gerisinden iz; kalan 3R'de",
-            "C": "Yarı yok, hedef yok; 1,5R'den sonra zirvenin 1R gerisinden iz; seans sonunda kapanır",
-            "D": "1R'de tamamı satılır"}
+LAB_ACIK = {"A": "Stop ya da sinyalin hedefi (K2, koşanlarda K3)",
+            "B": "K1'de yarısı satılır, stop maliyete; kâr büyüyünce stop arkadan takip eder; kalan K3'te",
+            "C": "Yarı yok, hedef yok; kâr büyüyünce stop arkadan takip eder; seans sonunda kapanır",
+            "D": "K1'de tamamı satılır"}
 LAB_MIN = 50
 _LAB = {"t": 0, "d": None}
 
@@ -3504,7 +3591,12 @@ def _lab_rows(kaynak, gun=20):
             continue
         if any(lr.get(k) is None for k in ("B", "C", "D")):
             continue
-        out.append({"setup": s_["setup"], "A": s_["r"], **{k: lr[k] for k in ("B", "C", "D")}})
+        rp = s_.get("rp")
+        if rp is None and s_.get("e") and s_.get("s"):
+            rp = abs(s_["e"] - s_["s"]) / s_["e"]
+        rp = (rp or 0.01) * 100
+        out.append({"setup": s_["setup"], "A": s_["r"], **{k: lr[k] for k in ("B", "C", "D")},
+                    "Ap": sig_yuzde(s_), **{k + "p": round(lr[k] * rp, 3) for k in ("B", "C", "D")}})
     return out
 
 
@@ -3512,7 +3604,8 @@ def _lab_tablo(rows):
     t = {}
     for k in "ABCD":
         v = [r[k] for r in rows]
-        t[k] = {"k": k, "ad": LAB_AD[k], "acik": LAB_ACIK[k], "n": len(v),
+        vp = [r[k + "p"] for r in rows if r.get(k + "p") is not None]
+        t[k] = {"k": k, "ad": LAB_AD[k], "acik": LAB_ACIK[k], "n": len(v), "avg_p": _ort(vp),
                 "avg": round(sum(v) / len(v), 3) if v else None,
                 "wr": round(100 * sum(1 for x in v if x > 0) / len(v)) if v else None,
                 "tot": round(sum(v), 1) if v else 0}
@@ -3535,7 +3628,7 @@ def lab_ozet():
         tb = _lab_tablo(rs)
         en = max("ABCD", key=lambda z: tb[z]["avg"] if tb[z]["avg"] is not None else -9)
         kurgu.append({"k": k, "ad": sinyal.SETUP_AD.get(k, k), "n": len(rs), "en": en,
-                      "r": {z: tb[z]["avg"] for z in "ABCD"}})
+                      "r": {z: tb[z]["avg"] for z in "ABCD"}, "p": {z: tb[z]["avg_p"] for z in "ABCD"}})
     kurgu.sort(key=lambda x: -x["n"])
     d = {"canli": _lab_tablo(canli), "test": _lab_tablo(test), "kurgu": kurgu[:8], "min": LAB_MIN,
          "secili": cikis_sec(), "mod": BOT_CFG.get("cikis_kural", 0)}
@@ -3560,9 +3653,9 @@ def cikis_sec():
             tb = _lab_tablo(rows)
             en = max("ABCD", key=lambda z: tb[z]["avg"])
             if en != "B" and tb[en]["avg"] - tb["B"]["avg"] >= 0.05:
-                _CIKIS_NEDEN[0] = f"{ad}: {len(rows)} sonuçta en iyisi {en} ({_r_(tb[en]['avg'])}, B {_r_(tb['B']['avg'])})"
+                _CIKIS_NEDEN[0] = f"{ad}: {len(rows)} sonuçta en iyisi {en} ({_p_(tb[en]['avg_p'])}, B {_p_(tb['B']['avg_p'])})"
                 return en
-            _CIKIS_NEDEN[0] = f"{ad}: {len(rows)} sonuçta B yeterince iyi (fark < 0,05R)"
+            _CIKIS_NEDEN[0] = f"{ad}: {len(rows)} sonuçta B yeterince iyi (fark küçük)"
             return "B"
     _CIKIS_NEDEN[0] = f"yeterli veri yok (canlıda {LAB_MIN}+ sonuç gerekli): şimdiki kural B"
     return "B"
@@ -3581,7 +3674,7 @@ def lab_tg():
         out.append(f"\n<b>{ad}</b> · {tb['A']['n']} sinyal")
         for z in "ABCD":
             x = tb[z]
-            out.append(f"{'★' if z == en else '•'} {z} · {_h(x['ad'])}: <b>{_r_(x['avg'])}</b> · %{x['wr']}")
+            out.append(f"{'★' if z == en else '•'} {z} · {_h(x['ad'])}: işlem başı <b>{_p_(x['avg_p'])}</b> · kazanma %{x['wr']}")
     if len(out) == 1:
         out.append("Henüz sonuçlanan sinyal yok; her sinyal kapanınca 4 kural birlikte ölçülür.")
     out.append(f"\n🤖 Bot şu an <b>{d['secili']} · {_h(LAB_AD[d['secili']])}</b> ile çıkıyor <i>({_h(d['neden'])})</i>")
@@ -3652,8 +3745,8 @@ async def kt_run(n_days=20):
             KT.update(sum=summ, t=int(time.time()))
             sic = kt_kurgu("sicrama") or {}
             feed_add("bot", "", f"Koşan hisse testi bitti: {summ.get('aday', 0)} hisse-gün, {summ['tum'].get('n', 0)} sinyal, "
-                     f"ort. {summ['tum'].get('avg', 0) or 0:+.2f}R",
-                     sub=(f"Dikey sıçrama kurgusu: {sic.get('n', 0)} sinyal, ort. {sic.get('avg') or 0:+.2f}R. " if sic else
+                     f"işlem başı ort. {_p_((summ['tum'].get('avg') or 0) * rp_ozet()['test'])}",
+                     sub=(f"Dikey sıçrama kurgusu: {sic.get('n', 0)} sinyal, işlem başı ort. {_p_((sic.get('avg') or 0) * rp_ozet()['test'])}. " if sic else
                           "Dikey sıçrama kurgusu bu dönemde sinyal vermedi. ") + "Ayrıntılar Öğren sekmesinde.", tone="bilgi")
             if backup.enabled:
                 async with httpx.AsyncClient(timeout=120) as c:
@@ -3738,7 +3831,7 @@ def neden_rapor(sym):
             den = (x.get("den") or {}).get("karar")
             out.append(f"🎯 Sinyal {_sa(x['t'])}: {sinyal.SETUP_AD.get(x['setup'], x['setup'])} · güven {x['conf']}"
                        + (f" · denetçi {denetci.KARAR_AD.get(den, den)}" if den else "") + f" · {x['st']}"
-                       + (f" {x['r']:+.2f}R" if x.get("r") is not None else ""))
+                       + (f" {_p_(sig_yuzde(x))}" if x.get("r") is not None else ""))
     else:
         out.append("🎯 Bugün bu hissede sinyal yok")
     js = [j for j in bot.journal[-600:] if j.get("sym") == sym and now - j["t"] < 86400]
@@ -3987,23 +4080,24 @@ def _liste_durum(x):
     return {"sym": sym, "px": px, "ch": (summary(sym) or {}).get("ch"), "st": st, "uzak": uz, "giris": giris,
             "stop": (p or {}).get("stop") or x["stop"], "hedefler": (p or {}).get("hedefler") or x["hedefler"],
             "kat": x.get("kat"), "haber": x.get("haber"), "yz": x.get("yz"), "pct0": x.get("pct"),
-            "r": sig.get("r") if sig else None, "sig": sig["id"] if sig else None,
+            "r": sig.get("r") if sig else None, "pct": sig_yuzde(sig) if sig else None, "sig": sig["id"] if sig else None,
             "bot": (pos or {}).get("st"), "plan": (p or son or {}).get("id")}
 
 
 def liste_sonuc():
-    return [{k: v for k, v in _liste_durum(x).items() if k in ("sym", "st", "r", "giris", "kat")} for x in LISTE.get("liste") or []]
+    return [{k: v for k, v in _liste_durum(x).items() if k in ("sym", "st", "r", "pct", "giris", "kat")} for x in LISTE.get("liste") or []]
 
 
 def liste_ozet():
     L = [_liste_durum(x) for x in LISTE.get("liste") or []]
     # karne: geçmiş günlerde listedeki hisselerin kırılım sonuçları
     rs = [y["r"] for g in (LISTE.get("gecmis") or []) for y in g.get("liste") or [] if y.get("r") is not None]
+    ps = [y.get("pct") for g in (LISTE.get("gecmis") or []) for y in g.get("liste") or [] if y.get("r") is not None]
     kirildi = sum(1 for g in (LISTE.get("gecmis") or []) for y in g.get("liste") or [] if y.get("st") == "kırıldı")
     toplam = sum(len(g.get("liste") or []) for g in (LISTE.get("gecmis") or []))
     return {"gun": LISTE.get("gun"), "t": LISTE.get("t"), "durum": LISTE.get("durum"), "liste": L,
             "karne": {"gun": len(LISTE.get("gecmis") or []), "hisse": toplam, "kirildi": kirildi, "n": len(rs),
-                      "avg": round(sum(rs) / len(rs), 3) if rs else None,
+                      "avg": round(sum(rs) / len(rs), 3) if rs else None, "avg_p": _ort(ps),
                       "wr": round(100 * sum(1 for r in rs if r > 0) / len(rs)) if rs else None}}
 
 
@@ -4146,7 +4240,7 @@ def tg_pozisyon_tablosu(baslik=True):
         up = p.get("upnl")
         ur = p.get("ur")
         up_s = f"{up:+.2f}" if up is not None else "—"
-        ur_s = f"{ur:+.1f}R" if ur is not None else ""
+        ur_s = (f"{p['dir'] * (px / e - 1) * 100:+.1f}%" if px and e else "")
         rows.append(f"{p['sym']:<6}{'AL ' if p['dir'] > 0 else 'SAT'} {fp_(e):>8} {fp_(px):>8} {up_s:>7} {ur_s:>6}")
     now = datetime.now(TR).strftime("%H:%M")
     td = b["today"]
@@ -4155,7 +4249,7 @@ def tg_pozisyon_tablosu(baslik=True):
         body = "Açık pozisyon yok."
     else:
         tot = sum(p.get("upnl") or 0 for p in b["open"])
-        body = ("<pre>HİSSE YÖN    GİRİŞ    ŞİMDİ    K/Z $      R\n" + "\n".join(_h(r) for r in rows) +
+        body = ("<pre>HİSSE YÖN    GİRİŞ    ŞİMDİ    K/Z $      %\n" + "\n".join(_h(r) for r in rows) +
                 f"\nAçık toplam: {tot:+.2f} $</pre>")
     return (head + body + f"\nBugün kapanan: {td['n']} işlem, {td['pnl']:+.2f} $ · Para {b['capital']['total']:.2f} $")
 
@@ -4176,7 +4270,7 @@ def tg_karne(gun=None):
     spy = spy_karsilastir(eq, k.get("cap0") or 250)
     bas = "Haftalık rapor (son 7 gün)" if gun else "Karne (tüm zamanlar)"
     txt = [f"🏁 <b>{bas}</b>",
-           f"{n} işlem · kazanma %{round(100 * w / n) if n else 0} · ort. {(sum(rs) / len(rs)) if rs else 0:+.2f}R · "
+           f"{n} işlem · kazanma %{round(100 * w / n) if n else 0} · işlem başı ort. {_p_(_ort([p.get('pct') for p in closed]))} · "
            f"<b>{pnl:+.2f} $</b>"]
     if eq:
         last = eq[-1][1]
@@ -4350,15 +4444,15 @@ async def tg_komut(text, chat, thread=None):
             send("☀️ <b>Günün Listesi</b>\n" + "\n".join(
                 f"{ik.get(x['st'], '•')} <b>{_h(x['sym'])}</b> <code>{fk(x['giris'])}</code> üstü · şimdi {fk(x['px'])}"
                 + (f" · tetiğe {fy(x['uzak'])}" if x['st'] in ('bekliyor', 'yaklasiyor') and x['uzak'] is not None else "")
-                + (f" · {x['r']:+.2f}R".replace('.', ',') if x.get('r') is not None else "") for x in L))
+                + (f" · {_p_(x['pct'])}" if x.get('pct') is not None else "") for x in L))
     elif cmd in ("kurgular", "kesici", "kurgu"):
         k = kesici_ozet()
         dur_ = {"acik": "🟢", "golge": "🌑", "kapali": "⛔"}
         send("🧭 <b>Kurgu kesici</b> · " + ("açık" if k["aktif"] else "kapalı") + f" · {k['acik']}/{k['toplam']} kurgu işlemde\n"
-             + "\n".join(f"{dur_.get(x['durum'], '•')} {_h(x['ad'])}: " + (f"{x['n']} sinyal, ort. {_r_(x['avg'])}" if x["n"] else "veri yok")
+             + "\n".join(f"{dur_.get(x['durum'], '•')} {_h(x['ad'])}: " + (f"{x['n']} sinyal, işlem başı ort. {_p_(x.get('avg_p'))}" if x["n"] else "veri yok")
                          + (" · elle" if x["mod"] != "oto" else "") for x in k["liste"] if x["n"] or x["mod"] != "oto")
-             + f"\n<i>Kural: son {k['esik']['gun']} günde {k['esik']['n']}+ sinyal ve ort. {_r_(k['esik']['kes'])} altı → gölge; "
-               f"gölgedeki son {k['esik']['ac_n']} sinyal 0'ın üstüne çıkınca açılır.</i>")
+             + f"\n<i>Kural: son {k['esik']['gun']} günde {k['esik']['n']}+ sinyal ve ortalaması zarardaysa (riskin %15'inden fazla) → gölge; "
+               f"gölgedeki son {k['esik']['ac_n']} sinyal kâra geçince açılır.</i>")
     elif cmd in ("cikis", "çıkış", "lab"):
         send(lab_tg())
     elif cmd in ("neden", "niye"):
@@ -4553,10 +4647,7 @@ async def tg_komut_loop():
                 for u in js.get("result", []):
                     tg.offset = u["update_id"] + 1
                     if u.get("callback_query"):
-                        try:
-                            await tg_dugme(u["callback_query"])
-                        except Exception as e:
-                            log.warning("Telegram düğme hatası: %s", e)
+                        _gorev(_tg_dugme_guvenli(u["callback_query"]))      # beklemeden: düğme anında cevaplanır
                         continue
                     m = u.get("message") or u.get("channel_post") or {}
                     text = m.get("text") or ""
@@ -4571,10 +4662,8 @@ async def tg_komut_loop():
                         continue
                     if not await _yetkili(m):
                         continue
-                    try:
-                        await tg_komut(text, m["chat"]["id"], m.get("message_thread_id") if m.get("is_topic_message") else None)
-                    except Exception as e:
-                        log.warning("Telegram komut hatası: %s", e)
+                    _gorev(_tg_komut_guvenli(text, m["chat"]["id"],
+                                             m.get("message_thread_id") if m.get("is_topic_message") else None))
             except Exception as e:
                 tg.cmd_st = f"hata: {str(e)[:60]}"
                 await asyncio.sleep(10)
@@ -4704,7 +4793,7 @@ async def dis_loop():
                     degisti = True
                     if x["st"] in ("hedef", "stop", "süre"):
                         tg.send(f"📡 #{_h(x['sym'])} ({_h(x['kanal'])}) sonuçlandı: <b>{_h(x['st'])}</b> "
-                                f"{x['r']:+.2f}R · en iyi nokta %{(x.get('mfe') or 0):+.1f}", sym=x["sym"])
+                                f"{_p_(sig_yuzde(x))} · en iyi nokta %{(x.get('mfe') or 0):+.1f}", sym=x["sym"])
             except Exception as e:
                 log.debug("Dış sinyal değerlendirme hatası %s: %s", x.get("sym"), e)
         for s_ in syms:
@@ -4742,8 +4831,7 @@ async def tg_takip_loop():
                 neden = next((j["msg"].split("atlandı:", 1)[1].strip() for j in reversed(bot.journal)
                               if j.get("sym") == sig["sym"] and j["typ"] == "atla" and "atlandı:" in j["msg"]
                               and abs(j["t"] - (sig.get("created") or sig["t"])) < 600), "")
-                tg.send(f"{'✅' if r_ > 0 else '❌'} <b>#{_h(sig['sym'])} sinyal sonucu: {ST_TR_[sig['st']]} {r_:+.2f}R</b>"
-                        + (f" ({sig.get('pct'):+.1f}%)" if sig.get("pct") is not None else "")
+                tg.send(f"{'✅' if r_ > 0 else '❌'} <b>#{_h(sig['sym'])} sinyal sonucu: {ST_TR_[sig['st']]} {_p_(sig_yuzde(sig))}</b>"
                         + (f"\nBot bu işleme girmedi: {_h(neden[:140])}" if neden else "\nBot bu işleme girmedi."),
                         reply=key, quiet=True, konu="sinyal")
                 tg.persist()
@@ -4810,7 +4898,7 @@ def panel_sinyaller():
     rows = []
     for x in sg:
         st = x.get("st")
-        res = (f"✅ {x['r']:+.1f}R" if (x.get("r") or 0) > 0 else f"❌ {x['r']:+.1f}R") if st in ST_TR_ and x.get("r") is not None \
+        res = (f"✅ {_p_(sig_yuzde(x), 1)}" if (x.get("r") or 0) > 0 else f"❌ {_p_(sig_yuzde(x), 1)}") if st in ST_TR_ and x.get("r") is not None \
             else ("🟢 açık" if st == "açık" else "⏳" if st == "bekliyor" else "⏸")
         rows.append(f"{'🟢' if x['dir'] > 0 else '🔴'} #{_h(x['sym'])} · {_h(sinyal.SETUP_AD.get(x['setup'], x['setup'])[:28])} "
                     f"· {x['conf']} · {res}")
@@ -4892,6 +4980,24 @@ async def _admin_mi(uid):
         except Exception:
             pass
     return uid in _TG_ADMINS["ids"]
+
+
+async def _tg_komut_guvenli(text, chat, thread):
+    try:
+        await tg_komut(text, chat, thread)
+    except Exception as e:
+        log.warning("Telegram komut hatası: %s", e)
+
+
+async def _tg_dugme_guvenli(cq):
+    try:
+        await tg_dugme(cq)
+    except Exception as e:
+        log.warning("Telegram düğme hatası: %s", e)
+        try:
+            await tg.api("answerCallbackQuery", callback_query_id=cq.get("id"), text="Bir hata oldu, tekrar dene.")
+        except Exception:
+            pass
 
 
 async def tg_dugme(cq):
@@ -5007,9 +5113,9 @@ def super_tg(sig):
     o = super_ozet()
     gec = []
     if k.get("n", 0) >= 10 and k.get("avg") is not None:
-        gec.append(f"📊 <b>Geçmişte bu sınıf:</b> {k['n']} sinyalin <b>%{k['wr']}</b>'i kazandı, ort. <b>{k['avg']:+.2f}R</b>")
+        gec.append(f"📊 <b>Geçmişte bu sınıf:</b> {k['n']} sinyalin <b>%{k['wr']}</b>'i kazandı, işlem başı ort. <b>{_p_(k['avg'] * rp_ozet()['test'])}</b>")
     if o["n"]:
-        gec.append(f"💎 Canlı süper karnesi: {o['n']} sonuç · %{o['wr']} · ort. {o['avg']:+.2f}R")
+        gec.append(f"💎 Canlı süper karnesi: {o['n']} sonuç · %{o['wr']} · işlem başı ort. {_p_(o.get('avg_p'))}")
     gec.append("<i>Garanti değil. Stop'a sadık kal, paper hesap.</i>")
     out.append("<blockquote>" + "\n".join(gec) + "</blockquote>")
     return "\n".join(out)
@@ -5039,12 +5145,12 @@ def bot_girdi_metni(sig):
     pos = next((p for p in bot.positions if p.get("sig") == sig["id"] and p["st"] != "iptal"), None)
     if pos:
         if pos["st"] == "kapandı" and pos.get("pnl") is not None:
-            return f"Evet, kapandı: {pos['pnl']:+.2f} $ ({pos.get('r') or 0:+.2f}R)"
+            return f"Evet, kapandı: {pos['pnl']:+.2f} $ ({_p_(pos.get('pct'))})"
         if pos.get("entry"):
             ur = ""
             px = _px(sig["sym"])
             if px and pos.get("entry") and pos.get("stop") and pos["entry"] != pos["stop"]:
-                ur = f", şu an {pos['dir'] * (px - pos['entry']) / abs(pos['entry'] - pos['stop']):+.2f}R"
+                ur = f", şu an {_p_(pos['dir'] * (px / pos['entry'] - 1) * 100)}"
             return f"Evet: {pos['qty']:g} adet @ {fp_(pos['entry'])}{ur}"
         return "Emir verildi, dolum bekleniyor."
     neden = next((j["msg"].split("atlandı:", 1)[1].strip() for j in reversed(bot.journal[-400:])
@@ -5067,7 +5173,7 @@ def canli_cubuk(sig):
     pos = next((p for p in bot.positions if p.get("sig") == sig["id"] and p["st"] in botmod.OPEN_ST), None)
     if pos and pos.get("be"):
         ek = "\n🔒 Stop giriş fiyatına çekildi"
-    return f"📍 Şimdi {fp_(px)} · <b>{ur:+.2f}R</b>\n🛑 {bar} 🎯{ek}"
+    return f"📍 Şimdi {fp_(px)} · <b>{_p_(d * (px / e - 1) * 100)}</b>\n🛑 {bar} 🎯{ek}"
 
 
 def kazanc_serisi():
@@ -5188,7 +5294,7 @@ def sabah_tg():
         out.append(f"🧭 Piyasa havası: {ik} <b>{_h(et)}</b>")
     o = super_ozet()
     if o["n"]:
-        out.append(f"💎 Süper fırsat karnesi: {o['n']} sonuç · %{o['wr']} · ort. {o['avg']:+.2f}R")
+        out.append(f"💎 Süper fırsat karnesi: {o['n']} sonuç · %{o['wr']} · işlem başı ort. {_p_(o.get('avg_p'))}")
     return "\n".join(out)
 
 
@@ -5201,14 +5307,14 @@ def super_komut():
     if L:
         for i, x in enumerate(L, 1):
             out.append(f"{i}. #{_h(x['sym'])} {st_ad.get(x['st'], '•')} "
-                       + (f"{x['r']:+.2f}R" if x.get("r") is not None else f"giriş {fp_(x['e'])} · hedef {fp_(x['h'])}"))
+                       + (_p_(sig_yuzde(x)) if x.get("r") is not None else f"giriş {fp_(x['e'])} · hedef {fp_(x['h'])}"))
     else:
         out.append("Bugün henüz yok. Günde en fazla " + str(o["gunluk"]) + " tane gelir; çok sıkı bir süzgeç.")
     k = o["sinif"] or {}
     if o["n"]:
-        out.append(f"<i>Canlı: {o['n']} sonuç · %{o['wr']} kazandı · ort. {o['avg']:+.2f}R</i>")
+        out.append(f"<i>Canlı: {o['n']} sonuç · %{o['wr']} kazandı · işlem başı ort. {_p_(o.get('avg_p'))}</i>")
     if k.get("n"):
-        out.append(f"<i>Geçmiş test (aynı sınıf): {k['n']} sinyal · %{k['wr']} · ort. {k['avg']:+.2f}R</i>")
+        out.append(f"<i>Geçmiş test (aynı sınıf): {k['n']} sinyal · %{k['wr']} · işlem başı ort. {_p_((k['avg'] or 0) * rp_ozet()['test'])}</i>")
     out.append(f"<i>Eşik: model en iyi %{round(100 * (1 - o['esik']))} · 5 modülden Fırsat, Teknik, Piyasa olumlu</i>")
     return "\n".join(out)
 
@@ -5654,8 +5760,8 @@ def plan_olaylari():
                     PLAN_DURUM[f"k:{p['id']}"] = DURUM_AD["onaylı"] + f" · 🎯 <b>K{i + 1} geldi</b> <code>{fk(h_[i])}</code>"
                     PLAN_FOTO[f"k:{p['id']}"] = "k1" if i == 0 else "k2"
                     pos_ = next((q for q in bot.positions if q.get("sig") == p["sig"]), None)
-                    tg.send(f"🎯 <b>K{i + 1} GELDİ · #{_h(p['sym'])}</b> <code>{fk(h_[i])}</code> <i>(+{i + 1}R)</i>\n"
-                            + (("Bot: yarısını satıyor, stop maliyete çekiliyor." if i == 0 else "Bot: iz süren stop zirvenin 1R gerisinde.")
+                    tg.send(f"🎯 <b>K{i + 1} GELDİ · #{_h(p['sym'])}</b> <code>{fk(h_[i])}</code> <i>({fy((h_[i] / p['giris'] - 1) * 100)})</i>\n"
+                            + (("Bot: yarısını satıyor, stop maliyete çekiliyor." if i == 0 else "Bot: iz süren stop zirveyi arkadan takip ediyor.")
                                if pos_ and pos_["st"] in botmod.OPEN_ST else
                                ("💡 Stopu girişe çekmek mantıklı." if i == 0 else "💰 Kârın bir kısmını almak mantıklı.")),
                             sym=p["sym"], reply=f"k:{p['id']}", konu="plan", quiet=False)
@@ -5755,7 +5861,15 @@ def plan_ozet():
     gun = str(datetime.now(ET).date())
     son = [{k: p.get(k) for k in ("id", "sym", "giris", "stop", "hedefler", "tur", "st", "neden", "t", "kanal", "sig", "tip")}
            for p in PLAN.gecmis[-60:] if p.get("gun") == gun][-15:][::-1]
-    return {"aktif": akt, "son": son, "karne": PLAN.karne(engine.signals), "izle": len(IZLE),
+    karne = PLAN.karne(engine.signals)
+    ps = {}
+    for s_ in engine.signals:
+        if s_.get("setup") == "kirilim" and s_.get("r") is not None and s_.get("st") in ("hedef", "stop", "süre"):
+            for t in (s_.get("plan_tur") or []):
+                ps.setdefault(t, []).append(sig_yuzde(s_))
+    for r_ in karne:
+        r_["avg_p"] = _ort(ps.get(r_["k"]) or [])
+    return {"aktif": akt, "son": son, "karne": karne, "izle": len(IZLE),
             "yetki": BOT_CFG.get("kirilim_yetki", 1), "golge": golge_kurgu("kirilim")}
 
 
@@ -5780,7 +5894,7 @@ def sinyal_durumu(sig):
         d = f"🟢 Girildi {fp_(sig.get('fill'))} · takipte"
     elif st in ST_TR_ and sig.get("r") is not None:
         r_ = sig["r"]
-        d = {"hedef": "✅ Hedef geldi", "stop": "❌ Stop oldu", "süre": "⌛ Süre doldu"}[st] + f" <b>{r_:+.2f}R</b>"
+        d = {"hedef": "✅ Hedef geldi", "stop": "❌ Stop oldu", "süre": "⌛ Süre doldu"}[st] + f" <b>{_p_(sig_yuzde(sig))}</b>"
     elif st == "dolmadı":
         d = "⏸ Giriş seviyesine gelmedi"
     else:
@@ -5796,7 +5910,7 @@ def sinyal_durumu(sig):
     pos = next((p for p in bot.positions if p.get("sig") == sig["id"] and p["st"] != "iptal"), None)
     if pos:
         if pos["st"] == "kapandı" and pos.get("pnl") is not None:
-            d += f"\n🤖 Bot: {pos['pnl']:+.2f} $ ({pos.get('r') or 0:+.2f}R)"
+            d += f"\n🤖 Bot: {pos['pnl']:+.2f} $ ({_p_(pos.get('pct'))})"
         elif pos.get("entry"):
             d += f"\n🤖 Bot içerde: {pos['qty']:g} adet @ {fp_(pos['entry'])}"
         else:

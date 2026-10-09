@@ -365,7 +365,8 @@ def sonuc_kart(d_):
     d.text((56 * S, 120 * S), T(d_.get("sym", "")), fill=TXT, font=f(46, "xb"))
     sw = d.textlength(T(d_.get("sym", "")), font=f(46, "xb"))
     d.text((56 * S + sw + 18 * S, 140 * S), T((d_.get("ad") or "")[:28]), fill=MUT, font=f(22, "m"))
-    rt = (f"{d_.get('r', 0):+.1f}R").replace(".", ",").replace("-", "−")
+    rt = T(fpct(d_["pct"], 2 if abs(d_["pct"]) < 10 else 1)) if d_.get("pct") is not None else \
+        (f"{d_.get('r', 0):+.1f}R").replace(".", ",").replace("-", "−")
     d.text((50 * S, 196 * S), rt, fill=ana, font=f(150, "xb"))
     us = (f"{d_.get('usd', 0):+.2f} $").replace(".", ",").replace("-", "−")
     d.text((58 * S, 392 * S), us, fill=TXT, font=f(44, "b"))
