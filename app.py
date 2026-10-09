@@ -3375,7 +3375,8 @@ async def tg_komut(text, chat, thread=None):
         send(f"@{_h(k)} artık izlenmiyor (eski ölçümler karnede kalır)." if k else "Kullanım: /kanalsil @kanal")
     elif cmd == "kanallar":
         ks = dinle.kanallar
-        satir = [f"• @{_h(k)} · {v.get('n', 0)} sinyal"
+        satir = [f"• @{_h(k)}{' (grup: sadece yöneticiler)' if v.get('tur') == 'grup' else ''} · {v.get('n', 0)} sinyal"
+                 + (f" · ⚠️ {_h(v['uyari'])}" if v.get("uyari") else "")
                  + (f" · {v['resim']} resimli mesaj okunamadı" if v.get("resim") else "")
                  + (f" · hata: {_h(v['hata'])}" if v.get("hata") else "") for k, v in ks.items()]
         send("👂 <b>İzlenen kanallar</b>\n" + ("\n".join(satir) or "Yok. Ekle: /kanalekle @kanal")

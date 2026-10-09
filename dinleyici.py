@@ -24,6 +24,7 @@ try:
     from telethon.errors import (FloodWaitError, PhoneCodeExpiredError, PhoneCodeInvalidError,
                                  PasswordHashInvalidError, SessionPasswordNeededError)
     from telethon.sessions import StringSession
+    from telethon.tl.types import ChannelParticipantsAdmins
     TELETHON = True
 except Exception:          # requirements'a eklenmemişse uygulama yine çalışsın
     TELETHON = False
@@ -31,6 +32,7 @@ except Exception:          # requirements'a eklenmemişse uygulama yine çalış
 KANAL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,31}$")
 ARALIK = 30               # sn: her kanal bu aralıkla okunur
 GERI = 6 * 86400          # yeni eklenen kanalda son 6 günün mesajları da işlenir (7 gün veri sınırı)
+YONETICI_YENILE = 3600    # gruplarda yönetici listesi saatte bir yenilenir
 
 
 def kanal_adi(x):
@@ -51,6 +53,7 @@ class Dinleyici:
         self.hesap = ""
         self._giris = None                   # giriş akışı sırasında geçici istemci
         self._tetik = asyncio.Event()
+        self._yon = {}                       # grup adı -> (zaman, {yönetici id}) ; None = alınamadı
 
     @property
     def hazir(self):
@@ -140,11 +143,30 @@ class Dinleyici:
                 pass
             self._tetik.clear()
 
+    async def _grup_mu(self, ad, k):
+        """Kanal mı grup mu? Grupsa yönetici id'leri (sadece onların mesajları sinyal sayılır)."""
+        if "tur" not in k:
+            ent = await self.client.get_entity(ad)
+            k["tur"] = "grup" if getattr(ent, "megagroup", False) or getattr(ent, "gigagroup", False) else "kanal"
+        if k["tur"] != "grup":
+            return None
+        t, ids = self._yon.get(ad, (0, None))
+        if time.time() - t > YONETICI_YENILE:
+            try:
+                ids = {u.id for u in await self.client.get_participants(ad, filter=ChannelParticipantsAdmins)}
+            except Exception as e:
+                log.info("Yönetici listesi alınamadı %s: %s", ad, e)
+                ids = None
+            self._yon[ad] = (time.time(), ids)
+        return ids if ids is not None else set()
+
     async def _oku(self, ad):
         k = self.kanallar[ad]
+        yonetici = await self._grup_mu(ad, k)     # None: kanal; küme: grup (boşsa liste alınamadı)
         son = int(k.get("son") or 0)
         ilk = son == 0
-        msgs = await self.client.get_messages(ad, limit=40 if ilk else 20, min_id=son)
+        msgs = await self.client.get_messages(ad, limit=(200 if yonetici is not None else 40) if ilk else 60,
+                                              min_id=son)
         msgs = sorted([m for m in msgs if m and m.id > son], key=lambda m: m.id)
         n = 0
         for m in msgs:
@@ -152,6 +174,16 @@ class Dinleyici:
             ts = int(m.date.timestamp()) if m.date else int(time.time())
             if ilk and time.time() - ts > GERI:
                 continue
+            kim = ad
+            if yonetici is not None:
+                # Grup: herkes yazabilir. Sadece yöneticilerin (ya da grup adına yazılan) mesajları sinyal sayılır.
+                sid = getattr(m, "sender_id", None)
+                grup_adina = getattr(m, "post", False) or (sid is not None and sid < 0)
+                if not grup_adina and sid not in yonetici:
+                    if not yonetici:
+                        k["uyari"] = "yönetici listesi alınamadı: grup mesajları okunmuyor"
+                    continue
+                k.pop("uyari", None)
             text = m.message or ""
             if not text.strip():
                 k["resim"] = int(k.get("resim") or 0) + 1        # sadece resim: metin yok, okunamaz
@@ -159,7 +191,7 @@ class Dinleyici:
             if self.on_msg:
                 try:
                     if await self.on_msg({"text": text, "date": ts, "chat": {"id": None},
-                                          "forward_origin": {"type": "channel", "chat": {"username": ad},
+                                          "forward_origin": {"type": "channel", "chat": {"username": kim},
                                                              "message_id": m.id, "date": ts},
                                           "_oto": True, "_eski": ilk}):
                         n += 1
