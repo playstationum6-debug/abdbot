@@ -605,7 +605,8 @@ def den_ctx(sig):
         kalan = max(0.0, BOT_CFG["daily_loss"] + min(0.0, bot.today_pnl()))
     except Exception:
         kalan = None
-    return {"model": model, "secici": ogrenme.SECICI, "spread": scanner.spread_of(sig["sym"], ses=sig.get("ses")),
+    return {"model": model, "secici": ogrenme.SECICI, "spread": None if sig["sym"] in SYMBOLS else scanner.spread_of(sig["sym"], ses=sig.get("ses")),
+            # ana listedeki büyük hisselerde IEX kotası ulusal en iyi fiyat değil (JPM %5, ARM %15 görünüyordu): kullanma
             "yz_ara": YZM.arastirma(sig["sym"]),
             "kalan": kalan, "risk_usd": BOT_CFG.get("risk_usd"), "hava": HAVA.get("etiket")}
 

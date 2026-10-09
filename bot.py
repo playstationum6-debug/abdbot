@@ -15,6 +15,7 @@ Kurallar:
   (0,5×–1,5× risk). Üst üste 3 kayıpta lot yarıya iner, ilk kazançta normale döner. Her işleme ders yazılır.
 - Çıkışları bot kendisi yönetir (Alpaca uzatılmış seansta stop emri kabul etmediği için).
 """
+import asyncio
 import math
 import re
 import time
@@ -407,7 +408,39 @@ class Bot:
             self.note("çıkış", f"Çıkış emri ({reason}): {side} {pos['qty']:g} {body['type']}"
                                + (f" @ {body.get('limit_price')}" if body.get("limit_price") else ""), pos["sym"])
         except Exception as e:
-            self.note("hata", f"Çıkış emri gönderilemedi: {e}", pos["sym"])
+            now = time.time()
+            if "insufficient qty" in str(e) and now - pos.get("xfix_t", 0) > 20:
+                # Hisselerin bir kısmı başka açık emirde tutuluyor (ör. yeniden başlamada kalan yarım-kapat emri)
+                # ya da Alpaca'daki adet farklı: açık emirleri iptal et, gerçek adedi al, bir kez daha dene.
+                pos["xfix_t"] = now
+                try:
+                    acik = await self._req("GET", "/v2/orders", params={"status": "open", "symbols": pos["sym"]})
+                    for o_ in acik or []:
+                        try:
+                            await self._req("DELETE", f"/v2/orders/{o_['id']}")
+                        except Exception:
+                            pass
+                    await asyncio.sleep(1.5)
+                    ap = await self._req("GET", f"/v2/positions/{pos['sym']}")
+                    q = abs(float(ap.get("qty_available") or ap.get("qty") or 0))
+                    if q > 0:
+                        if q != float(pos["qty"]):
+                            self.note("senkron", f"Adet Alpaca ile eşitlendi: {pos['qty']:g} → {q:g} "
+                                                 f"({len(acik or [])} açık emir iptal edildi)", pos["sym"])
+                            pos["qty"] = int(q) if q == int(q) else q
+                        body["qty"] = str(pos["qty"])
+                        o = await self._req("POST", "/v2/orders", json=body)
+                        pos["xoid"] = o["id"]
+                        pos["xsent"] = time.time()
+                        pos["st"] = "çıkış"
+                        pos["xr"] = reason
+                        self.note("çıkış", f"Çıkış emri ({reason}): {side} {pos['qty']:g} {body['type']} (yeniden denendi)", pos["sym"])
+                        return
+                except Exception as e2:
+                    e = e2
+            if now - pos.get("xerr_t", 0) > 60:       # aynı hatayı her saniye yazma
+                pos["xerr_t"] = now
+                self.note("hata", f"Çıkış emri gönderilemedi: {e}", pos["sym"])
         self._touch(pos)
 
     # ------------------------------------------------------------ yarım kapat (kârın bir kısmını cebe koy)
