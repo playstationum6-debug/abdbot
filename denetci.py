@@ -91,7 +91,13 @@ def m_teknik(sig, ctx):
         eks += 1
         nd.append("EMA 20/50 ters")
     mum = f.get("mum") or ""
-    if (d > 0 and "güçlü yeşil" in mum) or (d < 0 and "güçlü kırmızı" in mum):
+    if "yutan (lehte)" in mum:
+        art += 1
+        nd.append("yutan mum")
+    elif "yutan (aleyhte)" in mum:
+        eks += 1
+        nd.append("ters yutan mum")
+    elif (d > 0 and "güçlü yeşil" in mum) or (d < 0 and "güçlü kırmızı" in mum):
         art += 1
         nd.append("güçlü mum")
     elif "kararsız" in mum:

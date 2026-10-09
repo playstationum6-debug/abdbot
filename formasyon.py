@@ -14,6 +14,9 @@ Girdi: 5 dakikalık mumlar [(t, o, h, l, c, v), ...] eskiden yeniye (son 2-3 gü
    - TOBO (ters omuz-baş-omuz) / OBO (omuz-baş-omuz)
    - Yükselen / alçalan / simetrik üçgen
    - Boğa bayrağı (sert yükseliş direği + dar konsolidasyon)
+   - Düşen kama (boğa) / yükselen kama (ayı): iki kenar aynı yöne eğik ve daralıyor; hedef kamanın başladığı tepe / dip
+   - Boğa / ayı flaması: sert direk + simetrik üçgen; hedef direk boyu kadar (kırılım noktasından)
+   - Yutan mum (engulfing): dönüş noktasında ters mumun gövdesini tamamen yutan mum
    Her biri için: boyun çizgisi (kırılım seviyesi), hedef (formasyon yüksekliği kadar), durum (oluşuyor / kırıldı).
 3) Alıcı bölgesi: yükselen mumlardaki hacmin yoğunlaştığı fiyat bandı (fiyatın altında).
 4) FVG (boşluk / fair value gap): 3 mumluk dizide 1. mumun tepesi ile 3. mumun dibi arasında kalan, fiyatın
@@ -222,12 +225,33 @@ def patterns(b, piv, a):
                 bu = _status(b, up, pts[-1][0], True)
                 bd = _status(b, lo, pts[-1][0], False)
                 bull = bu is not None and (bd is None or bu <= bd) or (bu is None and bd is None and b[-1][4] >= (up(last_i) + lo(last_i)) / 2)
+                # flama: üçgenden hemen önce sert direk varsa hedef direk boyu kadar (AB = direk, CD = kırılımdan hedefe)
+                j0 = max(0, i0 - 15)
                 if bull:
-                    add("Simetrik üçgen", True, pts, up, hs[0][0], height, {"alt": [
+                    dip = min(x[3] for x in b[j0:i0 + 1])
+                    direk = hs[0][1] - dip
+                else:
+                    tepe = max(x[2] for x in b[j0:i0 + 1])
+                    direk = tepe - ls_[0][1]
+                flama = direk >= 3 * a and direk >= 1.8 * height
+                ad = ("Boğa flaması" if bull else "Ayı flaması") if flama else "Simetrik üçgen"
+                boy = direk if flama else height
+                if bull:
+                    add(ad, True, pts, up, hs[0][0], boy, {"alt": [
                         [b[ls_[0][0]][0], round(ls_[0][1], 4)], [b[last_i][0], round(lo(last_i), 4)]]})
                 else:
-                    add("Simetrik üçgen", False, pts, lo, ls_[0][0], height, {"alt": [
+                    add(ad, False, pts, lo, ls_[0][0], boy, {"alt": [
                         [b[hs[0][0]][0], round(hs[0][1], 4)], [b[last_i][0], round(up(last_i), 4)]]})
+            elif dh < -tol * 0.6 and dl < -tol * 0.3:            # iki kenar da düşüyor; daralma (conv) yukarıda şart
+                # düşen kama: tepeler diplerden hızlı düşüyor → yukarı kırılım, hedef kamanın ilk tepesi
+                hedef_boy = max(hs[0][1] - up(last_i), 1.5 * a)
+                add("Düşen kama", True, pts, up, hs[0][0], hedef_boy, {"alt": [
+                    [b[ls_[0][0]][0], round(ls_[0][1], 4)], [b[last_i][0], round(lo(last_i), 4)]]})
+            elif dl > tol * 0.6 and dh > tol * 0.3:              # iki kenar da yükseliyor ve daralıyor
+                # yükselen kama: dipler tepelerden hızlı yükseliyor → aşağı kırılım, hedef kamanın ilk dibi
+                hedef_boy = max(lo(last_i) - ls_[0][1], 1.5 * a)
+                add("Yükselen kama", False, pts, lo, ls_[0][0], hedef_boy, {"alt": [
+                    [b[hs[0][0]][0], round(hs[0][1], 4)], [b[last_i][0], round(up(last_i), 4)]]})
     # Çift dip / çift tepe: L H L  /  H L H
     for j in range(len(P) - 3, -1, -1):
         x, y, z = P[j], P[j + 1], P[j + 2]
@@ -484,16 +508,40 @@ def mum(o, h, l, c):
     return "normal"
 
 
+# ----------------------------------------------------------------- yutan mum (engulfing)
+def yutan(b, a, look=12):
+    """Son kapanmış iki mumda yutan formasyon: 'boğa' (dipte, kırmızıyı yutan yeşil) / 'ayı' (tepede, yeşili yutan
+    kırmızı) / None. Yer şartı: son 'look' mumun dibine (boğa) ya da tepesine (ayı) yakın olmalı; gövde en az 0,3 ATR."""
+    if len(b) < look + 2 or a <= 0:
+        return None
+    p, q = b[-2], b[-1]
+    po, pc, qo, qc = p[1], p[4], q[1], q[4]
+    if abs(qc - qo) < 0.3 * a or abs(pc - po) < 0.05 * a:
+        return None
+    pen = b[-look - 2:-2]
+    if pc < po and qc > qo and qo <= pc and qc >= po:          # kırmızıyı yutan yeşil
+        if min(p[3], q[3]) <= min(x[3] for x in pen) + 0.5 * a:
+            return "boğa"
+    if pc > po and qc < qo and qo >= pc and qc <= po:          # yeşili yutan kırmızı
+        if max(p[2], q[2]) >= max(x[2] for x in pen) - 0.5 * a:
+            return "ayı"
+    return None
+
+
 # ----------------------------------------------------------------- hepsi bir arada
 def analyze(b):
     """b: 5 dk mumlar [(t,o,h,l,c,v)]. Dönüş: lv, pat, zones, fvg, kanal, yapi, fib, atr"""
     if len(b) < 30:
-        return {"lv": [], "pat": [], "zones": [], "fvg": [], "kanal": None, "yapi": None, "fib": None, "atr": 0}
+        return {"lv": [], "pat": [], "zones": [], "fvg": [], "kanal": None, "yapi": None, "fib": None, "atr": 0, "yutan": None}
     a = atr(b)
     last = b[-1][4]
     piv = pivots(b, k=3, min_move=a * 1.0)
     out = {"lv": key_levels(b, piv, a), "pat": patterns(b, piv, a), "zones": demand_zones(b, last),
            "atr": round(a, 4)}
+    try:
+        out["yutan"] = yutan(b, a)
+    except Exception:
+        out["yutan"] = None
     for k, fn in (("fvg", lambda: fvg(b, a)), ("kanal", lambda: kanal(b, piv, a)),
                   ("yapi", lambda: yapi(b, piv, a)), ("fib", lambda: fib(b, piv, a))):
         try:

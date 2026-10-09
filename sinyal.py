@@ -1417,6 +1417,9 @@ class Engine:
         else:
             f["fib"] = "yok"
         f["mum"] = x.get("_mum") or formasyon.mum(x["o"], x["h"], x["l"], x["c"])
+        yt = (x.get("_fx") or {}).get("yutan")
+        if yt:                                       # 5 dk'da yutan mum: sinyal yönündeyse lehte, tersse aleyhte
+            f["mum"] = f"{'boğa' if yt == 'boğa' else 'ayı'} yutan ({'lehte' if (yt == 'boğa') == (d > 0) else 'aleyhte'})"
         t15, td = x.get("_mtf") or (0, 0)
         uy, ters = (t15 == d) + (td == d), (t15 == -d) + (td == -d)
         f["mtf"] = "ikisi uyumlu" if uy == 2 else "ikisi ters" if ters == 2 else "biri uyumlu" if uy and not ters \
