@@ -7,6 +7,7 @@ Geçmiş test: botun BUGÜNKÜ kurallarını geçmiş günlerin dakikalık veris
 Sınırlar: koşan küçük hisseler (o günlerin tarayıcı listesi yok) ve haber/SEC filtreleri test edilmez.
 Render'ın küçük işlemcisinde yavaştır: piyasa kapalıyken çalıştırılır.
 """
+import gc
 import time
 from datetime import date, datetime, time as dtime, timedelta, timezone
 
@@ -44,7 +45,7 @@ class BtCal:
         r = self._b.get(ts)
         if r is None:
             r = (datetime.fromtimestamp(ts, self.ET).date(), SES_CODE[self.session(ts)])
-            if len(self._b) > 400000:
+            if len(self._b) > 60000:
                 self._b.clear()
             self._b[ts] = r
         return r
@@ -105,7 +106,7 @@ def slim(s):
     """Öğrenme ve raporlar için hafif kayıt."""
     return {"id": "bt-" + s["id"], "sym": s["sym"], "dir": s["dir"], "setup": s["setup"], "ses": s["ses"], "t": s["t"],
             "day": s["day"], "conf": s["conf"], "st": s["st"], "r": s.get("r"), "f": s.get("f") or {},
-            "xt": s.get("xt"), "bt": 1}
+            "xt": s.get("xt"), "bt": 1, "rp": round(abs(s["e"] - s["s"]) / s["e"], 5) if s.get("e") else None}
 
 
 def spy_regime(bars, cal):
@@ -127,12 +128,15 @@ def spy_regime(bars, cal):
     return out
 
 
-def run(key, secret, symbols, n_days, et, progress=None, should_stop=None):
-    """Ana fonksiyon (ayrı iş parçacığında çalıştırılır). Dönüş: (sinyaller, özet)"""
+def run(key, secret, symbols, n_days, et, progress=None, should_stop=None, done=None, onceki=None, on_symbol=None):
+    """Ana fonksiyon (ayrı iş parçacığında çalıştırılır). Dönüş: (sinyaller, özet)
+    done/onceki: yarıda kalan testin bitmiş hisseleri ve sinyalleri (kaldığı yerden devam).
+    on_symbol(sym, sinyaller): her hisse bitince çağrılır (ara kayıt için)."""
+    done = set(done or [])
     hdr = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
     now = datetime.now(UTC)
     end = now - timedelta(minutes=20)                  # ücretsiz planda son 15 dk SIP verisi yok
-    out = []
+    out = list(onceki or [])
     t0 = time.time()
     with httpx.Client(timeout=30) as c:
         days = calendar(c, hdr, (now - timedelta(days=int(n_days * 1.6) + 10)).date(), now.date())
@@ -149,11 +153,18 @@ def run(key, secret, symbols, n_days, et, progress=None, should_stop=None):
         for n, sym in enumerate(syms):
             if should_stop and should_stop():
                 break
+            if sym in done:
+                continue
             try:
                 bars = spy if sym == "SPY" else fetch(c, hdr, sym, start, end)
             except Exception:
-                continue
+                bars = {}
             if len(bars) < 200:
+                if on_symbol:
+                    try:
+                        on_symbol(sym, [])
+                    except Exception:
+                        pass
                 continue
             store = _Store()
             store.bars[sym] = bars
@@ -190,7 +201,15 @@ def run(key, secret, symbols, n_days, et, progress=None, should_stop=None):
                     eng._update(sig, day_tss, bars, fin)
                 if len(eng._fx) > 400:
                     eng._fx.clear()
-            out.extend(slim(s) for s in eng.signals if s.get("r") is not None)
+            yeni = [slim(s) for s in eng.signals if s.get("r") is not None]
+            out.extend(yeni)
+            del eng, store, bars, by_day, tss_all
+            gc.collect()
+            if on_symbol:
+                try:
+                    on_symbol(sym, yeni)
+                except Exception:
+                    pass
             if progress:
                 progress(n + 1, len(syms), len(out), time.time() - t0)
     return out, summary(out, test_days, time.time() - t0)

@@ -441,6 +441,41 @@ class Scanner:
                          "msg": f"SEC: {dates[i]} tarihli {f} raf kaydı — şirket her an hisse satabilir"}
         return shelf or {"kind": "temiz", "msg": "SEC: son 30 günde seyreltme bildirimi yok"}
 
+    async def model_bul(self, c=None):
+        """Model kaldırılmış / adı değişmişse (404): hesabın kullanabildiği en yeni 'flash' modelini otomatik seç."""
+        if time.time() - getattr(self, "_model_t", 0) < 600:
+            return
+        self._model_t = time.time()
+        own = c is None
+        if own:
+            c = httpx.AsyncClient(timeout=20)
+        try:
+            r = await c.get("https://generativelanguage.googleapis.com/v1beta/models", headers={"x-goog-api-key": self.ai_key},
+                            params={"pageSize": 200})
+            ms = [m for m in (r.json().get("models") or [])
+                  if "generateContent" in (m.get("supportedGenerationMethods") or [])]
+            names = [m["name"].split("/", 1)[-1] for m in ms]
+            iyi = [n for n in names if "flash" in n and "lite" not in n and "image" not in n and "tts" not in n
+                   and "exp" not in n and "preview" not in n] or [n for n in names if "flash" in n] or names
+            if iyi:
+                def surum(n):
+                    import re as _re
+                    m = _re.search(r"(\d+(?:\.\d+)?)", n)
+                    return (float(m.group(1)) if m else 0, "latest" in n, -len(n))
+                yeni = max(iyi, key=surum)
+                if yeni != self.ai_model:
+                    if self.log:
+                        self.log.info("Yapay zeka modeli değişti: %s → %s", self.ai_model, yeni)
+                    self.ai_model = yeni
+                    self.ai_status = f"model otomatik seçildi: {yeni}"
+            else:
+                self.ai_status = "kullanılabilir model bulunamadı (anahtarı kontrol et)"
+        except Exception as e:
+            self.ai_status = f"model listesi alınamadı: {str(e)[:60]}"
+        finally:
+            if own:
+                await c.aclose()
+
     async def _ai_score(self, c, sym, headline, pct):
         """Gemini ile başlığı puanla: {"skor": -100..100, "neden": str} ya da None (kota/hata)."""
         if headline in self.ai_cache:
@@ -456,6 +491,9 @@ class Scanner:
                 headers={"x-goog-api-key": self.ai_key, "Content-Type": "application/json"},
                 json={"contents": [{"parts": [{"text": AI_PROMPT.format(sym=sym, headline=headline[:300], pct=pct)}]}],
                       "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}})
+            if r.status_code == 404:
+                await self.model_bul(c)
+                return None
             if r.status_code != 200:
                 self.ai_status = f"hata {r.status_code}: {r.text[:80]}"
                 return None

@@ -234,6 +234,8 @@ class Bot:
             same = [p for p in self.open_positions() if self.sector_of(p["sym"]) == sec]
             if len(same) >= lim_s:
                 return skip(f"{sec} sektöründe zaten {len(same)} açık pozisyon var (sınır {lim_s})")
+        if sig["setup"] in (self.cfg.get("kapali") or []):
+            return skip("bu kurgu Ayarlar'dan kapatıldı (sinyal öğrenme için takip ediliyor)")
         if d < 0 and ses != "regular":
             return skip("uzatılmış seansta açığa satış yapılmıyor")
         if d < 0 and sig.get("runner") and sig["setup"] != "fade":

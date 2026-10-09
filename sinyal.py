@@ -13,6 +13,7 @@ Kurgular (setup):
   Öncesi/sonrası: gap (boşluk devamı), uz_seviye (seviye kırılımı) — likidite filtresi + 2 mum teyidi
 """
 import math
+from bisect import bisect_left
 import time
 from datetime import datetime
 
@@ -121,6 +122,7 @@ class Engine:
         self._plan_posted = {}     # koşan hisse -> son yayınlanan plan seviyesi
         self._fx = {}              # (sembol, 5 dk dilimi) -> grafik analizi (formasyon, seviye, alıcı bölgesi)
         self._mtf = {}             # (sembol, 15 dk dilimi) -> 15 dk trend yönü
+        self._ixc = None           # son mum listesinin gün/seans dizini
         self.gunluk = None         # app.py: sembol -> günlük trend (+1 / -1 / 0)
         self._tgt_over = {}        # formasyon hedefi: (sembol, mum, kurgu, yön) -> hedef fiyat
         self.runners = {}          # tarayıcının bulduğu koşan hisseler: sembol -> bilgi (yüzde, haber)
@@ -144,68 +146,123 @@ class Engine:
         return entry - d * risk, risk
 
     # ------------------------------------------------------------ bağlam
+    def _index(self, tss, bars):
+        """Mum listesinin gün/seans dizini (bir kez hesaplanır): her değerlendirmede bütün geçmişi taramamak için.
+        Geçmiş testte ~5 kat hızlandırır."""
+        key = (id(tss), len(tss), tss[0] if tss else 0, tss[-1] if tss else 0)
+        ix = self._ixc
+        if ix and ix["key"] == key:
+            return ix
+        days, scs, start = [], [], {}
+        for i, t in enumerate(tss):
+            d, s_ = self.bar_info(t)
+            days.append(d)
+            scs.append(s_)
+            if d not in start:
+                start[d] = i
+        self._ixc = ix = {"key": key, "days": days, "scs": scs, "start": start, "prev": {}}
+        return ix
+
+    def _gun(self, ix, tss, bars, day):
+        """Günün birikimli değerleri (bir kez): seans içi en yüksek/düşük, VWAP toplamları, hacim — her mum için."""
+        g = ix.setdefault("gun", {}).get(day)
+        if g is not None:
+            return g
+        ds = ix["start"][day]
+        de = ds
+        n = len(tss)
+        while de < n and ix["days"][de] == day:
+            de += 1
+        sh, sl, sv, sdv, spv, svv = [], [], [], [], [], []
+        rpv, rvv, rhi, rlo = [], [], [], []
+        ph, pl = [], []
+        cur = None
+        a = [None, None, 0.0, 0.0, 0.0, 0.0]
+        r = [0.0, 0.0, None, None]
+        p_ = [None, None]
+        for i in range(ds, de):
+            o, h, l, c, v = bars[tss[i]][:5]
+            sc = ix["scs"][i]
+            if sc != cur:
+                cur = sc
+                a = [None, None, 0.0, 0.0, 0.0, 0.0]
+            a[0] = h if a[0] is None else max(a[0], h)
+            a[1] = l if a[1] is None else min(a[1], l)
+            a[2] += v
+            a[3] += v * c
+            a[4] += (h + l + c) / 3 * v
+            a[5] += v
+            sh.append(a[0]); sl.append(a[1]); sv.append(a[2]); sdv.append(a[3]); spv.append(a[4]); svv.append(a[5])
+            if sc == 1:
+                r[0] += (h + l + c) / 3 * v
+                r[1] += v
+                r[2] = h if r[2] is None else max(r[2], h)
+                r[3] = l if r[3] is None else min(r[3], l)
+            rpv.append(r[0]); rvv.append(r[1]); rhi.append(r[2]); rlo.append(r[3])
+            if sc == 0:
+                p_[0] = h if p_[0] is None else max(p_[0], h)
+                p_[1] = l if p_[1] is None else min(p_[1], l)
+            ph.append(p_[0]); pl.append(p_[1])
+        g = {"ds": ds, "de": de, "sh": sh, "sl": sl, "sv": sv, "sdv": sdv, "spv": spv, "svv": svv,
+             "rpv": rpv, "rvv": rvv, "rhi": rhi, "rlo": rlo, "ph": ph, "pl": pl, "poc": {}}
+        ix["gun"][day] = g
+        return g
+
     def _ctx(self, tss, bars, k):
         T = tss[k]
-        day, sc = self.bar_info(T)
+        ix = self._index(tss, bars)
+        day, sc = ix["days"][k], ix["scs"][k]
         b = self.bounds(day)
         if not b or sc == 3:
             return None
-        days_before = sorted({self.bar_info(t)[0] for t in tss[:k] if self.bar_info(t)[0] < day})
-        pday = days_before[-1] if days_before else None
-
-        today, prev_reg = [], []
-        for t in tss[:k + 1]:
-            d, s = self.bar_info(t)
-            if d == day:
-                today.append((t, s))
-            elif d == pday and s == 1:
-                prev_reg.append(t)
+        ds = ix["start"][day]
+        pday = ix["days"][ds - 1] if ds > 0 else None
+        days_, scs_ = ix["days"], ix["scs"]
+        today = [(tss[i], scs_[i]) for i in range(ds, k + 1)]
+        pv = ix["prev"].get(day)
+        if pv is None:
+            prev_reg = [tss[i] for i in range(ix["start"][pday], ds) if scs_[i] == 1] if pday else []
+            pv = (bars[prev_reg[-1]][3], max(bars[t][1] for t in prev_reg), min(bars[t][2] for t in prev_reg)) \
+                if prev_reg else None
+            ix["prev"][day] = pv
 
         o, h, l, c, v = bars[T][:5]
         pb = bars[tss[k - 1]] if k > 0 else None
         x = {"T": T, "day": day, "sc": sc, "ses": SES_NAME[sc], "b": b, "o": o, "h": h, "l": l, "c": c, "v": v,
              "pc": None, "pdh": None, "pdl": None}
-        if prev_reg:
-            x["pc"] = bars[prev_reg[-1]][3]
-            x["pdh"] = max(bars[t][1] for t in prev_reg)
-            x["pdl"] = min(bars[t][2] for t in prev_reg)
+        prev_reg = None
+        if pv:
+            x["pc"], x["pdh"], x["pdl"] = pv
 
-        # piyasa öncesi seviyeleri
-        pre_before = [t for t, s in today if s == 0 and t < T]
-        x["pmh"] = max((bars[t][1] for t in pre_before), default=None)
-        x["pml"] = min((bars[t][2] for t in pre_before), default=None)
+        G = self._gun(ix, tss, bars, day)
+        j = k - ds                                         # bugünün içindeki sıra
+        j1 = j - 1                                         # bu mumdan önceki
+        j2 = bisect_left(tss, T - 60, ds, k + 1) - 1 - ds  # T-60'tan önceki son mum
+        # piyasa öncesi seviyeleri (bu mumdan önceki öncesi seans mumları)
+        x["pmh"] = G["ph"][j1] if j1 >= 0 else None
+        x["pml"] = G["pl"][j1] if j1 >= 0 else None
         # 2 mum teyidi için: kırılım mumundan ÖNCEKİ seviyeler
-        pre_before2 = [t for t in pre_before if t < T - 60]
-        x["pmh2"] = max((bars[t][1] for t in pre_before2), default=None)
-        x["pml2"] = min((bars[t][2] for t in pre_before2), default=None)
+        x["pmh2"] = G["ph"][j2] if j2 >= 0 else None
+        x["pml2"] = G["pl"][j2] if j2 >= 0 else None
 
         # normal seans: VWAP, açılış aralığı, gün tepe/dip
         reg = [t for t, s in today if s == 1]
-        pv = vv = 0.0
-        vwap_prev = None
-        for t in reg:
-            bo, bh, bl, bc, bv = bars[t][:5]
-            if t == T:
-                vwap_prev = pv / vv if vv > 0 else None
-            pv += (bh + bl + bc) / 3 * bv
-            vv += bv
-        x["vwap"] = pv / vv if vv > 0 else None
-        x["vwap_prev"] = vwap_prev
+        x["vwap"] = G["rpv"][j] / G["rvv"][j] if G["rvv"][j] > 0 else None
+        x["vwap_prev"] = (G["rpv"][j1] / G["rvv"][j1] if j1 >= 0 and G["rvv"][j1] > 0 else None) if sc == 1 else None
         orb = [t for t in reg if t < b["open"] + 15 * 60]
         x["or_ok"] = len(orb) >= 10 and T >= b["open"] + 15 * 60
         x["orh"] = max((bars[t][1] for t in orb), default=None)
         x["orl"] = min((bars[t][2] for t in orb), default=None)
-        reg_before = [t for t in reg if t < T]
-        x["hod"] = max((bars[t][1] for t in reg_before), default=None)
-        x["lod"] = min((bars[t][2] for t in reg_before), default=None)
+        x["hod"] = G["rhi"][j1] if j1 >= 0 else None
+        x["lod"] = G["rlo"][j1] if j1 >= 0 else None
         x["rc"] = bars[reg[-1]][3] if reg and sc == 2 else None   # bugünün normal seans kapanışı (sonrası için)
         x["dopen"] = bars[reg[0]][0] if reg else None
         or5 = [t for t in reg if t < b["open"] + 300]
         x["or5h"] = max((bars[t][1] for t in or5), default=None) if len(or5) >= 4 and T >= b["open"] + 300 else None
         x["or5l"] = min((bars[t][2] for t in or5), default=None) if x["or5h"] else None
         # günün hacim profili: en çok işlem gören fiyat (POC), bu mumdan önceki normal seans mumlarından
-        x["poc"] = None
-        rb = [bars[t] for t in reg if t < T]
+        x["poc"] = G["poc"].get(T // 300) if T // 300 in G["poc"] else None
+        rb = [bars[t] for t in reg if t < T] if T // 300 not in G["poc"] else []
         if len(rb) >= 45:
             plo = min(r[2] for r in rb)
             phi = max(r[1] for r in rb)
@@ -221,6 +278,7 @@ class Engine:
                         bins[i] += per
                 pi = max(range(N), key=lambda i: bins[i])
                 x["poc"] = plo + (pi + 0.5) * st_
+        G["poc"][T // 300] = x["poc"]                      # POC 5 dakikada bir hesaplanır
 
         # EMA, ATR (son 80 mum, seanslar karışık olabilir)
         win = tss[max(0, k - 79):k + 1]
@@ -244,7 +302,7 @@ class Engine:
         prev20 = [bars[t][4] for t in ses_today[:-1][-20:]]
         x["avgv"] = (sum(prev20) / len(prev20)) if len(prev20) >= 5 else None
         x["volr"] = (v / x["avgv"]) if x["avgv"] else 0.0
-        x["ses_vol"] = sum(bars[t][4] for t in ses_today)
+        x["ses_vol"] = G["sv"][j]
         last10 = ses_today[-10:]
         x["vol5"] = sum(bars[t][4] for t in ses_today[-5:])
         x["active10"] = sum(1 for t in last10 if bars[t][4] > 0)
@@ -255,20 +313,15 @@ class Engine:
         x["low5"] = min(bars[t][2] for t in tss[max(0, k - 4):k + 1])
         x["high5"] = max(bars[t][1] for t in tss[max(0, k - 4):k + 1])
         x["closes4"] = [bars[t][3] for t in tss[max(0, k - 4):k]]
-        x["ses_dv"] = sum(bars[t][4] * bars[t][3] for t in ses_today)
-        x["sh"] = max((bars[t][1] for t in ses_today if t < T), default=None)
-        x["sh2"] = max((bars[t][1] for t in ses_today if t < T - 60), default=None)
-        x["sl2"] = min((bars[t][2] for t in ses_today if t < T - 60), default=None)
+        x["ses_dv"] = G["sdv"][j]
+        same1 = j1 >= 0 and ix["scs"][k - 1] == sc
+        same2 = j2 >= 0 and ix["scs"][ds + j2] == sc
+        x["sh"] = G["sh"][j1] if same1 else None
+        x["sh2"] = G["sh"][j2] if same2 else None
+        x["sl2"] = G["sl"][j2] if same2 else None
         # Uzatılmış seansın kendi VWAP'ı (öncesi / sonrası ayrı)
-        spv = svv = 0.0
-        x["svwap_prev"] = None
-        for t in ses_today:
-            bo, bh, bl, bc, bv = bars[t][:5]
-            if t == T:
-                x["svwap_prev"] = spv / svv if svv > 0 else None
-            spv += (bh + bl + bc) / 3 * bv
-            svv += bv
-        x["svwap"] = spv / svv if svv > 0 else None
+        x["svwap_prev"] = (G["spv"][j1] / G["svv"][j1] if G["svv"][j1] > 0 else None) if same1 else None
+        x["svwap"] = G["spv"][j] / G["svv"][j] if G["svv"][j] > 0 else None
         start = {0: b["sopen"], 1: b["open"], 2: b["close"]}.get(sc, b["open"])
         x["ses_mins"] = (T - start) / 60
         x["recent"] = [tuple(bars[t][:5]) for t in ses_today[-12:]]
