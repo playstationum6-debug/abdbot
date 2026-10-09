@@ -122,6 +122,7 @@ class Scanner:
         self.gainers, self.losers, self.actives = [], [], []
         self.news_pending = {}   # sembol -> {"item", "until"}: olumlu haber geldi, fiyat tepkisi bekleniyor
         self.news_seen = set()
+        self.spread = {}             # sembol -> (spread %, zaman): Alpaca IEX en iyi alış/satış
         self.recent_news_syms = {}   # sembol -> zaman (seans dışı taramada aday havuzu)
         self.ext_status = "—"
         self.tv_status = "—"
@@ -157,10 +158,21 @@ class Scanner:
                                 params={"symbols": ",".join(syms[i:i + 50]), "feed": "iex"})
                 if r.status_code == 200:
                     js = r.json()
-                    out.update(js.get("snapshots", js) if isinstance(js, dict) else {})
+                    part = js.get("snapshots", js) if isinstance(js, dict) else {}
+                    out.update(part)
+                    now = time.time()
+                    for k, sn in (part or {}).items():
+                        q = (sn or {}).get("latestQuote") or {}
+                        ap, bp = float(q.get("ap") or 0), float(q.get("bp") or 0)
+                        if ap > 0 and bp > 0 and ap >= bp:
+                            self.spread[k] = (round((ap - bp) / ((ap + bp) / 2) * 100, 3), now)
             except Exception:
                 continue
         return out
+
+    def spread_of(self, sym, max_age=300):
+        x = self.spread.get(sym)
+        return x[0] if x and time.time() - x[1] < max_age else None
 
     @staticmethod
     def _move(sn, ses):

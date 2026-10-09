@@ -18,6 +18,8 @@ Kurallar:
 import math
 import re
 import time
+
+from denetci import BEKLE_SN, ONAY_R
 from datetime import datetime, timezone
 
 import httpx
@@ -79,6 +81,7 @@ class Bot:
         self.ver = 0
         self.dirty_days = set()
         self.seen = set()
+        self.bekleyen = {}       # Karar Denetçisi BEKLE dedi: sinyal kimliği -> {sig, until, why}
         self.account = {}
         self.status = "kapalı (Alpaca anahtarı yok)" if not (key and secret) else ("kapalı (BOT_ENABLED=0)" if not cfg["enabled"] else "başlıyor")
         self.client = None
@@ -196,11 +199,12 @@ class Bot:
         return r.json() if r.content else {}
 
     # ------------------------------------------------------------ karar
-    def consider(self, sig, now):
-        if sig["id"] in self.seen:
-            return
-        self.seen.add(sig["id"])
-        if not self.active or now - sig.get("created", 0) > 180 or sig["st"] not in ("bekliyor", "açık"):
+    def consider(self, sig, now, onayli=False):
+        if not onayli:
+            if sig["id"] in self.seen:
+                return
+            self.seen.add(sig["id"])
+        if not self.active or (not onayli and now - sig.get("created", 0) > 180) or sig["st"] not in ("bekliyor", "açık"):
             return
         sym, d, ses, conf = sig["sym"], sig["dir"], sig["ses"], sig["conf"]
         yon = "AL" if d > 0 else "SAT"
@@ -245,11 +249,22 @@ class Bot:
         conf0 = sig.get("conf0", conf)
         if conf0 < thr:
             return skip(f"güven {conf0} < eşik {thr}")
-        # Öğrenme filtresi: model bu sinyali zayıf dilimde görüyorsa işlem açma.
-        # Sinyal yine gölgede takip edilir ve sonucu öğrenmeye girer. Koşan küçük hisseler hariç
-        # (geçmiş testte onların verisi yok). Ayarlarda ogren_filtre=0 ile kapatılabilir.
+        # Karar Denetçisi: 5 bağımsız kontrol → AL / BEKLE / PAS GEÇ (sinyal her durumda gölgede takip edilir)
+        den = sig.get("den")
+        den_lot = 1.0
+        if den and self.cfg.get("denetci", 1) and not onayli:
+            if den["karar"] == "PAS":
+                return skip("Karar Denetçisi PAS GEÇ — " + den["neden"])
+            if den["karar"] == "BEKLE":
+                self.bekleyen[sig["id"]] = {"sig": sig, "until": now + BEKLE_SN, "why": den["neden"]}
+                self.note("bekle", f"{head} — BEKLE: {den['neden']}. Fiyat girişin ötesine geçerse alacağım "
+                                   f"({BEKLE_SN // 60} dk)", sym)
+                return
+        if den and self.cfg.get("denetci", 1):
+            den_lot = den.get("lot", 1.0)
+        # Öğrenme filtresi (denetçi kapalıysa eski davranış): model bu sinyali zayıf dilimde görüyorsa işlem açma.
         _veto = getattr(self.learner, "veto", None)
-        if _veto and self.cfg.get("ogren_filtre", 1) and not sig.get("runner"):
+        if _veto and not (den and self.cfg.get("denetci", 1)) and self.cfg.get("ogren_filtre", 1) and not sig.get("runner"):
             try:
                 v, vwhy = _veto(sig["setup"], ses, sig.get("f"))
             except Exception:
@@ -262,6 +277,11 @@ class Bot:
             mult, mwhy = self.learner.size_mult(sig["setup"], ses, conf, sig.get("f"))
         except Exception:
             mult, mwhy = 1.0, ""
+        if den_lot != 1.0:
+            mult *= den_lot
+            mwhy = (mwhy + ", " if mwhy else "") + f"denetçi lotu ×{den_lot:g}"
+        if onayli:
+            mwhy = (mwhy + ", " if mwhy else "") + "BEKLE sonrası fiyat onayı geldi"
         if self.extra_mult:
             try:
                 em, enote = self.extra_mult(sig)
@@ -433,10 +453,39 @@ class Bot:
         return await self._req("GET", f"/v2/orders/{oid}")
 
     # ------------------------------------------------------------ yönetim
+    def bekle_kontrol(self, now):
+        """BEKLE denen sinyaller: fiyat girişin ONAY_R ötesine geçerse al, stopa değerse ya da süre dolarsa bırak."""
+        for sid, b in list(self.bekleyen.items()):
+            sig = b["sig"]
+            sym, d = sig["sym"], sig["dir"]
+            if sig["st"] not in ("bekliyor", "açık"):
+                del self.bekleyen[sid]
+                continue
+            px = self.price(sym)[0]
+            risk = abs(sig["e"] - sig["s"]) or 1e-9
+            if px and (px - sig["s"]) * d <= 0:
+                del self.bekleyen[sid]
+                self.note("atla", f"{sym} BEKLE iptal: fiyat stop seviyesine geldi, onay gelmedi", sym)
+            elif px and (px - sig["e"]) * d >= ONAY_R * risk:
+                if (px - sig["h"]) * d >= -0.5 * risk:
+                    del self.bekleyen[sid]
+                    self.note("atla", f"{sym} BEKLE iptal: fiyat hedefe çok yaklaştı, geç kalındı", sym)
+                    continue
+                del self.bekleyen[sid]
+                self.note("onay", f"{sym} onay geldi: {px:.4g} girişin ötesinde → AL değerlendiriliyor", sym)
+                self.consider(sig, now, onayli=True)
+            elif now > b["until"]:
+                del self.bekleyen[sid]
+                self.note("atla", f"{sym} BEKLE süresi doldu: onay gelmedi ({b['why']})", sym)
+
     async def manage(self):
         if not self.active:
             return
         now = time.time()
+        try:
+            self.bekle_kontrol(now)
+        except Exception as e:
+            self.note("hata", f"Bekleme kontrolü hatası: {str(e)[:100]}")
         if now - self._last_acct > 60:
             self._last_acct = now
             try:
@@ -716,6 +765,9 @@ class Bot:
                       "avg_r": round(sum(rs) / len(rs), 3) if rs else None},
             "limit_hit": self.today_pnl() <= -lim,
             "open": opens, "recent": recent, "journal": self.journal[-80:][::-1],
+            "bekleyen": [{"sym": b["sig"]["sym"], "dir": b["sig"]["dir"], "setup": b["sig"]["setup"], "e": b["sig"]["e"],
+                          "s": b["sig"]["s"], "h": b["sig"]["h"], "until": int(b["until"]), "why": b["why"],
+                          "conf": b["sig"].get("conf")} for b in self.bekleyen.values()],
             "karne": self.karne(closed),
         }
 

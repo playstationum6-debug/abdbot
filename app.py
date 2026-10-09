@@ -38,6 +38,7 @@ import websockets
 import yfinance as yf
 
 import analiz
+import denetci
 import dinleyici
 import dissinyal
 import bot as botmod
@@ -586,6 +587,65 @@ dis = dissinyal.DisSinyal()          # Telegram'dan iletilen kanal sinyalleri (s
 # Kanal dinleyici: bir Telegram hesabıyla herkese açık kanalları otomatik okur (oturum sadece Render Environment'ta)
 dinle = dinleyici.Dinleyici(os.getenv("TG_API_ID", ""), os.getenv("TG_API_HASH", ""), os.getenv("TG_SESSION", ""))
 engine.learner = learner
+
+
+def den_ctx(sig):
+    """Karar Denetçisi için bağlam: model tahmini, spread, günlük zarar hakkı, piyasa havası."""
+    try:
+        model = learner.predict(sig["setup"], sig.get("ses"), sig.get("f")) if learner.ready() else (None, None)
+    except Exception:
+        model = (None, None)
+    try:
+        kalan = max(0.0, BOT_CFG["daily_loss"] + min(0.0, bot.today_pnl()))
+    except Exception:
+        kalan = None
+    return {"model": model, "secici": ogrenme.SECICI, "spread": scanner.spread_of(sig["sym"]),
+            "kalan": kalan, "risk_usd": BOT_CFG.get("risk_usd"), "hava": HAVA.get("etiket")}
+
+
+def den_hesapla(sig):
+    return denetci.degerlendir(sig, den_ctx(sig))
+
+
+engine.denetle = den_hesapla
+DEN = {"karne": None, "t": 0, "durum": "hesaplanmadı"}
+
+
+def _den_ctx_gecmis(s):
+    """Geçmiş sinyaller için (kaydedilmiş karar yoksa): model var; o anki spread / günlük hak bilgisi yok."""
+    try:
+        return {"model": learner.predict(s["setup"], s.get("ses"), s.get("f")) if learner.ready() else (None, None),
+                "secici": ogrenme.SECICI}
+    except Exception:
+        return {}
+
+
+async def denetci_loop():
+    """Modül karnesi: 15 dakikada bir (canlı + geçmiş test sinyalleri), ana döngüyü kilitlemeden."""
+    await asyncio.sleep(90)
+    while True:
+        try:
+            sigs = list(engine.signals) + BT["sigs"]
+            DEN["karne"] = await asyncio.to_thread(denetci.karne, sigs, _den_ctx_gecmis)
+            DEN["t"] = int(time.time())
+            DEN["durum"] = f"{DEN['karne']['n']} sonuç"
+        except Exception as e:
+            DEN["durum"] = f"hata: {str(e)[:60]}"
+            log.warning("Denetçi karnesi hatası: %s", e)
+        await asyncio.sleep(900)
+
+
+async def spread_loop():
+    """Spread (alış-satış farkı): seans açıkken dakikada bir ana liste + koşan hisseler (Alpaca IEX anlık özet)."""
+    await asyncio.sleep(30)
+    while True:
+        try:
+            if ALPACA_KEY and ALPACA_SECRET and cal.session(time.time()) != "closed":
+                async with httpx.AsyncClient(timeout=15) as c:
+                    await scanner.snapshots(c, list(SYMBOLS) + list(scanner.runners))
+        except Exception as e:
+            log.debug("Spread okunamadı: %s", e)
+        await asyncio.sleep(60)
 scanner = tarayici.Scanner(ALPACA_KEY, ALPACA_SECRET, SYMBOLS, min_price=RUN_MIN_PRICE, min_pct=RUN_MIN_PCT,
                            max_runners=RUN_MAX, log=log,
                            ai_key=os.getenv("GEMINI_API_KEY", ""), ai_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
@@ -1708,6 +1768,15 @@ def sinyal_tg(sig, d, ad):
            f"💵 Giriş <b>{fp_(sig['e'])}</b>   🛑 Stop {fp_(sig['s'])}   🎯 Hedef {fp_(sig['h'])}"]
     out.append(rr_satiri({"giris": sig["e"], "stop": sig["s"], "hedef": sig["h"]}, sig["dir"]).strip())
     out.append(f"🔥 Güven <b>{sig['conf']}</b> {guven_bar(sig['conf'])} · Derece <b>{derece(sig['conf'])}</b>")
+    den = sig.get("den")
+    if den:
+        rozet = {"AL": "🟢 AL", "BEKLE": "🟡 BEKLE", "PAS": "🔴 PAS GEÇ"}.get(den["karar"], den["karar"])
+        out.append(f"🧭 <b>Karar Denetçisi: {rozet}</b> · {_h(den['neden'])}")
+        out += denetci.tg_satirlari(den)
+        n = (scanner.runners.get(sym) or {}).get("news") or {}
+        if n.get("url"):
+            out.append(f'📰 <a href="{_h(n["url"])}">{_h((n.get("headline") or "Habere git")[:110])}</a>')
+        return "\n".join(x for x in out if x)
     why = [w for w in (sig.get("why") or []) if not w.startswith("Öğren")]
     iyi = [w for w in why if not any(u in w for u in _UYARI)][:3]
     kotu = [w for w in why if any(u in w for u in _UYARI)][:2]
@@ -1802,6 +1871,11 @@ def feed_bot_note(typ, msg, sym, t):
         feed_add("bot", sym, t1, tone="bilgi", t=t, extra=ex)
     elif typ in ("hata", "uyarı"):
         feed_add("bot", sym, msg, tone="zarar", t=t)
+    elif typ in ("bekle", "onay"):
+        bas = "🟡 <b>BEKLE" if typ == "bekle" else "🟢 <b>ONAY GELDİ"
+        govde = msg.split(" — ", 1)[-1]
+        feed_add("bot", sym, govde, tone="bilgi", t=t,
+                 extra={"tg_html": f"{bas} · #{_h(sym or '')}</b>\n{_h(govde)}"})
 
 
 async def news_loop():
@@ -1906,6 +1980,7 @@ async def send_sig(cl):
                    "mine": engine.for_symbol(cl.sym, time.time() - 4 * 86400) if cl.sym else [],
                    "learn": {"ins": learner.insights(), "groups": learner.group_rows(), "cmp": compare_rows(),
                              "saat": saat_tablosu(), "dis": dis.karne(),
+                             "den": DEN["karne"], "perf": denetci.performans(bot.positions),
                              "bt": {k: BT[k] for k in ("sum", "t", "running", "bekliyor", "prog", "hata")}}})
 
 
@@ -3342,6 +3417,7 @@ YARDIM = ("<b>Komutlar</b>\n/panel — kontrol panelini yeniden kur ve sabitle\n
           "/kanal — iletilen Telegram kanal sinyallerinin karnesi\n"
           "/sinyal @kanal metin — iletmesi kapalı kanal için sinyali elle yaz\n"
           "/kanalekle @kanal — kanalı otomatik izle · /kanalsil @kanal · /kanallar — izlenenler\n"
+          "/denetci — Karar Denetçisi: modül karnesi ve gerçek performans\n"
           "Bir kanaldaki sinyal mesajını bana İLETİRSEN gölgede takip edip sonucunu ölçerim.\nSadece paper (sanal) hesap.")
 
 
@@ -3443,6 +3519,8 @@ async def tg_komut(text, chat, thread=None):
         send(learner.ozet())
     elif cmd == "kanal":
         send(dis.tg_metin())
+    elif cmd in ("denetci", "denetçi", "karar"):
+        send(denetci_tg())
     elif cmd == "kanalekle":
         if not arg:
             send("Kullanım: /kanalekle @NasdaqPatronu")
@@ -3496,7 +3574,7 @@ KOMUTLAR = (("panel", "Kontrol panelini yeniden kur"), ("durum", "Bot ve para du
             ("karne", "Sonuçlar + grafik"), ("analiz", "Hisse analizi: /analiz QNME"),
             ("alarm", "Fiyat alarmı: /alarm QNME 0.90"), ("alarmlar", "Kurulu alarmlar"), ("rapor", "Gün sonu raporu"),
             ("yorum", "Yapay zekalı piyasa yorumu"), ("ogren", "Bot ne öğrendi"),
-            ("kanal", "Kanal sinyallerinin karnesi"), ("kanalekle", "Kanalı otomatik izle: /kanalekle @kanal"),
+            ("kanal", "Kanal sinyallerinin karnesi"), ("denetci", "Karar Denetçisi karnesi"), ("kanalekle", "Kanalı otomatik izle: /kanalekle @kanal"),
             ("kanallar", "İzlenen kanallar"), ("dur", "Yeni işlemleri durdur"), ("basla", "Yeni işlemlere devam"),
             ("yardim", "Komut listesi"))
 
@@ -3585,6 +3663,32 @@ async def tg_komut_loop():
             except Exception as e:
                 tg.cmd_st = f"hata: {str(e)[:60]}"
                 await asyncio.sleep(10)
+
+
+def denetci_tg():
+    k = DEN.get("karne")
+    out = ["🧭 <b>Karar Denetçisi</b>"]
+    if not k:
+        out.append("Karne henüz hesaplanmadı (açılıştan ~2 dk sonra hazır olur).")
+    else:
+        kr = k["kararlar"]
+        out.append(f"Kararların gerçek sonucu ({k['n']} sinyal):")
+        for x, ad in (("AL", "🟢 AL"), ("BEKLE", "🟡 BEKLE"), ("PAS", "🔴 PAS GEÇ")):
+            v = kr.get(x) or {}
+            if v.get("n"):
+                out.append(f"{ad}: {v['n']} sinyal · ort. {v['avg']:+.2f}R · tutma %{v['wr']}")
+        out.append("\n<b>Modül karnesi</b> (ayırt gücü = olumlu ort. − olumsuz ort.)")
+        for r in k["moduller"]:
+            if r["guc"] is None:
+                out.append(f"• {r['ad']}: yeterli veri yok")
+            else:
+                out.append(f"• {r['ad']}: <b>{r['guc']:+.2f}R</b> (olumlu {r['olumlu']:+.2f} / olumsuz {r['olumsuz']:+.2f})")
+    p = denetci.performans(bot.positions)
+    if p.get("n"):
+        kf = p["kar_faktoru"] if p["kar_faktoru"] is not None else "—"
+        out.append(f"\n<b>Gerçek performans</b> ({p['n']} işlem)\nBeklenen getiri {(p['beklenen_r'] or 0):+.2f}R · "
+                   f"kâr faktörü {kf} · maks. düşüş {p['mdd']:.2f} $ · işlem başı maliyet ~{p['maliyet_islem']:.2f} $")
+    return "\n".join(out)
 
 
 async def dis_iletildi(m):
@@ -4159,7 +4263,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop)]
+                                                  rapor_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop)]
     yield
     for t in tasks:
         t.cancel()
