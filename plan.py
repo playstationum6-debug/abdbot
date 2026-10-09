@@ -20,10 +20,10 @@ import math
 import time
 from datetime import datetime
 
-AGIRLIK = {"taban": 2.0, "kaybedilen": 2.0, "pmh": 1.5, "pdh": 1.5, "hod": 1.0, "yuvarlak": 0.5, "kanal": 3.0}
+AGIRLIK = {"taban": 2.0, "kaybedilen": 2.0, "pmh": 1.5, "pdh": 1.5, "hod": 1.0, "yuvarlak": 0.5, "kanal": 3.0, "liste": 2.5}
 TUR_AD = {"taban": "sabahki / gün içi tabanın tavanı", "kaybedilen": "kaybedilen seviye (geri alma)",
           "pmh": "piyasa öncesi tepesi", "pdh": "dünkü tepe", "hod": "gün tepesi", "yuvarlak": "yuvarlak sayı",
-          "kanal": "kanalın verdiği seviye"}
+          "kanal": "kanalın verdiği seviye", "liste": "sabah listesinin seviyesi"}
 MIN_PUAN = 2.0
 UZAK_MIN, UZAK_MAX = 0.005, 0.12
 TEKRAR_SN = 15 * 60          # bitmiş plandan sonra aynı hissede yeni plan için bekleme
@@ -65,6 +65,7 @@ class Planci:
         self._bant = {}              # sym -> (k, bantlar) önbellek
         self._seq = 0
         self.uygun = None            # app.py: hangi hisselerde kendi planını kursun (kanal seviyesi her zaman)
+        self.liste = {}              # sym -> sabah listesi seviyesi {"lvl","stop","hedefler","neden","t"} (gün boyu geçerli)
 
     # ------------------------------------------------------------------ kanal seviyesi
     def kanal_ekle(self, sym, lvl, stop=None, hedefler=None, kanal="", t=None):
@@ -72,6 +73,12 @@ class Planci:
             return
         self.kanal[sym] = {"lvl": float(lvl), "stop": float(stop) if stop else None, "hedefler": hedefler or [],
                            "kanal": kanal, "t": t or time.time()}
+
+    def liste_ekle(self, sym, lvl, stop=None, hedefler=None, neden="", t=None):
+        if not lvl or lvl <= 0:
+            return
+        self.liste[sym] = {"lvl": float(lvl), "stop": float(stop) if stop else None, "hedefler": hedefler or [],
+                           "neden": neden, "t": t or time.time()}
 
     # ------------------------------------------------------------------ yardımcılar
     def _bantlar(self, tss, bars, ds, k):
@@ -110,16 +117,16 @@ class Planci:
             sonra = [bars[tss[i]][3] for i in range(i1 + 1, k + 1)]
             ustunde = sonra and max(sonra) > hi * 1.03
             if c < hi:
-                lv.append((hi, "kaybedilen" if ustunde else "taban", lo))
+                lv.append((hi, "kaybedilen" if ustunde else "taban", lo, (tss[i0], tss[i1], lo, hi)))
         if x.get("ses") == "regular" and x.get("pmh") and c < x["pmh"]:
             pm_sonra = max((bars[tss[i]][3] for i in range(ds, k + 1)), default=0)
-            lv.append((x["pmh"], "kaybedilen" if pm_sonra > x["pmh"] * 1.03 else "pmh", None))
+            lv.append((x["pmh"], "kaybedilen" if pm_sonra > x["pmh"] * 1.03 else "pmh", None, None))
         if x.get("pdh") and c < x["pdh"]:
-            lv.append((x["pdh"], "pdh", None))
+            lv.append((x["pdh"], "pdh", None, None))
         if x.get("hod") and c < x["hod"]:
-            lv.append((x["hod"], "hod", None))
+            lv.append((x["hod"], "hod", None, None))
         for v in yuvarlaklar(c):
-            lv.append((v, "yuvarlak", None))
+            lv.append((v, "yuvarlak", None, None))
         lv = [v for v in lv if v[0] and c * (1 + UZAK_MIN) <= v[0] <= c * (1 + UZAK_MAX)]
         lv.sort(key=lambda v: v[0])
         kume = []
@@ -130,8 +137,10 @@ class Planci:
                 g["tur"].add(v[1])
                 if v[2]:
                     g["dip"] = min(g.get("dip") or v[2], v[2])
+                if v[3] and not g.get("bant"):
+                    g["bant"] = v[3]
             else:
-                kume.append({"alt": v[0], "ust": v[0], "tur": {v[1]}, "dip": v[2]})
+                kume.append({"alt": v[0], "ust": v[0], "tur": {v[1]}, "dip": v[2], "bant": v[3]})
         for g in kume:
             g["puan"] = sum(AGIRLIK[t] for t in g["tur"])
         return kume
@@ -164,7 +173,7 @@ class Planci:
              "hedefler": [round(giris + r, 4), round(giris + 2 * r, 4), k3], "tur": sorted(g["tur"]),
              "puan": round(g["puan"], 1), "st": "bekliyor", "t": T, "kt": None, "kaynak": kaynak, "kanal": kanal,
              "px": c, "uzak": round((giris / c - 1) * 100, 1), "ses": x.get("ses"), "sig": None, "k1": 0, "k2": 0,
-             "gun": str(x["day"])}
+             "gun": str(x["day"]), "bant": g.get("bant")}
         p["iptal_alt"] = round(min(stop, (x.get("_dip20") or stop) * 0.995), 4)
         if r / giris > 0.10:                            # geri alma planı: gösterilen stop girişin %7 altı
             p["stop"] = round(giris * 0.93, 4)
@@ -230,6 +239,8 @@ class Planci:
             guclu = max(x.get("volr", 0), x["_volr2"]) >= 1.5 and (c - x["l"]) / rng >= 0.6
             if p["st"] == "bekliyor":
                 if c >= p["giris"] and guclu:
+                    p["vr"] = round(max(x.get("volr", 0), x["_volr2"]), 1)
+                    p["ust"] = round(100 * (x["h"] - c) / rng)          # kapanış mumun tepesine ne kadar yakın (%)
                     if c <= p["giris"] * 1.04:
                         a = self._aday(eng, p, c, T, "kırılım", dip10)
                         if a:
@@ -272,6 +283,23 @@ class Planci:
             if pl:
                 pl["giris"] = round(kn["lvl"], 4)
                 self.kanal.pop(sym, None)
+                self.planlar[sym] = pl
+                self.olay.append(("yeni", pl))
+            return []
+        ls = self.liste.get(sym)
+        if ls and time.time() - ls["t"] < 12 * 3600 and ls["lvl"] * 0.85 < c < ls["lvl"] * 1.005:
+            kume = [g for g in self.seviyeler(sym, tss, bars, ds, k, x) if abs(g["ust"] / ls["lvl"] - 1) <= 0.015]
+            g = kume[0] if kume else {"ust": ls["lvl"], "tur": set(), "dip": None, "bant": None}
+            g = dict(g, ust=ls["lvl"], tur=set(g["tur"]) | {"liste"})
+            g["puan"] = sum(AGIRLIK[t] for t in g["tur"])
+            pl = self._plan_kur(sym, x, g, T, "liste", None, ls.get("stop"))
+            if pl:
+                pl["giris"] = round(ls["lvl"], 4)
+                r_ = pl["giris"] - pl["stop"]
+                if r_ > 0:
+                    pl["hedefler"] = [round(pl["giris"] + i * r_, 4) for i in (1, 2, 3)]
+                pl["liste"] = 1
+                self.liste.pop(sym, None)
                 self.planlar[sym] = pl
                 self.olay.append(("yeni", pl))
             return []

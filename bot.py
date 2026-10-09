@@ -26,6 +26,12 @@ from datetime import datetime, timezone
 import httpx
 
 MIN_TRADE_USD = 20.0   # boşta kalan para bundan azsa yeni işlem açılmaz
+CIKIS = {   # çıkış kuralları (çıkış laboratuvarı ile aynı): yarım kapat, kâr koruma, iz süren stop, hedef (R; None: sinyalin hedefi, 0: yok)
+    "A": {"half": 0, "be": 0, "trail": 0, "hr": None, "ad": "sabit hedef"},
+    "B": {"half": 1, "be": 1, "trail": 1, "hr": None, "ad": "K1 yarı + maliyet + iz"},
+    "C": {"half": 0, "be": 1, "trail": 1, "hr": 0, "ad": "iz süren stop"},
+    "D": {"half": 0, "be": 0, "trail": 0, "hr": 1, "ad": "hızlı K1"},
+}
 BE_R = 1.5   # kâr koruma: bu kadar R kâra ulaşınca stop girişe çekilir (1R çok erkendi)
 
 PAPER = "https://paper-api.alpaca.markets"
@@ -365,6 +371,7 @@ class Bot:
             "trail": False, "xoid": None, "xr": None, "exit": None, "xt": None, "pnl": None, "r": None,
             "pct": None, "lesson": "", "opened": int(now), "day": self._day(now), "f": sig.get("f") or {},
             "tries": 0, "stale_noted": False, "why": why,
+            "cikis": (self.cikis() if callable(getattr(self, "cikis", None)) else "B"),
         }
         self.positions.append(pos)
         self.note("al", f"{head} — alındı ({why}); {qty:g} adet ≈ {qty * px:.0f} $", sym)
@@ -601,14 +608,15 @@ class Bot:
                 pos["stale_noted"] = True
                 self.note("uyarı", "5 dk'dır fiyat gelmiyor (işlem durdurma olabilir)", pos["sym"])
             entry, risk = pos["entry"], pos["risk"]
+            pr = CIKIS.get(pos.get("cikis") or "B", CIKIS["B"])
             pos["last"] = px
             pos["hw"] = max(pos["hw"], px) if d > 0 else min(pos["hw"], px)
             best_r = (pos["hw"] - entry) * d / risk if risk > 0 else 0
-            if not pos["be"] and best_r >= BE_R:
+            if pr["be"] and not pos["be"] and best_r >= BE_R:
                 pos["be"] = True
                 pos["stop"] = entry + d * entry * 0.0005
                 self.note("koruma", f"Kâr koruma: +{BE_R:g}R'ye ulaştı, stop girişe çekildi", pos["sym"])
-            if best_r >= 1.5:
+            if pr["trail"] and best_r >= 1.5:
                 ns = pos["hw"] - d * risk
                 if (ns - pos["stop"]) * d > 0:
                     pos["stop"] = ns
@@ -616,16 +624,17 @@ class Bot:
                         pos["trail"] = True
                         self.note("iz", "İz süren stop devrede (zirvenin 1R gerisinden)", pos["sym"])
                     self.dirty_days.add(pos["day"])
-            if self.cfg.get("yarim_kapat", 1) and not pos.get("half") and \
+            tgt = pos["target"] if pr["hr"] is None else (None if pr["hr"] == 0 else entry + d * pr["hr"] * risk)
+            if pr["half"] and self.cfg.get("yarim_kapat", 1) and not pos.get("half") and \
                     best_r >= float(self.cfg.get("yarim_r", 1.0)) and self.cal.session(now) == "regular" \
-                    and (px - pos["stop"]) * d > 0 and (px - pos["target"]) * d < 0:
+                    and (px - pos["stop"]) * d > 0 and (tgt is None or (px - tgt) * d < 0):
                 hq = self._half_qty(pos, px)
                 if hq:
                     return await self._submit_half(pos, hq, px)
             reason = None
             if (px - pos["stop"]) * d <= 0:
                 reason = "iz süren stop" if pos["trail"] else ("kâr koruma" if pos["be"] else "stop")
-            elif (px - pos["target"]) * d >= 0:
+            elif tgt is not None and (px - tgt) * d >= 0:
                 reason = "hedef"
             elif now >= pos["end"] - 180:
                 reason = "seans sonu"

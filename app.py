@@ -19,6 +19,7 @@ import sys
 import hashlib
 import hmac
 import json
+import math
 import logging
 import os
 import secrets
@@ -50,8 +51,10 @@ except Exception:
     grafik = None
 try:
     import kart                    # yeni tema resim kartları (Süper Fırsat, hedef, gün sonu, /hisse)
+    import gorsel                  # v4 görsel sistemi: seviye merdivenli grafik + sonuç kartı
 except Exception:
     kart = None
+    gorsel = None
 import sektor
 import ikon
 import ogrenme
@@ -110,8 +113,12 @@ BOT_CFG = {
     "yer_min_guven": 85,
     "eko_dur": 1,                                             # yüksek etkili ekonomik veri saatinde yeni işlem yok
     "kapali": [],                                             # kapatılan kurgular: sinyal üretilir (öğrenme sürer), bot girmez
+    "zorla": [],                                              # elle açık tutulan kurgular: kurgu kesici bunlara dokunmaz
     "yz_yetki": 1,                                            # yapay zekâ: 0 kapalı · 1 karnesi kanıtlanınca karar verir · 2 hep karar verir
     "kirilim_yetki": 1,                                       # kırılım planı: 0 kapalı · 1 işlem açar, canlıda kötüyse durur · 2 hep
+    "kesici": 1,                                              # kurgu kesici: 1 zayıf kurguları kendiliğinden gölgeye alır
+    "cikis_kural": 0,                                         # çıkış: 0 otomatik (laboratuvarın en iyisi) · 1 A · 2 B · 3 C · 4 D
+    "liste_oncelik": 1,                                       # sabah listesi: 1 plan motoru önce listedeki hisselere bakar
 }
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
@@ -1282,7 +1289,8 @@ AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd"
             "min_conf_ext": (int, 0, 100), "yeni_islem": (int, 0, 1), "sektor_max": (int, 0, 20),
             "yarim_kapat": (int, 0, 1), "yarim_r": (float, 0.5, 3), "kalan_r": (float, 1, 8),
             "tg_min_guven": (int, 0, 100), "yer_ac": (int, 0, 1), "yer_min_guven": (int, 50, 100),
-            "eko_dur": (int, 0, 1), "yz_yetki": (int, 0, 2), "kirilim_yetki": (int, 0, 2)}
+            "eko_dur": (int, 0, 1), "yz_yetki": (int, 0, 2), "kirilim_yetki": (int, 0, 2),
+            "kesici": (int, 0, 1), "cikis_kural": (int, 0, 4), "liste_oncelik": (int, 0, 1)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1,
              "tg_kosan": 1, "tg_tablo": 1, "tg_uyari": 1,
@@ -1422,6 +1430,9 @@ class Telegram:
         data = self._chart_data(ch)
         if not data:
             return None
+        v = v4_veri(ch)
+        if v:
+            return await asyncio.to_thread(gorsel.plan_grafik, data[0], v)
         return await asyncio.to_thread(lambda: grafik.ciz(
             data[0], data[1], ch.get("title", ""), ch.get("sub", ""), ch.get("lines"), ch.get("pat"), ch.get("zone"),
             tf=ch.get("tf", "5 dk"), kart=ch.get("kart"), odak=ch.get("odak"), sig_t=ch.get("sig_t")))
@@ -1464,7 +1475,7 @@ class Telegram:
             except Exception as e:
                 log.warning("Telegram grafiği çizilemedi: %s", e)
         if png:
-            cap = item["html"] if len(item["html"]) <= 1000 else item["html"][:1000] + "…"
+            cap = tg_kisalt(item["html"], 1024)
             data = {k: ("true" if v is True else "false" if v is False else str(v)) for k, v in base.items()}
             data["caption"] = cap
             if mk:
@@ -1553,8 +1564,8 @@ def apply_ayar(d):
                 BOT_CFG[k] = typ(min(hi, max(lo, float(v))))
             elif k in PUSH_PREF:
                 PUSH_PREF[k] = 1 if v else 0
-            elif k == "kapali" and isinstance(v, list):
-                BOT_CFG["kapali"] = [str(x) for x in v if str(x) in sinyal.SETUP_AD][:30]
+            elif k in ("kapali", "zorla") and isinstance(v, list):
+                BOT_CFG[k] = [str(x) for x in v if str(x) in sinyal.SETUP_AD][:30]
         except (TypeError, ValueError):
             continue
 
@@ -1732,7 +1743,9 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
     if s0 and k in ("sinyal", "plan"):
         kk = (k, s0)
         tekrar = time.time() - _TG_SON.get(kk, 0) < (600 if k == "sinyal" else 900)
-    if k == "sinyal" and ex.get("super") and PUSH_PREF.get("tg_super", 1) and tg.ok:
+    if k == "sinyal" and (ex.get("golge") or sustur_mu(s0)):
+        pass                                     # kurgu gölgede / kapalı: sinyal sadece sitede, Telegram'a gitmez
+    elif k == "sinyal" and ex.get("super") and PUSH_PREF.get("tg_super", 1) and tg.ok:
         _TG_SON[("sinyal", s0)] = time.time()
         sig_ = engine.by_id.get(ex.get("sid")) or {}
         if sig_:
@@ -1742,7 +1755,7 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
                 ch_ = {"fn": lambda v=veri: kart.super_kart(v)}
             tg.send(super_tg(sig_), ch_, key=tk, sym=sym1, quiet=False, haber=ex.get("tg_haber"),
                     durum=ex.get("tg_durum"), konu="sinyal", mk=super_dugmeler(sig_))
-    elif k in ("bot", "sinyal") and PUSH_PREF["tg_islem"] and \
+    elif k in ("bot", "sinyal") and PUSH_PREF["tg_islem"] and not ex.get("tg_skip") and \
             (not (k == "sinyal" and tekrar) or ex.get("setup") == "kirilim") and \
             (k == "bot" or ex.get("conf", 0) >= BOT_CFG.get("tg_min_guven", TG_MIN_CONF) or ex.get("setup") == "kirilim"):
         if k == "sinyal":
@@ -1826,6 +1839,7 @@ def feed_signal(sig):
              extra={"conf": sig["conf"], "e": sig["e"], "s": sig["s"], "h": sig["h"], "tgk": f"s:{sig['id']}",
                     "tg_html": sinyal_tg(sig, d, ad), "tg_durum": "⏳ Takipte", "kart": kart_bilgi(sig, ad),
                     "setup": sig["setup"], "sig_t": sig["t"], "super": 1 if sig.get("super") else 0, "sid": sig["id"],
+                    "golge": 1 if (kesici_golge(sig["setup"]) or sig["setup"] in (BOT_CFG.get("kapali") or [])) else 0,
                     **({"tgr": f"k:{sig['plan']}"} if sig.get("plan") else {}),
                     "tg_haber": ((scanner.runners.get(sig["sym"]) or {}).get("news") or {}).get("headline")})
 
@@ -1845,39 +1859,59 @@ def kart_bilgi(sig, ad, etiket=None, alt=None):
 
 
 def sinyal_tg(sig, d, ad):
-    """Telegram için şablonlu sinyal mesajı."""
+    """Telegram v4 sinyal mesajı: başlık · seviye merdiveni · güven/denetçi · ayrıntılar katlanır alıntıda."""
     sym = sig["sym"]
-    out = [f"{'🟢' if d == 'AL' else '🔴'} <b>{d} · #{_h(sym)}</b> · {_h(ad)}",
-           f"💵 Giriş <b>{fp_(sig['e'])}</b>   🛑 Stop {fp_(sig['s'])}   🎯 Hedef {fp_(sig['h'])}"]
-    out.append(rr_satiri({"giris": sig["e"], "stop": sig["s"], "hedef": sig["h"]}, sig["dir"]).strip())
-    if sig.get("hedefler"):
-        out[0] = (f"✅ <b>KIRILIM {'(RETEST) ' if sig.get('plan_tip') == 'retest' else ''}ONAYLANDI · #{_h(sym)}</b>"
-                  + (f" · @{_h(sig['plan_kanal'])} seviyesi" if sig.get("plan_kanal") else ""))
-        h_ = sig["hedefler"]
-        out.append(f"🎯 Kademeler: K1 <b>{fp_(h_[0])}</b> · K2 <b>{fp_(h_[1])}</b> · K3 <b>{fp_(h_[2])}</b>")
-    out.append(f"🔥 Güven <b>{sig['conf']}</b> {guven_bar(sig['conf'])} · Derece <b>{derece(sig['conf'])}</b>")
+    hed = sig.get("hedefler") or [sig["h"]]
     den = sig.get("den")
+    rozet = None
+    neden_ = ""
     if den:
-        rozet = {"AL": "🟢 AL", "BEKLE": "🟡 BEKLE", "PAS": "🔴 PAS GEÇ"}.get(den["karar"], den["karar"])
+        rozet = {"AL": "🟢 AL", "BEKLE": "🟡 BEKLE", "PAS": "🔴 PAS"}.get(den["karar"], den["karar"])
         neden_ = den["neden"]
         if sig.get("setup") == "kirilim" and den["karar"] != "AL" and \
                 not any(v.get("k") == "veto" for v in (den.get("mod") or {}).values()):
             rozet, neden_ = "🟢 AL", "kırılım onayı (hacim + mum kapanışı) alındı, veto yok"
-        out.append(f"🧭 <b>Karar Denetçisi: {rozet}</b> · {_h(neden_)}")
-        out += denetci.tg_satirlari(den)
-        n = (scanner.runners.get(sym) or {}).get("news") or {}
-        if n.get("url"):
-            out.append(f'📰 <a href="{_h(n["url"])}">{_h((n.get("headline") or "Habere git")[:110])}</a>')
-        return "\n".join(x for x in out if x)
-    why = [w for w in (sig.get("why") or []) if not w.startswith("Öğren")]
-    iyi = [w for w in why if not any(u in w for u in _UYARI)][:3]
-    kotu = [w for w in why if any(u in w for u in _UYARI)][:2]
-    out += ["✅ " + _h(w[:140]) for w in iyi]
-    out += ["⚠️ " + _h(w[:140]) for w in kotu]
+    if sig.get("setup") == "kirilim":
+        p = next((q for q in list(PLAN.planlar.values()) + PLAN.gecmis[-80:] if q["id"] == sig.get("plan")), None) or {}
+        out = [f"✅ <b>KIRILDI{' (RETEST)' if sig.get('plan_tip') == 'retest' else ''} · #{_h(sym)}</b>  <code>{fk(sig['e'])}</code>"]
+        alt = []
+        if p.get("vr"):
+            alt.append(f"Hacim <b>{str(p['vr']).replace('.', ',')}×</b>")
+        if p.get("ust") is not None:
+            alt.append(f"mum tepesine %{p['ust']} yakın kapandı")
+        if sig.get("plan_kanal"):
+            alt.append(f"@{_h(sig['plan_kanal'])} seviyesi")
+        if p.get("liste"):
+            alt.append("☀️ Günün Listesi")
+        if alt:
+            out.append(" · ".join(alt))
+    else:
+        out = [f"{'🟢' if d == 'AL' else '🔴'} <b>{d} · #{_h(sym)}</b> · {_h(ad)}  <code>{fk(sig['e'])}</code>"]
+    out.append("")
+    out.append(tg_seviyeler(sig["e"], sig["s"], hed))
+    out.append(f"🔥 Güven <b>{sig['conf']}</b> · {derece(sig['conf'])}" + (f" · 🧭 Denetçi <b>{rozet}</b>" if rozet else ""))
+    det = []
+    if neden_:
+        det.append("🧭 " + _h(neden_[:160]))
+    if den:
+        det += denetci.tg_satirlari(den)[:6]
+    else:
+        why = [w for w in (sig.get("why") or []) if not w.startswith("Öğren")]
+        det += ["✅ " + _h(w[:140]) for w in why if not any(u in w for u in _UYARI)][:3]
+        det += ["⚠️ " + _h(w[:140]) for w in why if any(u in w for u in _UYARI)][:2]
+    if det:
+        sec, uz = [], 0
+        for x in det:
+            if uz + len(x) > 560:
+                break
+            sec.append(x)
+            uz += len(x) + 1
+        blok = "\n".join(sec)
+        out.append("<blockquote expandable>" + blok + "</blockquote>")
     n = (scanner.runners.get(sym) or {}).get("news") or {}
     if n.get("url"):
-        out.append(f'📰 <a href="{_h(n["url"])}">{_h((n.get("headline") or "Habere git")[:110])}</a>')
-    return "\n".join(x for x in out if x)
+        out.append(f'📰 <a href="{_h(n["url"])}">{_h((n.get("headline") or "Habere git")[:100])}</a>')
+    return "\n".join(x for x in out if x is not None)
 
 
 def _pos_of(sym, open_=None, sig=None):
@@ -1909,11 +1943,12 @@ def feed_bot_note(typ, msg, sym, t):
                   "kart": kart_bilgi({"sym": sym, "e": e_, "s": pos["stop"], "h": pos["target"], "dir": pos["dir"],
                                       "conf": pos.get("conf")}, sinyal.SETUP_AD.get(pos["setup"], pos["setup"]),
                                      etiket="BOT", alt=f"Bot içerde: {pos['qty']:g} adet × {fp_(e_)}"),
-                  "tg_html": (f"{'🟢' if pos['dir'] > 0 else '🔴'} <b>{'İÇERDEYİM' if pos['dir'] > 0 else 'AÇIĞA SATTIM'} · "
-                              f"#{_h(sym)}</b> · {_h(sinyal.SETUP_AD.get(pos['setup'], pos['setup']))}\n"
-                              f"💵 {pos['qty']:g} adet × <b>{fp_(e_)}</b> (≈ {abs(pos['qty']) * (e_ or 0):.0f} $)\n"
-                              f"🛑 Stop {fp_(pos['stop'])}   🎯 Hedef {fp_(pos['target'])}"
-                              + rr_satiri({"giris": e_, "stop": pos["stop"], "hedef": pos["target"]}, pos["dir"])
+                  "tg_html": (f"🤖 <b>BOT {'GİRDİ' if pos['dir'] > 0 else 'AÇIĞA SATTI'} · #{_h(sym)}</b>  "
+                              f"<code>{fk(e_)}</code> × {pos['qty']:g} adet\n"
+                              f"<i>{_h(sinyal.SETUP_AD.get(pos['setup'], pos['setup']))} · ≈ {abs(pos['qty']) * (e_ or 0):.0f} $ · "
+                              f"risk {abs((e_ or 0) - pos['stop']) * abs(pos['qty']):.2f} $</i>\n\n".replace(".", ",")
+                              + tg_seviyeler(e_, pos["stop"], [pos["target"]])
+                              + f"\n🧪 Çıkış: <b>{_h(pos.get('cikis') or 'B')} · {_h(LAB_AD.get(pos.get('cikis') or 'B', ''))}</b>"
                               + f"\n💼 Para {cap[0]:.0f} $ · boşta {cap[2]:.0f} $")}
         feed_add("bot", sym, txt, sub=sub, tone="al" if not pos or pos["dir"] > 0 else "sat", t=t, extra=ex)
     elif typ == "kapandı":
@@ -1929,23 +1964,34 @@ def feed_bot_note(typ, msg, sym, t):
                 dk = int(((pos.get("xt") or t) - (pos.get("et") or pos["opened"])) // 60)
                 sub = (f"giriş {fp_(pos['entry'])} → çıkış {fp_(pos['exit'])}   "
                        f"{(pos['exit'] / pos['entry'] - 1) * 100 * pos['dir']:+.1f}%   {dk} dk sürdü")
-            html = (f"{'✅' if usd > 0 else '❌'} <b>{head.replace('i', 'İ').upper()} · #{_h(sym)} {r:+.2f}R</b>\n"
-                    f"💰 <b>{usd:+.2f} $</b>" + (f" · {_h(sub)}" if sub else ""))
+                sub_tg = (f"giriş {fk(pos['entry'])} → çıkış {fk(pos['exit'])} · "
+                          f"{fy((pos['exit'] / pos['entry'] - 1) * 100 * pos['dir'])} · {dk} dk")
+            else:
+                sub_tg = ""
+            rt = f"{r:+.2f}R".replace(".", ",").replace("-", "−")
+            ut = f"{usd:+.2f} $".replace(".", ",").replace("-", "−")
+            html = (f"🏁 <b>#{_h(sym)} kapandı · {rt}</b>  {'🟢' if usd > 0 else '🔴'} <b>{ut}</b>\n"
+                    f"<i>{_h(head)}" + (f" · {_h(sub_tg)}" if sub_tg else "") + "</i>"
+                    + (f"\n🧪 Çıkış kuralı: {_h(pos.get('cikis') or 'B')} · {_h(LAB_AD.get(pos.get('cikis') or 'B', ''))}" if pos else ""))
             td = bot.today_closed()
             seri = kazanc_serisi()
             if usd > 0 and seri >= 2:
-                html = html.replace("</b>\n💰", "</b>\n🔥 Seri: <b>" + str(seri) + " kazanç</b> üst üste\n💰", 1)
+                html += f"\n🔥 Seri: <b>{seri} kazanç</b> üst üste"
             if usd <= 0 and pos and pos.get("lesson"):
                 html += f"\n<blockquote>📚 {_h(pos['lesson'][:300])}</blockquote>"
-            html += f"\n📅 Bugün: {len(td)} işlem, {sum(p['pnl'] for p in td):+.2f} $"
+            html += f"\n📅 Bugün: {len(td)} işlem · " + f"{sum(p['pnl'] for p in td):+.2f} $".replace(".", ",").replace("-", "−")
             ex = {"tg_html": html}
             if pos:
                 ex["tgr"] = f"p:{pos['id']}"
             if kart and usd > 0 and PUSH_PREF.get("tg_kart", 1):
                 dk_ = int(((pos.get("xt") or t) - (pos.get("et") or pos["opened"])) // 60) if pos else None
-                veri = {"sym": sym, "ad": sinyal.SETUP_AD.get((pos or {}).get("setup"), ""), "r": r, "usd": usd,
-                        "giris": (pos or {}).get("entry"), "cikis": (pos or {}).get("exit"), "dk": dk_,
-                        "seri": seri if seri >= 2 else 0,
+                ps_ = pos or {}
+                rk_ = abs((ps_.get("entry") or 0) - (ps_.get("init_stop") or 0))
+                veri = {"sym": sym, "ad": sinyal.SETUP_AD.get(ps_.get("setup"), "")[:28], "r": r, "usd": usd,
+                        "giris": ps_.get("entry"), "cikis": ps_.get("exit"), "dk": dk_,
+                        "seri": seri if seri >= 2 else 0, "stop": ps_.get("init_stop"),
+                        "hedefler": [ps_["entry"] + ps_["dir"] * i * rk_ for i in (1, 2, 3)] if rk_ and ps_.get("dir", 1) > 0 else None,
+                        "kural": LAB_AD.get(ps_.get("cikis") or "B", ""),
                         "etiket": "HEDEF" if why == "hedef" else "KÂR ALINDI"}
                 ex["chart"] = {"fn": lambda v=veri: kart.sonuc_kart(v)}
             feed_add("bot", sym, f"{head}: {r:+.2f}R ({usd:+.2f} $)", sub=sub, tone="kar" if usd > 0 else "zarar", t=t,
@@ -1961,7 +2007,9 @@ def feed_bot_note(typ, msg, sym, t):
     elif typ == "yarım":
         pos = _pos_of(sym, open_=True)
         m = re.search(r"([+-][\d.]+) \$ cebe", msg)
-        ex = {"tg_html": f"💰 <b>YARIM KAPAT · #{_h(sym)}</b>\n{_h(msg)}"}
+        ex = {"tg_html": (f"🎯 <b>K1 · YARISI SATILDI · #{_h(sym)}</b>\n"
+                          + (f"<b>{_h(m.group(1).replace('.', ','))} $</b> cebe · " if m else "")
+                          + "stop maliyete çekildi, bu işlem artık zarar yazmaz")}
         if pos:
             ex["tgr"] = f"p:{pos['id']}"
         feed_add("bot", sym, f"Yarısını sattım: {m.group(1) if m else ''} $ cebe" if m else "Yarısını sattım",
@@ -1969,7 +2017,7 @@ def feed_bot_note(typ, msg, sym, t):
     elif typ in ("koruma", "iz"):
         pos = _pos_of(sym, open_=True)
         t1 = "Stop girişe çekildi, bu işlem artık zarar yazmaz" if typ == "koruma" else "Kâr büyüyor, stop arkadan takip ediyor"
-        ex = {"tg_html": f"🛡 <b>#{_h(sym)}</b> · {_h(t1)}" + (f"\n🛑 Yeni stop {fp_(pos['stop'])}" if pos else "")}
+        ex = {"tg_html": f"🛡 <b>#{_h(sym)}</b> · {_h(t1)}" + (f"\n🔴 Yeni stop <code>{fk(pos['stop'])}</code>" if pos else "")}
         if pos:
             ex["tgr"] = f"p:{pos['id']}"
         feed_add("bot", sym, t1, tone="bilgi", t=t, extra=ex)
@@ -2087,7 +2135,8 @@ async def send_sig(cl):
                              "saat": saat_tablosu(), "dis": dis.karne(),
                              "den": DEN["karne"], "perf": denetci.performans(bot.positions), "strat": strateji_ozet(), "super": super_ozet(),
                              "kosan": {k: KT[k] for k in ("sum", "t", "running", "prog", "hata", "istek")},
-                             "sicrama": golge_kurgu("sicrama"), "plan": plan_ozet(),
+                             "sicrama": golge_kurgu("sicrama"), "plan": plan_ozet(), "kesici": kesici_ozet(),
+                             "liste": liste_ozet(), "lab": lab_ozet(),
                              "yz": {"durum": YZM.durum, "kalan": YZM.kalan(), "gunluk": yzmod.GUNLUK, "karne": yz_karne(),
                                     "yetki": BOT_CFG.get("yz_yetki", 1), "aktif": yz_yetki(), "hazir": YZM.hazir,
                                     "ders": YZM.ders, "hata": YZM.son_hata, "arama": YZM.arama},
@@ -2734,12 +2783,12 @@ async def rapor_loop():
             except Exception:
                 acilis = None
             gun_ = datetime.now(TR).date().isoformat()
-            if acilis and 0 < acilis - now <= 15 * 60 and FIRSAT_GUN[0] != gun_:
+            if acilis and 0 < acilis - now <= 25 * 60 and FIRSAT_GUN[0] != gun_:
                 FIRSAT_GUN[0] = gun_
                 try:
-                    await firsat_gonder()
+                    await liste_gonder()          # ☀️ Günün Listesi (eski "günün fırsatı"nın yerine)
                 except Exception as e:
-                    log.warning("Günün fırsatı hatası: %s", e)
+                    log.warning("Günün listesi hatası: %s", e)
         if pre_at and now >= pre_at:
             pre_at = None
             t_, s_ = sabah_listesi()
@@ -3343,8 +3392,209 @@ def plan_kanal(it):
         log.debug("Kanal seviyesi plana alınamadı: %s", e)
 
 
+# ----------------------------------------------------------------- kurgu kesici: zayıf kurgular kendiliğinden gölgeye
+KESICI = {"t": 0, "d": {}}
+KESICI_ESIK = {"gun": 20, "n": 30, "kes": -0.15, "ac_n": 20, "ac": 0.0}
+
+
+def _r_(v):
+    return "—" if v is None else f"{v:+.2f}R".replace(".", ",").replace("-", "−")
+
+
+def kesici_guncelle(zorla=False):
+    """Son 20 günün CANLI sonuçlarına bakar. 30+ sinyalde ort. −0,15R altı → gölge.
+    Gölgedeki kurgu sinyal üretmeye devam eder; son 20 sonucun ortalaması 0'ın üstüne çıkınca geri açılır."""
+    now = time.time()
+    if not zorla and now - KESICI["t"] < 120:
+        return KESICI["d"]
+    KESICI["t"] = now
+    if not KESICI["d"] and isinstance(backup.data.get("kesici"), dict):
+        KESICI["d"] = backup.data["kesici"]
+    rows = {}
+    for s_ in _sim_sinyaller(KESICI_ESIK["gun"]):
+        if not s_["bt"]:
+            rows.setdefault(s_["setup"], []).append(s_["r"])
+    eski, yeni, olay = KESICI["d"], {}, []
+    for k, rs in rows.items():
+        n = len(rs)
+        avg = sum(rs) / n
+        son = rs[-KESICI_ESIK["ac_n"]:]
+        savg = sum(son) / len(son)
+        o = eski.get(k) or {}
+        dur = o.get("durum", "acik")
+        t_ = o.get("t") or 0
+        if dur == "acik" and n >= KESICI_ESIK["n"] and avg < KESICI_ESIK["kes"]:
+            dur, t_ = "golge", now
+            olay.append((k, "golge", n, avg))
+        elif dur == "golge" and len(son) >= KESICI_ESIK["ac_n"] and savg > KESICI_ESIK["ac"]:
+            dur, t_ = "acik", now
+            olay.append((k, "acik", len(son), savg))
+        yeni[k] = {"durum": dur, "n": n, "avg": round(avg, 3), "wr": round(100 * sum(1 for r in rs if r > 0) / n),
+                   "son": round(savg, 3), "son_n": len(son), "t": t_}
+    for k, v in eski.items():
+        if k not in yeni:
+            yeni[k] = dict(v, n=0)
+    KESICI["d"] = yeni
+    backup.data["kesici"] = yeni
+    if olay and not _SEEDING[0] and BOT_CFG.get("kesici", 1):
+        for k, ne, n, avg in olay:
+            ad = sinyal.SETUP_AD.get(k, k)
+            if ne == "golge":
+                txt = f"Kurgu kesici: {ad} gölgeye alındı"
+                sub = (f"Son {KESICI_ESIK['gun']} günde {n} sinyal, ortalama {_r_(avg)}. Sinyal üretmeye devam eder, "
+                       "bot girmez. Toparlanırsa kendiliğinden açılır.")
+                html = (f"🧭 <b>Kurgu kesici</b>\n<b>{_h(ad)}</b> gölgeye alındı: {n} sinyal, ort. <b>{_r_(avg)}</b>.\n"
+                        "<i>Sinyal üretmeye devam eder, bot girmez. Toparlanırsa kendiliğinden açılır.</i>")
+            else:
+                txt = f"Kurgu kesici: {ad} yeniden açıldı"
+                sub = f"Gölgedeki son {n} sinyalin ortalaması {_r_(avg)}."
+                html = f"🧭 <b>Kurgu kesici</b>\n<b>{_h(ad)}</b> yeniden açıldı: gölgedeki son {n} sinyal ort. <b>{_r_(avg)}</b>."
+            feed_add("bot", "", txt, sub=sub, tone="bilgi", extra={"tg_skip": 1})
+            if tg.ok and PUSH_PREF.get("tg_rapor", 1):
+                tg.send(html, quiet=True, konu="rapor")
+    return yeni
+
+
+def kesici_golge(setup):
+    """Kurgu kesici bu kurguyu gölgeye aldıysa neden metni, değilse None."""
+    if not BOT_CFG.get("kesici", 1) or setup in (BOT_CFG.get("zorla") or []) or setup in (BOT_CFG.get("kapali") or []):
+        return None
+    k = kesici_guncelle().get(setup)
+    if k and k.get("durum") == "golge":
+        return (f"kurgu kesici: {sinyal.SETUP_AD.get(setup, setup)} son {KESICI_ESIK['gun']} günde {k['n']} sinyalde "
+                f"ort. {_r_(k['avg'])} → gölgede (toparlanınca kendiliğinden açılır)")
+    return None
+
+
+def kesici_ozet():
+    d = kesici_guncelle()
+    kap, zor = set(BOT_CFG.get("kapali") or []), set(BOT_CFG.get("zorla") or [])
+    out = []
+    for k, ad in sinyal.SETUP_AD.items():
+        v = d.get(k) or {}
+        mod = "kapali" if k in kap else "acik" if k in zor else "oto"
+        dur = "kapali" if mod == "kapali" else "acik" if mod == "acik" else (v.get("durum") or "acik")
+        if not BOT_CFG.get("kesici", 1) and mod == "oto":
+            dur = "acik"
+        out.append({"k": k, "ad": ad, "n": v.get("n", 0), "avg": v.get("avg"), "wr": v.get("wr"), "son": v.get("son"),
+                    "son_n": v.get("son_n", 0), "mod": mod, "durum": dur, "t": v.get("t", 0)})
+    sira = {"acik": 0, "golge": 1, "kapali": 2}
+    out.sort(key=lambda x: (sira.get(x["durum"], 3), -(x["avg"] if x["avg"] is not None and x["n"] else -9)))
+    return {"aktif": BOT_CFG.get("kesici", 1), "esik": KESICI_ESIK, "liste": out,
+            "acik": sum(1 for x in out if x["durum"] == "acik"), "toplam": len(out)}
+
+
+
+# ----------------------------------------------------------------- 🧪 çıkış laboratuvarı: aynı girişler, 4 çıkış kuralı
+LAB_AD = {"A": "Sabit hedef", "B": "K1 yarı + maliyet + iz", "C": "İz süren stop", "D": "Hızlı: K1'de tamamı"}
+LAB_ACIK = {"A": "Stop ya da sinyalin hedefi (2R, koşanlarda 3R)",
+            "B": "1R'de yarısı satılır, stop maliyete; 1,5R'den sonra zirvenin 1R gerisinden iz; kalan 3R'de",
+            "C": "Yarı yok, hedef yok; 1,5R'den sonra zirvenin 1R gerisinden iz; seans sonunda kapanır",
+            "D": "1R'de tamamı satılır"}
+LAB_MIN = 50
+_LAB = {"t": 0, "d": None}
+
+
+def _lab_rows(kaynak, gun=20):
+    cut = time.time() - gun * 86400
+    out = []
+    for s_ in kaynak:
+        lr = s_.get("lab_r")
+        if not lr or s_.get("r") is None or s_.get("st") not in ("hedef", "stop", "süre") or (s_.get("t") or 0) < cut:
+            continue
+        if any(lr.get(k) is None for k in ("B", "C", "D")):
+            continue
+        out.append({"setup": s_["setup"], "A": s_["r"], **{k: lr[k] for k in ("B", "C", "D")}})
+    return out
+
+
+def _lab_tablo(rows):
+    t = {}
+    for k in "ABCD":
+        v = [r[k] for r in rows]
+        t[k] = {"k": k, "ad": LAB_AD[k], "acik": LAB_ACIK[k], "n": len(v),
+                "avg": round(sum(v) / len(v), 3) if v else None,
+                "wr": round(100 * sum(1 for x in v if x > 0) / len(v)) if v else None,
+                "tot": round(sum(v), 1) if v else 0}
+    return t
+
+
+def lab_ozet():
+    now = time.time()
+    if _LAB["d"] is not None and now - _LAB["t"] < 60:
+        return _LAB["d"]
+    canli = _lab_rows([s_ for s_ in engine.signals if (s_.get("t") or 0) >= ogrenme.LEARN_SINCE])
+    test = _lab_rows(BT["sigs"], 60)
+    kur = {}
+    for r in canli:
+        kur.setdefault(r["setup"], []).append(r)
+    kurgu = []
+    for k, rs in kur.items():
+        if len(rs) < 10:
+            continue
+        tb = _lab_tablo(rs)
+        en = max("ABCD", key=lambda z: tb[z]["avg"] if tb[z]["avg"] is not None else -9)
+        kurgu.append({"k": k, "ad": sinyal.SETUP_AD.get(k, k), "n": len(rs), "en": en,
+                      "r": {z: tb[z]["avg"] for z in "ABCD"}})
+    kurgu.sort(key=lambda x: -x["n"])
+    d = {"canli": _lab_tablo(canli), "test": _lab_tablo(test), "kurgu": kurgu[:8], "min": LAB_MIN,
+         "secili": cikis_sec(), "mod": BOT_CFG.get("cikis_kural", 0)}
+    d["neden"] = _CIKIS_NEDEN[0]
+    _LAB.update(t=now, d=d)
+    return d
+
+
+_CIKIS_NEDEN = [""]
+
+
+def cikis_sec():
+    """Bot yeni pozisyonda hangi çıkış kuralını kullansın. Elle seçilmişse o; otomatikte laboratuvarın en iyisi
+    (canlıda 50+ ya da geçmiş testte 100+ sonuç ve şimdiki kuraldan (B) en az +0,05R iyiyse), yoksa B."""
+    m = int(BOT_CFG.get("cikis_kural", 0) or 0)
+    if 1 <= m <= 4:
+        _CIKIS_NEDEN[0] = "elle seçildi"
+        return "ABCD"[m - 1]
+    for rows, esik, ad in ((_lab_rows([s_ for s_ in engine.signals if (s_.get("t") or 0) >= ogrenme.LEARN_SINCE]), LAB_MIN, "canlı"),
+                           (_lab_rows(BT["sigs"], 60), 2 * LAB_MIN, "geçmiş test")):
+        if len(rows) >= esik:
+            tb = _lab_tablo(rows)
+            en = max("ABCD", key=lambda z: tb[z]["avg"])
+            if en != "B" and tb[en]["avg"] - tb["B"]["avg"] >= 0.05:
+                _CIKIS_NEDEN[0] = f"{ad}: {len(rows)} sonuçta en iyisi {en} ({_r_(tb[en]['avg'])}, B {_r_(tb['B']['avg'])})"
+                return en
+            _CIKIS_NEDEN[0] = f"{ad}: {len(rows)} sonuçta B yeterince iyi (fark < 0,05R)"
+            return "B"
+    _CIKIS_NEDEN[0] = f"yeterli veri yok (canlıda {LAB_MIN}+ sonuç gerekli): şimdiki kural B"
+    return "B"
+
+
+bot.cikis = cikis_sec
+
+
+def lab_tg():
+    d = lab_ozet()
+    out = ["🧪 <b>Çıkış laboratuvarı</b> · aynı girişler, 4 çıkış kuralı"]
+    for ad, tb in (("Canlı (son 20 gün)", d["canli"]), ("Geçmiş test", d["test"])):
+        if not tb["A"]["n"]:
+            continue
+        en = max("ABCD", key=lambda z: tb[z]["avg"])
+        out.append(f"\n<b>{ad}</b> · {tb['A']['n']} sinyal")
+        for z in "ABCD":
+            x = tb[z]
+            out.append(f"{'★' if z == en else '•'} {z} · {_h(x['ad'])}: <b>{_r_(x['avg'])}</b> · %{x['wr']}")
+    if len(out) == 1:
+        out.append("Henüz sonuçlanan sinyal yok; her sinyal kapanınca 4 kural birlikte ölçülür.")
+    out.append(f"\n🤖 Bot şu an <b>{d['secili']} · {_h(LAB_AD[d['secili']])}</b> ile çıkıyor <i>({_h(d['neden'])})</i>")
+    return "\n".join(out)
+
+
 def golge_kurgu(setup):
     """Bot bu kurguya girebilir mi? None: girebilir; metin: neden giremez (sinyal yine gölgede ölçülür)."""
+    kz = kesici_golge(setup)
+    if kz:
+        return kz
+    if setup in (BOT_CFG.get("zorla") or []) and setup != "sicrama":
+        return None
     if setup == "kirilim":
         m = BOT_CFG.get("kirilim_yetki", 1)
         if m == 0:
@@ -3562,6 +3812,216 @@ def simulasyon(p):
 
 
 # ----------------------------------------------------------------- günün fırsatı (açılıştan 15 dk önce)
+
+# ----------------------------------------------------------------- ☀️ Günün Listesi: hareketten ÖNCE doğru 5 hisse
+LISTE = {"gun": None, "t": 0, "liste": [], "durum": "", "gecmis": []}
+LISTE_MAX = 5
+
+
+def fk(x):
+    """Telegram için Türkçe fiyat: 2,21 · 0,4512"""
+    if x is None:
+        return "—"
+    return (f"{x:.4f}" if x < 1 else f"{x:.2f}").replace(".", ",")
+
+
+def fy(x, d=1):
+    if x is None:
+        return "—"
+    return ("+" if x > 0 else "−" if x < 0 else "") + f"%{abs(x):.{d}f}".replace(".", ",")
+
+
+KAT_AD = (("fda", "FDA"), ("onay", "ONAY"), ("ortak", "ORTAKLIK"), ("sözleşme", "SÖZLEŞME"), ("ihale", "İHALE"),
+          ("bilan", "BİLANÇO"), ("gelir", "BİLANÇO"), ("satın", "SATIN ALMA"), ("birleş", "BİRLEŞME"),
+          ("patent", "PATENT"), ("deney", "KLİNİK"), ("klinik", "KLİNİK"), ("yapay", "YAPAY ZEKÂ"), ("kripto", "KRİPTO"),
+          ("bitcoin", "KRİPTO"), ("anlaşma", "ANLAŞMA"), ("sipariş", "SİPARİŞ"))
+
+
+def trk(x):
+    """Türkçe küçük harf (ORTAKLIK → ortaklık, İHALE → ihale)."""
+    return str(x or "").replace("I", "ı").replace("İ", "i").lower()
+
+
+def kat_etiket(metin):
+    m = (metin or "").lower()
+    for k, ad in KAT_AD:
+        if k in m:
+            return ad
+    return "HABER" if m else ""
+
+
+def _liste_seviye(sym, px):
+    """Listeye girecek seviye: aktif plan varsa onun girişi, yoksa öncesi seans tepesi (güzel sayıya yuvarlanmış)."""
+    p = PLAN.planlar.get(sym)
+    if p and p.get("st") == "bekliyor":
+        return p["giris"], p["stop"], p["hedefler"], "plan"
+    lv = levels(sym) or {}
+    pmh = next((x["p"] for x in lv.get("lv", []) if x.get("k") == "pm" and "tepe" in x.get("t", "")), None)
+    pml = next((x["p"] for x in lv.get("lv", []) if x.get("k") == "pm" and "dip" in x.get("t", "")), None)
+    if not pmh or px < pmh * 0.85:
+        return None
+    giris = planmod.guzel(max(pmh, px) * 1.002)
+    a5 = ((lv.get("fx") or {}).get("atr")) or px * 0.01
+    pay = min(max(2.5 * a5, giris * 0.03), giris * 0.08)
+    stop = giris - pay
+    if pml and 0.03 <= (giris - pml) / giris <= 0.08:
+        stop = pml * 0.99
+    r = giris - stop
+    return round(giris, 4), round(stop, 4), [round(giris + i * r, 4) for i in (1, 2, 3)], "pmh"
+
+
+async def gunun_listesi():
+    """Açılıştan ~25 dk önce: haberli, hacimli, seyreltmesiz en iyi 5 hisse + her biri için 'X üstü kırılırsa' seviyesi.
+    Seviyeler plan motoruna verilir (öncelikli izlenir); onayı bot kendi kuralıyla verir."""
+    now = time.time()
+    ad = []
+    for r in scanner.rows():
+        sym = r["sym"]
+        px = _px(sym) or r.get("price")
+        pct = r.get("pct_now") if r.get("pct_now") is not None else r.get("pct")
+        n = r.get("news") or {}
+        if not px or not (0.5 <= px <= 40) or (pct or 0) < 5 or r.get("news_kind") == "kötü":
+            continue
+        dv = (r.get("vol") or 0) * px
+        puan = (min(pct, 80) / 8 + (3 if r.get("news_kind") == "iyi" else 1.5 if n else 0)
+                + ((r.get("ai") or {}).get("skor") or 0) / 40 + (max(0.0, min(2.0, math.log10(dv) - 5)) if dv > 0 else 0))
+        if not n and dv < 300_000:
+            continue
+        sv = _liste_seviye(sym, px)
+        if not sv:
+            continue
+        giris, stop, hed, kay = sv
+        uzak = (giris / px - 1) * 100
+        if uzak > 12 or uzak < -1:
+            continue
+        if uzak > 8:
+            puan -= 1
+        ad.append({"sym": sym, "px": px, "pct": round(pct, 1), "dv": round(dv), "haber": n.get("headline", ""),
+                   "kat": kat_etiket(n.get("headline", "")), "giris": giris, "stop": stop, "hedefler": hed, "kay": kay,
+                   "puan": round(puan, 2), "uzak": round(uzak, 1)})
+    ad.sort(key=lambda x: -x["puan"])
+    ad = ad[:8]
+    # yapay zekâ araştırması (kota varsa): seyreltme / float / katalizör
+    if YZM.hazir and YZM.kalan() >= 20 and ad:
+        async def ara(x):
+            try:
+                y = await asyncio.wait_for(YZM.arastir(x["sym"], "", x["px"], x["pct"]), timeout=90)
+                return x, (y or {}).get("d")
+            except Exception:
+                return x, None
+        for x, d in await asyncio.gather(*(ara(x) for x in ad)):
+            if not d:
+                continue
+            x["yz"] = {"skor": d.get("skor"), "seyreltme": d.get("seyreltme"), "float": d.get("float"),
+                       "katalizor": (d.get("katalizor") or "")[:80], "ozet": (d.get("ozet") or "")[:200]}
+            x["puan"] += (d.get("skor") or 0) / 25 + (1 if d.get("float") == "küçük" else 0)
+            if d.get("seyreltme") == "var":
+                x["puan"] -= 6
+                x["dus"] = "seyreltme riski"
+            if d.get("katalizor") and not x["kat"]:
+                x["kat"] = kat_etiket(d["katalizor"])
+    ad = [x for x in ad if not x.get("dus")]
+    ad.sort(key=lambda x: -x["puan"])
+    secilen = ad[:LISTE_MAX]
+    gun = datetime.now(ET).date().isoformat()
+    for x in secilen:
+        x["t"] = now
+        PLAN.liste_ekle(x["sym"], x["giris"], None, x["hedefler"], x.get("kat") or "liste", now)   # stopu plan motoru tabana göre koyar
+    if LISTE.get("gun") and LISTE["gun"] != gun and LISTE.get("liste"):
+        LISTE["gecmis"] = (LISTE.get("gecmis") or [])[-30:] + [{"gun": LISTE["gun"], "liste": liste_sonuc()}]
+    LISTE.update(gun=gun, t=now, liste=secilen, durum=f"{len(secilen)} hisse · {len(ad)} aday")
+    backup.data["liste"] = {k: LISTE[k] for k in ("gun", "t", "liste", "gecmis")}
+    backup.dirty = True
+    izle_guncelle()
+    return secilen
+
+
+def liste_tg(L):
+    sa = datetime.now(TR).strftime("%H:%M")
+    if not L:
+        return (f"☀️ <b>Günün Listesi</b> · {sa}\n<i>Bugün ölçütleri geçen hisse yok (haber + hacim + seyreltmesiz). "
+                "Bot kendi planlarıyla devam ediyor.</i>")
+    out = [f"☀️ <b>Günün Listesi</b> · {sa}", f"<i>Haberli · hacimli · seyreltmesiz {len(L)} hisse</i>", ""]
+    for i, x in enumerate(L, 1):
+        out.append(f"{i}. <b>{_h(x['sym'])}</b> <code>{fk(x['giris'])}</code> üstü · {_h(trk(x.get('kat') or 'hareket'))}"
+                   f" <i>({fy(x['uzak'])})</i>")
+    det = []
+    for x in L:
+        y = x.get("yz") or {}
+        parca = [f"öncesi seans {fy(x['pct'], 0)}"]
+        if x.get("dv"):
+            parca.append(f"{x['dv'] / 1e6:.1f} M$ hacim".replace(".", ","))
+        if y.get("float") and y["float"] != "bilinmiyor":
+            parca.append(f"float {y['float']}")
+        if y.get("seyreltme") == "yok":
+            parca.append("seyreltme yok")
+        if y.get("skor") is not None:
+            parca.append(f"YZ {y['skor']:+d}")
+        det.append(f"<b>{_h(x['sym'])}</b>: " + _h(", ".join(parca))
+                   + (f"\n{_h((y.get('katalizor') or x.get('haber') or '')[:110])}" if (y.get("katalizor") or x.get("haber")) else ""))
+    out.append("<blockquote expandable>Neden bunlar?\n" + "\n".join(det) + "</blockquote>")
+    out.append("<i>Her seviye kırılınca ayrı mesaj gelir. Bot sadece hacimli, mum kapanışlı kırılıma girer.</i>")
+    return "\n".join(out)
+
+
+def _liste_durum(x):
+    """Listede bir hissenin canlı durumu: bekliyor / yaklaşıyor / kırıldı / sahte / kaçtı / iptal + sonuç R."""
+    sym = x["sym"]
+    px = _px(sym)
+    p = PLAN.planlar.get(sym)
+    son = next((q for q in reversed(PLAN.gecmis) if q["sym"] == sym and (q.get("t") or 0) >= (x.get("t") or 0) - 3600), None)
+    sig = next((s_ for s_ in reversed(engine.signals) if s_["sym"] == sym and s_.get("setup") == "kirilim"
+                and (s_.get("t") or 0) >= (x.get("t") or 0) - 3600), None)
+    st = "bekliyor"
+    if sig:
+        st = "kırıldı"
+    elif p:
+        st = {"onaylı": "kırıldı", "kaçtı": "kaçtı"}.get(p["st"], "bekliyor")
+    elif son:
+        st = {"sahte": "sahte", "iptal": "iptal", "süre": "süre", "onaylı": "kırıldı"}.get(son["st"], "bekliyor")
+    giris = (p or {}).get("giris") or x["giris"]
+    uz = round((giris / px - 1) * 100, 1) if px else None
+    if st == "bekliyor" and uz is not None and uz <= 1.5:
+        st = "yaklasiyor"
+    pos = next((q for q in bot.positions if q["sym"] == sym and sig and q.get("sig") == sig["id"]), None)
+    return {"sym": sym, "px": px, "ch": (summary(sym) or {}).get("ch"), "st": st, "uzak": uz, "giris": giris,
+            "stop": (p or {}).get("stop") or x["stop"], "hedefler": (p or {}).get("hedefler") or x["hedefler"],
+            "kat": x.get("kat"), "haber": x.get("haber"), "yz": x.get("yz"), "pct0": x.get("pct"),
+            "r": sig.get("r") if sig else None, "sig": sig["id"] if sig else None,
+            "bot": (pos or {}).get("st"), "plan": (p or son or {}).get("id")}
+
+
+def liste_sonuc():
+    return [{k: v for k, v in _liste_durum(x).items() if k in ("sym", "st", "r", "giris", "kat")} for x in LISTE.get("liste") or []]
+
+
+def liste_ozet():
+    L = [_liste_durum(x) for x in LISTE.get("liste") or []]
+    # karne: geçmiş günlerde listedeki hisselerin kırılım sonuçları
+    rs = [y["r"] for g in (LISTE.get("gecmis") or []) for y in g.get("liste") or [] if y.get("r") is not None]
+    kirildi = sum(1 for g in (LISTE.get("gecmis") or []) for y in g.get("liste") or [] if y.get("st") == "kırıldı")
+    toplam = sum(len(g.get("liste") or []) for g in (LISTE.get("gecmis") or []))
+    return {"gun": LISTE.get("gun"), "t": LISTE.get("t"), "durum": LISTE.get("durum"), "liste": L,
+            "karne": {"gun": len(LISTE.get("gecmis") or []), "hisse": toplam, "kirildi": kirildi, "n": len(rs),
+                      "avg": round(sum(rs) / len(rs), 3) if rs else None,
+                      "wr": round(100 * sum(1 for r in rs if r > 0) / len(rs)) if rs else None}}
+
+
+async def liste_gonder():
+    try:
+        L = await gunun_listesi()
+    except Exception as e:
+        log.warning("Günün listesi hatası: %s", e)
+        return
+    html = liste_tg(L)
+    feed_add("rapor", "", f"Günün Listesi: {len(L)} hisse", sub=" · ".join(f"{x['sym']} {fp_(x['giris'])} üstü" for x in L)
+             or "Bugün ölçütleri geçen hisse yok", tone="bilgi", extra={"tg_skip": 1})
+    if tg.ok and PUSH_PREF.get("tg_plan", 1):
+        tg.send(html, quiet=False, konu="plan")
+    if PUSH_PREF.get("push_plan") and L:
+        push.notify("☀️ Günün Listesi", " · ".join(f"{x['sym']} {fk(x['giris'])}↑" for x in L), tag="liste", url="/")
+
+
 def gunun_firsati():
     """Haberli koşan hisselerden en güçlü 2'si: öncesi seans tepesinin kırılımı planı."""
     out = []
@@ -3780,7 +4240,7 @@ async def tg_analiz(sym):
     return "\n".join(out), png
 
 
-YARDIM = ("<b>Komutlar</b>\n/planlar — 📐 aktif kırılım planları (\"X kırılırsa giriş\")\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
+YARDIM = ("<b>Komutlar</b>\n/liste — ☀️ günün listesi ve durumu\n/kurgular — 🧭 kurgu kesici: hangi kurgu açık, hangisi gölgede\n/cikis — 🧪 çıkış laboratuvarı (4 çıkış kuralı karşılaştırması)\n/planlar — 📐 aktif kırılım planları (\"X kırılırsa giriş\")\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
           "/analiz QNME — 15 dk analiz ve plan (grafikli)\n/alarm QNME 0.90 — fiyat alarmı\n/alarmlar — kurulu alarmlar\n"
           "/alarmsil QNME — alarmı sil\n/yorum — yapay zekalı piyasa yorumu\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
           "/basla — yeni işlem açmaya devam\n/ogren — bot ne öğrendi (model karnesi)\n"
@@ -3817,7 +4277,7 @@ async def _yetkili(msg):
 
 
 def _ayar_kaydet():
-    backup.data["ayar"] = {**{k: BOT_CFG[k] for k in AYAR_DEF}, **PUSH_PREF, "kapali": BOT_CFG.get("kapali", [])}
+    backup.data["ayar"] = {**{k: BOT_CFG[k] for k in AYAR_DEF}, **PUSH_PREF, "kapali": BOT_CFG.get("kapali", []), "zorla": BOT_CFG.get("zorla", [])}
     backup.dirty = True
     bot.ver += 1
 
@@ -3881,6 +4341,26 @@ async def tg_komut(text, chat, thread=None):
              f"Durum: {_h(YZM.durum)}\nModeller: kısa işler {_h(YZM.hafif or '—')}, araştırma {_h(YZM.agir or scanner.ai_model)}")
     elif cmd in ("planlar", "plan", "kirilim", "kırılım"):
         send(planlar_tg())
+    elif cmd in ("liste", "gunun", "günün"):
+        L = [_liste_durum(x) for x in LISTE.get("liste") or []]
+        if not L:
+            send("☀️ Bugünün listesi henüz yok. Açılıştan ~25 dk önce hazırlanır.")
+        else:
+            ik = {"bekliyor": "⏳", "yaklasiyor": "🟡", "kırıldı": "✅", "sahte": "⚠️", "kaçtı": "🏃", "iptal": "✖️", "süre": "⌛"}
+            send("☀️ <b>Günün Listesi</b>\n" + "\n".join(
+                f"{ik.get(x['st'], '•')} <b>{_h(x['sym'])}</b> <code>{fk(x['giris'])}</code> üstü · şimdi {fk(x['px'])}"
+                + (f" · tetiğe {fy(x['uzak'])}" if x['st'] in ('bekliyor', 'yaklasiyor') and x['uzak'] is not None else "")
+                + (f" · {x['r']:+.2f}R".replace('.', ',') if x.get('r') is not None else "") for x in L))
+    elif cmd in ("kurgular", "kesici", "kurgu"):
+        k = kesici_ozet()
+        dur_ = {"acik": "🟢", "golge": "🌑", "kapali": "⛔"}
+        send("🧭 <b>Kurgu kesici</b> · " + ("açık" if k["aktif"] else "kapalı") + f" · {k['acik']}/{k['toplam']} kurgu işlemde\n"
+             + "\n".join(f"{dur_.get(x['durum'], '•')} {_h(x['ad'])}: " + (f"{x['n']} sinyal, ort. {_r_(x['avg'])}" if x["n"] else "veri yok")
+                         + (" · elle" if x["mod"] != "oto" else "") for x in k["liste"] if x["n"] or x["mod"] != "oto")
+             + f"\n<i>Kural: son {k['esik']['gun']} günde {k['esik']['n']}+ sinyal ve ort. {_r_(k['esik']['kes'])} altı → gölge; "
+               f"gölgedeki son {k['esik']['ac_n']} sinyal 0'ın üstüne çıkınca açılır.</i>")
+    elif cmd in ("cikis", "çıkış", "lab"):
+        send(lab_tg())
     elif cmd in ("neden", "niye"):
         if not arg:
             send("Kullanım: /neden VIVK — bot bu hisseye neden girmedi / girdi")
@@ -4418,6 +4898,25 @@ async def tg_dugme(cq):
     """Paneldeki düğmeye basıldı."""
     data = cq.get("data") or ""
     cid = cq.get("id")
+    if data[:2] == "q:":
+        p_ = next((q for q in list(PLAN.planlar.values()) + PLAN.gecmis[-80:] if q["id"] == data[2:]), None)
+        if not p_:
+            txt = "Plan artık kayıtlı değil."
+        else:
+            tur = " + ".join(planmod.TUR_AD.get(t, t) for t in p_["tur"])
+            txt = (f"{p_['sym']} {fk(p_['giris'])}: {tur} (puan {p_['puan']}). Plan kurulurken fiyat seviyenin "
+                   f"%{p_['uzak']} altındaydı. Onay: hacim ≥1,5× + mum üst %40'ta kapanış.")
+        await tg.api("answerCallbackQuery", callback_query_id=cid, text=txt[:199], show_alert=True)
+        return
+    if data[:2] == "m:":
+        if not await _admin_mi((cq.get("from") or {}).get("id")):
+            await tg.api("answerCallbackQuery", callback_query_id=cid, text="Susturmayı sadece kanal yöneticileri yapabilir.",
+                         show_alert=True)
+            return
+        TG_SUSTUR[data[2:]] = datetime.now(ET).date().isoformat()
+        await tg.api("answerCallbackQuery", callback_query_id=cid, text=f"{data[2:]} bugün için susturuldu (plan ve sinyal mesajı gelmez).",
+                     show_alert=True)
+        return
     if data[:2] in ("n:", "b:"):
         sig_ = engine.by_id.get(data[2:])
         txt = "Sinyal artık kayıtlı değil." if not sig_ else (neden_metni(sig_) if data[0] == "n" else bot_girdi_metni(sig_))
@@ -4933,6 +5432,9 @@ def izle_guncelle():
     """Kırılım planı için izlenecek en fazla 12 hisse: kanalın seviye verdiği, koşup sönen, yükselmeye başlayan."""
     now = time.time()
     adaylar = []
+    if BOT_CFG.get("liste_oncelik", 1):
+        for s_ in PLAN.liste:
+            adaylar.append((120, s_, "günün listesi"))
     for s_ in PLAN.kanal:
         adaylar.append((100, s_, "kanal"))
     for s_, v in scanner.sonen.items():
@@ -4960,7 +5462,113 @@ def izle_guncelle():
     engine.sadece_plan = {s_ for s_ in IZLE if s_ not in scanner.runners and s_ not in SYMBOLS}
 
 
+# ----------------------------------------------------------------- Telegram v4: seviye merdiveni şablonları
+def tg_kisalt(html, n=1024):
+    """Resim yazısı sınırı: önce katlanır ayrıntıyı, sonra son satırları atar (HTML etiketi bölünmez)."""
+    if len(html) <= n:
+        return html
+    h2 = re.sub(r"<blockquote expandable>.*?</blockquote>\n?", "", html, flags=re.S)
+    if len(h2) <= n:
+        return h2
+    sat = h2.split("\n")
+    while sat and len("\n".join(sat)) > n - 2:
+        sat.pop(-2 if len(sat) > 1 else -1)
+    return "\n".join(sat)
+
+
+def v4_veri(ch):
+    """Grafik sözlüğünden v4 (seviye merdivenli) grafik verisi. Çizgisi olmayan grafikler eski çizimle kalır."""
+    if not gorsel or not PUSH_PREF.get("tg_v4", 1):
+        return None
+    if ch.get("v4"):
+        v = dict(ch["v4"])
+    else:
+        L = ch.get("lines") or {}
+        if not (L.get("giris") and (L.get("stop") or L.get("hedef"))):
+            return None
+        k = ch.get("kart") or {}
+        et = k.get("etiket")
+        v = {"giris": L.get("giris"), "stop": L.get("stop"), "hedefler": ch.get("hedefler") or [L.get("hedef")],
+             "durum": "giris" if et == "BOT" else ("al" if k.get("yon", 1) > 0 else "sat"),
+             "baslik": (k.get("ad") or ch.get("sub") or "")[:60], "alt": (k.get("alt") or "")[:44],
+             "neden": ch.get("neden"), "haber": ch.get("haber"), "t_sig": ch.get("sig_t"), "yon": k.get("yon", 1)}
+    sym = ch.get("sym")
+    s_ = summary(sym) or {}
+    v.setdefault("sym", sym)
+    v["last"] = v.get("last") or s_.get("p")
+    if v.get("ch") is None:
+        v["ch"] = s_.get("ch")
+    return v
+
+
+def _yuzde(a, b):
+    return (a / b - 1) * 100 if a and b else None
+
+
+def tg_seviyeler(giris, stop, hedefler, px=None, d=1):
+    """🔵 Giriş / 🔴 Stop / 🟢 Hedef satırları (kopyalanabilir fiyatlar)."""
+    hed = [h for h in (hedefler or []) if h]
+    out = [f"🔵 Giriş  <code>{fk(giris)}</code>" + (f"  <i>{fy(_yuzde(giris, px))}</i>" if px else "")]
+    if stop:
+        out.append(f"🔴 Stop   <code>{fk(stop)}</code>  <i>{fy(_yuzde(stop, giris))}</i>")
+    if hed:
+        out.append("🟢 Hedef  " + " · ".join(f"<code>{fk(h)}</code>" for h in hed[:3]))
+    if stop and hed and giris != stop:
+        rr = abs(hed[min(1, len(hed) - 1)] - giris) / abs(giris - stop)
+        out.append(f"⚖️ Risk/ödül <b>1:{rr:.1f}</b>".replace(".", ","))
+    return "\n".join(out)
+
+
 def _plan_html(p):
+    tur = " + ".join(planmod.TUR_AD.get(t, t) for t in p["tur"])
+    px = _px(p["sym"]) or p.get("px")
+    ek = []
+    if p.get("kanal"):
+        ek.append(f"📣 Seviye @{_h(p['kanal'])} kanalından; onayı bot kendi kuralıyla verir")
+    if p.get("liste"):
+        ek.append("☀️ Günün Listesi'nde")
+    yz = p.get("yz") or {}
+    if yz.get("katalizor"):
+        sey = {"var": "⚠️ seyreltme VAR", "yok": "seyreltme yok"}.get(yz.get("seyreltme"), "seyreltme bilinmiyor")
+        ek.append(f"🧠 {_h(str(yz['katalizor'])[:90])} · {sey}")
+    return (f"⏳ <b>PLAN · #{_h(p['sym'])}</b>  <code>{fk(px)}</code> → <code>{fk(p['giris'])}</code>\n"
+            f"<i>Kırılırsa giriş: {fk(p['giris'])} üstü kapanış + hacim</i>\n\n"
+            + tg_seviyeler(p["giris"], p["stop"], p["hedefler"], px) + "\n"
+            f"<blockquote expandable>📌 {_h(tur)} · puan {str(p['puan']).replace('.', ',')}"
+            + "".join("\n" + x for x in ek) +
+            "\nOnay: hacim ≥1,5× ve mum üst %40'ta kapanmalı. Sonraki mum seviyenin altına dönerse sahte sayılır."
+            "</blockquote>")
+
+
+def plan_grafik_ch(p, durum=None):
+    """Plan mesajının v4 grafiği (durum rozeti: bekliyor / onaylandı / sahte …)."""
+    n = (scanner.runners.get(p["sym"]) or {}).get("news") or {}
+    yz = p.get("yz") or {}
+    haber = yz.get("katalizor") or (n.get("headline") or "")[:80]
+    if yz.get("seyreltme") in ("var", "yok") and haber:
+        haber += " · seyreltme " + yz["seyreltme"]
+    v = gorsel.plan_veri(p, p["sym"], None, durum=durum, haber=haber or None) if gorsel else None
+    if v:
+        v["last"] = None
+        if p.get("ot"):
+            v["t_sig"] = p["ot"]
+    return {"sym": p["sym"], "v4": v, "title": f"#{p['sym']}  kırılım planı {fp_(p['giris'])}",
+            "lines": {"giris": p["giris"], "stop": p["stop"], "hedef": p["hedefler"][1]}}
+
+
+DURUM_AD = {"yeni": "Durum: ⏳ <b>kırılım bekleniyor</b>",
+            "kaçtı": "Durum: 🏃 <b>tek mumda kaçtı</b> · kovalanmıyor, seviyeye geri çekilirse (retest) girilecek",
+            "onaylı": "Durum: ✅ <b>KIRILDI</b>", "sahte": "Durum: ⚠️ <b>SAHTE KIRILIM</b>", "iptal": "Durum: ✖️ <b>iptal</b>",
+            "süre": "Durum: ⌛ <b>süre doldu</b>"}
+PLAN_FOTO = {}          # key → durum: plan resmi yeni rozetle yeniden çizilecek
+TG_SUSTUR = {}          # sym → gün: o gün plan/sinyal mesajı gönderilmez
+
+
+def sustur_mu(sym):
+    return bool(sym) and TG_SUSTUR.get(sym) == datetime.now(ET).date().isoformat()
+
+
+def _plan_html_eski(p):
     tur = " + ".join(planmod.TUR_AD.get(t, t) for t in p["tur"])
     h_ = p["hedefler"]
     kn = f"\n📣 Seviye @{_h(p['kanal'])} kanalından: onayı bot kendi kuralıyla verecek" if p.get("kanal") else ""
@@ -4971,8 +5579,7 @@ def _plan_html(p):
             f"\n<i>Onay: hacimle kırılıp mum üstünde kapanmalı; hemen geri düşerse sahte kırılım sayılır.</i>{kn}")
 
 
-DURUM_AD = {"yeni": "⏳ Kırılım bekleniyor", "kaçtı": "🏃 Kırıldı ama tek mumda kaçtı: kovalanmıyor, seviyeye geri çekilirse (retest) girilecek",
-            "onaylı": "✅ KIRILDI, onaylandı", "sahte": "❌ SAHTE KIRILIM", "iptal": "⌛ İptal", "süre": "⌛ Süre doldu"}
+
 
 
 def plan_olaylari():
@@ -4993,30 +5600,38 @@ def plan_olaylari():
                          f"{' + '.join(planmod.TUR_AD.get(t, t) for t in p['tur'])}",
                      tone="bilgi", extra={"lvl": p["giris"], "stop": p["stop"], "tgt": p["hedefler"][1], "tg_skip_plan": 1,
                                           "plan": p["id"]})
-            if tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK:
+            if tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK \
+                    and not sustur_mu(sym):
                 _PLAN_TG["n"] += 1
                 PLAN_DURUM[key] = DURUM_AD["yeni"]
-                ch = {"sym": sym, "title": f"#{sym}  kırılım planı {fp_(p['giris'])}",
-                      "sub": " + ".join(planmod.TUR_AD.get(t, t) for t in p["tur"]),
-                      "lines": {"giris": p["giris"], "stop": p["stop"], "hedef": p["hedefler"][1]}}
-                tg.send(_plan_html(p), ch, key=key, sym=sym, quiet=True, konu="plan", durum=DURUM_AD["yeni"])
+                tg.send(_plan_html(p), plan_grafik_ch(p), key=key, sym=sym, quiet=not p.get("liste"), konu="plan",
+                        durum=DURUM_AD["yeni"], mk=plan_dugmeler(p))
                 if kucuk and YZM.hazir and BOT_CFG.get("yz_yetki", 1) and YZM.kalan() > 60:
                     _gorev(plan_yz(p))
             continue
         if key not in tg.meta and key not in PLAN_DURUM:
             continue
+        sa = datetime.fromtimestamp(p.get("ot") or p.get("bitis") or time.time(), TR).strftime("%H:%M")
         if ev == "onaylı" and p.get("bitis"):
-            PLAN_DURUM[key] = DURUM_AD["onaylı"] + f" · giriş {fp_(engine.by_id.get(p.get('sig') or '', {}).get('e') or p['giris'])} · kırılım tuttu"
+            e_ = engine.by_id.get(p.get("sig") or "", {}).get("e") or p["giris"]
+            PLAN_DURUM[key] = DURUM_AD["onaylı"] + f" {sa} · giriş <code>{fk(e_)}</code> · kırılım tuttu"
         elif ev == "onaylı":
-            PLAN_DURUM[key] = DURUM_AD["onaylı"] + (" (retest)" if p.get("tip") == "retest" else "")
+            PLAN_DURUM[key] = DURUM_AD["onaylı"] + f" {sa}" + (" (retest)" if p.get("tip") == "retest" else "")
+            PLAN_FOTO[key] = "onaylı"
         elif ev == "sahte":
-            PLAN_DURUM[key] = DURUM_AD["sahte"] + f": {p.get('neden', '')}"
-            if p.get("sig") and tg.ok:
-                tg.send(f"⚠️ <b>#{_h(sym)} SAHTE KIRILIM</b>\n{_h(p.get('neden', ''))}\n"
-                        f"🛑 Stop {fp_(p['stop'])} korunuyor; seviye geri alınmazsa çıkmak mantıklı.", sym=sym,
-                        reply=key, konu="plan", quiet=False)
+            PLAN_DURUM[key] = DURUM_AD["sahte"] + f" · {_h(p.get('neden', ''))}"
+            PLAN_FOTO[key] = "sahte"
+            if tg.ok:
+                bot_ic = p.get("sig") and any(q.get("sig") == p["sig"] and q["st"] in botmod.OPEN_ST for q in bot.positions)
+                tg.send(f"⚠️ <b>SAHTE KIRILIM · #{_h(sym)}</b>\n{_h(p.get('neden', ''))}\n"
+                        + (f"<i>Bot içeride: stop <code>{fk(p['stop'])}</code> korunuyor; seviye geri alınmazsa çıkmak mantıklı.</i>"
+                           if bot_ic else "<i>Bot girmedi · plan kapandı</i>"),
+                        sym=sym, reply=key, konu="plan", quiet=not bot_ic)
+        elif ev == "kaçtı":
+            PLAN_DURUM[key] = DURUM_AD["kaçtı"]
+            PLAN_FOTO[key] = "kaçtı"
         else:
-            PLAN_DURUM[key] = DURUM_AD.get(ev, ev) + (f": {p.get('neden')}" if p.get("neden") else "")
+            PLAN_DURUM[key] = DURUM_AD.get(ev, ev) + (f" · {_h(p.get('neden'))}" if p.get("neden") else "")
     try:
         engine.ver += 1
     except Exception:
@@ -5036,8 +5651,13 @@ def plan_olaylari():
             if not p.get(nm) and px >= h_[i]:
                 p[nm] = 1
                 if tg.ok and f"k:{p['id']}" in tg.meta:
-                    tg.send(f"🎯 <b>#{_h(p['sym'])} {'K1' if i == 0 else 'K2'} geldi</b> · {fp_(h_[i])} "
-                            f"(+{i + 1}R)" + ("\n💡 Stopu girişe çekmek mantıklı." if i == 0 else "\n💰 Kârın bir kısmını almak mantıklı."),
+                    PLAN_DURUM[f"k:{p['id']}"] = DURUM_AD["onaylı"] + f" · 🎯 <b>K{i + 1} geldi</b> <code>{fk(h_[i])}</code>"
+                    PLAN_FOTO[f"k:{p['id']}"] = "k1" if i == 0 else "k2"
+                    pos_ = next((q for q in bot.positions if q.get("sig") == p["sig"]), None)
+                    tg.send(f"🎯 <b>K{i + 1} GELDİ · #{_h(p['sym'])}</b> <code>{fk(h_[i])}</code> <i>(+{i + 1}R)</i>\n"
+                            + (("Bot: yarısını satıyor, stop maliyete çekiliyor." if i == 0 else "Bot: iz süren stop zirvenin 1R gerisinde.")
+                               if pos_ and pos_["st"] in botmod.OPEN_ST else
+                               ("💡 Stopu girişe çekmek mantıklı." if i == 0 else "💰 Kârın bir kısmını almak mantıklı.")),
                             sym=p["sym"], reply=f"k:{p['id']}", konu="plan", quiet=False)
 
 
@@ -5051,12 +5671,11 @@ async def plan_yz(p):
     if not x:
         return
     d = x["d"]
+    p["yz"] = {"katalizor": d.get("katalizor"), "seyreltme": d.get("seyreltme"), "skor": d.get("skor")}
     m = tg.meta.get(f"k:{p['id']}")
     if m and "🧠" not in m["base"]:
-        sey = {"var": "⚠️ VAR", "yok": "yok"}.get(d.get("seyreltme"), "bilinmiyor")
-        m["base"] += f"\n🧠 <b>Yapay zekâ:</b> {_h(str(d.get('katalizor') or '—')[:90])} · seyreltme riski {sey}"
+        m["base"] = _plan_html(p)
         m["durum"] = None
-    p["yz"] = {"katalizor": d.get("katalizor"), "seyreltme": d.get("seyreltme"), "skor": d.get("skor")}
 
 
 async def tg_plan_guncelle():
@@ -5067,9 +5686,25 @@ async def tg_plan_guncelle():
             continue
         text = m["base"] + "\n\n" + d
         mk = m.get("mk") or tg._markup(m.get("sym"))
+        yeni_foto = PLAN_FOTO.pop(key, None)
+        if m.get("photo") and yeni_foto and gorsel:
+            p_ = next((q for q in list(PLAN.planlar.values()) + PLAN.gecmis[-60:] if f"k:{q['id']}" == key), None)
+            png = None
+            if p_:
+                try:
+                    png = await tg._png(plan_grafik_ch(p_, durum=yeni_foto))
+                except Exception as e:
+                    log.debug("Plan resmi yenilenemedi: %s", e)
+            if png:
+                ok_ = await tg_foto_degistir(tg.msg[key], png, text[:1024], mk)
+                if ok_:
+                    m["durum"] = d
+                    if d.startswith(("Durum: ✖️", "Durum: ⌛")) or "tuttu" in d:
+                        PLAN_DURUM.pop(key, None)
+                    await asyncio.sleep(0.4)
+                    continue
         if m.get("photo"):
-            if len(text) > 1024:
-                text = text[:1020] + "…"
+            text = tg_kisalt(text, 1024)
             js = await tg.api("editMessageCaption", chat_id=TG_CHAT, message_id=tg.msg[key], caption=text,
                               parse_mode="HTML", reply_markup=mk)
         else:
@@ -5077,12 +5712,37 @@ async def tg_plan_guncelle():
                               parse_mode="HTML", reply_markup=mk, disable_web_page_preview=True)
         if js.get("ok") or "not modified" in str(js.get("description", "")):
             m["durum"] = d
-        if d.startswith(("❌", "⌛")) or "tuttu" in d:
+        if d.startswith(("Durum: ✖️", "Durum: ⌛", "Durum: ⚠️")):
             PLAN_DURUM.pop(key, None)
         await asyncio.sleep(0.4)
     if len(PLAN_DURUM) > 200:
         for k_ in list(PLAN_DURUM)[:100]:
             PLAN_DURUM.pop(k_, None)
+
+
+async def tg_foto_degistir(mid, png, caption, mk=None):
+    """Plan mesajının resmini (durum rozeti değişti) ve yazısını yerinde günceller."""
+    try:
+        data = {"chat_id": str(TG_CHAT), "message_id": str(mid),
+                "media": json.dumps({"type": "photo", "media": "attach://foto", "caption": caption, "parse_mode": "HTML"})}
+        if mk:
+            data["reply_markup"] = json.dumps(mk)
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post(f"https://api.telegram.org/bot{TG_TOKEN}/editMessageMedia", data=data,
+                             files={"foto": ("grafik.png", png, "image/png")})
+        js = r.json()
+        return bool(js.get("ok")) or "not modified" in str(js.get("description", ""))
+    except Exception as e:
+        log.debug("editMessageMedia: %s", e)
+        return False
+
+
+def plan_dugmeler(p):
+    sym = p["sym"]
+    url = f"https://t.me/{tg.username}?startapp=s_{sym}" if tg.username and MINI_APP else f"{SITE_URL}/?s={sym}"
+    return {"inline_keyboard": [[{"text": "📊 Grafik", "url": url},
+                                 {"text": "🧠 Neden?", "callback_data": f"q:{p['id']}"[:60]},
+                                 {"text": "🔕 Sustur", "callback_data": f"m:{sym}"[:60]}]]}
 
 
 def plan_ozet():
@@ -5363,6 +6023,11 @@ async def lifespan(app):
     dinle.on_msg = dis_oto
     learner.rebuild(engine.signals + BT["sigs"] + dis.as_signals())
     apply_ayar(backup.data.get("ayar"))
+    if isinstance(backup.data.get("liste"), dict):
+        LISTE.update({k: v for k, v in backup.data["liste"].items() if k in ("gun", "t", "liste", "gecmis")})
+        if LISTE.get("gun") == datetime.now(ET).date().isoformat():
+            for x in LISTE.get("liste") or []:
+                PLAN.liste_ekle(x["sym"], x["giris"], None, x["hedefler"], x.get("kat") or "liste", x.get("t"))
     push.load(backup.data)
     tg.load(backup.data)
     feed_seed()
@@ -5618,7 +6283,7 @@ async def ayar_kaydet(request: Request):
     except Exception:
         return JSONResponse({"hata": "geçersiz veri"}, status_code=400)
     apply_ayar(d)
-    backup.data["ayar"] = {**{k: BOT_CFG[k] for k in AYAR_DEF}, **PUSH_PREF, "kapali": BOT_CFG.get("kapali", [])}
+    backup.data["ayar"] = {**{k: BOT_CFG[k] for k in AYAR_DEF}, **PUSH_PREF, "kapali": BOT_CFG.get("kapali", []), "zorla": BOT_CFG.get("zorla", [])}
     backup.dirty = True
     bot.ver += 1
     asyncio.create_task(backup.save(engine, bot))

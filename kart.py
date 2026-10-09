@@ -14,19 +14,25 @@ from PIL import Image, ImageDraw, ImageFilter
 import grafik
 
 TR = ZoneInfo("Europe/Istanbul")
-BG = (8, 17, 15)
-CARD = (14, 21, 24)
-LINE = (27, 60, 49)
-TXT = (242, 245, 247)
-MUT = (143, 176, 165)
-UP = (30, 227, 160)
-UP2 = (155, 255, 218)
-DN = (255, 84, 104)
-GOLD = (242, 193, 78)
-GOLD2 = (255, 224, 138)
-BLUE = (90, 168, 255)
-F = grafik.font
+import gorsel
+
+# v4 paleti (gorsel.py ile aynı): koyu lacivert zemin, yeşil/kırmızı yön, mavi vurgu, altın süper
+BG = gorsel.BG
+CARD = gorsel.PANEL
+LINE = gorsel.GRID
+TXT = gorsel.TXT
+MUT = gorsel.MUT
+UP = gorsel.UP
+UP2 = (134, 239, 172)
+DN = gorsel.DN
+GOLD = gorsel.GOLD
+GOLD2 = (253, 224, 140)
+BLUE = gorsel.ACC
 T = grafik._t
+
+
+def F(size, bold=False):
+    return gorsel.F(size, "b" if bold else "r")
 
 
 def fp(x):
@@ -120,7 +126,7 @@ def _rozet(img, xy, metin, renk1, renk2, yazi=(42, 26, 0), elmas=False, boy=26):
 
 
 def _kutu(d, x, y, w, h, etiket, deger, renk=TXT):
-    d.rounded_rectangle([x, y, x + w, y + h], radius=18, fill=(20, 30, 30), outline=(36, 52, 50), width=2)
+    d.rounded_rectangle([x, y, x + w, y + h], radius=18, fill=gorsel.PANEL2, outline=gorsel.GRID, width=2)
     d.text((x + 18, y + 14), T(etiket), font=F(22), fill=MUT)
     d.text((x + 18, y + h - 14), T(deger), font=F(34, True), fill=renk, anchor="ls")
 
@@ -134,7 +140,7 @@ def _logo(d, x, y, sym, boy=84):
 
 
 def _imza(d, w, y, sag=""):
-    d.text((44, y), "ABD·BOT", font=F(22, True), fill=(127, 167, 154))
+    d.text((44, y), "ABD·BOT", font=F(22, True), fill=gorsel.DIM)
     if sag:
         d.text((w - 44, y), T(sag), font=F(22), fill=MUT, anchor="ra")
 
@@ -157,9 +163,9 @@ def super_kart(d_):
     gl = _zemin(w, h, GOLD, 0.05, 0.0, 0.7)
     img = Image.blend(img, gl, 0.35)
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([6, 6, w - 7, h - 7], radius=36, outline=(70, 60, 30), width=3)
+    d.rounded_rectangle([6, 6, w - 7, h - 7], radius=36, outline=(92, 76, 36), width=3)
     _rozet(img, (44, 40), "SÜPER FIRSAT", GOLD, GOLD2, elmas=True)
-    d.text((w - 44, 58), "ABD·BOT", font=F(24, True), fill=(127, 167, 154), anchor="ra")
+    d.text((w - 44, 58), "ABD·BOT", font=F(24, True), fill=gorsel.DIM, anchor="ra")
     sym = d_["sym"]
     _logo(d, 44, 122, sym)
     d.text((148, 120), T(sym), font=F(64, True), fill=TXT)
@@ -197,7 +203,7 @@ def super_kart(d_):
     sw = (w - 88 - 4 * 14) / 5
     for i in range(5):
         x = 44 + i * (sw + 14)
-        col = UP if i < n_ok else (40, 56, 56)
+        col = UP if i < n_ok else gorsel.GRID
         if i < n_ok:
             gl = Image.new("RGBA", img.size, (0, 0, 0, 0))
             ImageDraw.Draw(gl).rounded_rectangle([x, 636, x + sw, 648], radius=6, fill=UP + (170,))
@@ -213,20 +219,27 @@ def super_kart(d_):
 
 # ------------------------------------------------------------------------------------------ hedef / sonuç
 def sonuc_kart(d_):
+    """v4: seviye merdivenli sonuç kartı (gorsel.py). Merdiven için stop/hedefler yoksa eski kart."""
+    if d_.get("stop") and d_.get("hedefler"):
+        return gorsel.sonuc_kart(d_)
+    return _sonuc_eski(d_)
+
+
+def _sonuc_eski(d_):
     """d_: sym, ad, r, usd, giris, cikis, dk, kazanc(bool), etiket"""
     w, h = 1080, 640
     win = d_.get("usd", 0) > 0
     ana = UP if win else DN
     img = _zemin(w, h, ana, 0.5, -0.05, 1.4)
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([6, 6, w - 7, h - 7], radius=36, outline=(36, 70, 58) if win else (80, 36, 44), width=3)
+    d.rounded_rectangle([6, 6, w - 7, h - 7], radius=36, outline=gorsel.GRID, width=3)
     et = d_.get("etiket") or ("HEDEF" if win else "STOP")
     f = F(28, True)
     tw = d.textlength(T(et), font=f) + 36 + 34
     _rozet(img, (int(w / 2 - tw / 2), 44), et, GOLD if win else DN, GOLD2 if win else (255, 140, 150),
            yazi=(42, 26, 0) if win else (255, 255, 255), boy=28)
     d = ImageDraw.Draw(img)
-    d.text((w / 2, 158), T(f"{d_['sym']} · {d_.get('ad') or ''}")[:46], font=F(32), fill=(191, 233, 216), anchor="mm")
+    d.text((w / 2, 158), T(f"{d_['sym']} · {d_.get('ad') or ''}")[:46], font=F(32), fill=TXT, anchor="mm")
     rt = f"{d_.get('r', 0):+.1f}R".replace(".", ",").replace("-", "−")
     gl = Image.new("RGBA", img.size, (0, 0, 0, 0))
     ImageDraw.Draw(gl).text((w / 2, 290), rt, font=F(150, True), fill=ana + (190,), anchor="mm")
@@ -249,7 +262,7 @@ def gunsonu_kart(d_):
     w, h = 1080, 700
     img = _zemin(w, h, BLUE, 0.1, 0.0, 0.9)
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([6, 6, w - 7, h - 7], radius=36, outline=(34, 52, 70), width=3)
+    d.rounded_rectangle([6, 6, w - 7, h - 7], radius=36, outline=gorsel.GRID, width=3)
     _rozet(img, (44, 40), "GÜN SONU", BLUE, (143, 211, 255), yazi=(3, 20, 42))
     d = ImageDraw.Draw(img)
     d.text((w - 44, 58), T(d_.get("tarih") or ""), font=F(26), fill=MUT, anchor="ra")

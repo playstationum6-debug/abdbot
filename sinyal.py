@@ -51,6 +51,7 @@ SES_NAME = {0: "pre", 1: "regular", 2: "post", 3: "closed"}
 
 # --- Maliyet varsayımları (temkinli) ---
 SLIP = {"regular": 0.0003, "pre": 0.0010, "post": 0.0010}  # tek yön kayma (%0,03 / %0,10)
+LAB = ("B", "C", "D")                                      # çıkış laboratuvarı kuralları (A = sinyalin kendisi)
 FEE = 0.00005                                              # tek yön masraf payı (SEC/FINRA ücretleri vb.)
 
 R_MULT = 2.0             # hedef = 2R
@@ -1281,6 +1282,8 @@ class Engine:
         for sig in self.signals[-400:]:
             if sig["sym"] == sym and sig["st"] in ("bekliyor", "açık"):
                 self._update(sig, tss, bars, now)
+            elif sig["sym"] == sym and sig.get("fill") and not sig.get("lab_ok"):
+                self._lab(sig, tss, bars, now)
 
     def _evaluate(self, sym, tss, bars, k, now):
         x = self._ctx(tss, bars, k)
@@ -1491,6 +1494,83 @@ class Engine:
         sig.update(st=st, x=round(px, 4), xt=int(t), pct=round(pct * 100, 3),
                    r=round(pct / risk_pct, 2) if risk_pct > 0 else 0.0)
 
+    # ------------------------------------------------------------ çıkış laboratuvarı
+    def _lab(self, sig, tss, bars, now):
+        """Aynı girişi 3 ayrı çıkış kuralıyla gölgede izler (A = sinyalin kendi sonucu):
+        B: botun şimdiki kuralı — 1R'de yarısı, stop maliyete; 1,5R'den sonra zirvenin 1R gerisinden iz; kalan 3R'de
+        C: iz süren stop — yarı yok, hedef yok; 1,5R'den sonra zirvenin 1R gerisinden iz, seans sonu kapanır
+        D: hızlı — 1R'de tamamı"""
+        if sig.get("lab_ok"):
+            return
+        if not sig.get("fill") or not sig.get("ft"):
+            if sig.get("st") in ("dolmadı",):
+                sig["lab_ok"] = 1
+            return
+        d, fill = sig["dir"], sig["fill"]
+        R0 = abs(fill - sig["s"])
+        if R0 <= 0:
+            sig["lab_ok"] = 1
+            return
+        L = sig.get("lab")
+        if not L:
+            L = sig["lab"] = {k: {"st": "açık", "stop": sig["s"], "hw": fill, "half": 0, "p1": 0.0} for k in LAB}
+        slip = slip_of(sig)
+        rp = R0 / fill
+        last = sig.get("lab_last", 0)
+
+        def pct(px, kay):
+            if kay:
+                px = px * (1 - d * slip)
+            return d * (px - fill) / fill - 2 * FEE
+
+        def kapat(k, px, kay, t):
+            x = L[k]
+            p = pct(px, kay)
+            tot = 0.5 * x["p1"] + 0.5 * p if x["half"] else p
+            x.update(st="kapandı", r=round(tot / rp, 2), xt=int(t))
+
+        for t in tss:
+            if t < sig["ft"] or t <= last:
+                continue
+            if t >= sig["end"]:
+                break
+            o, hi, lo, c = bars[t][:4]
+            for k, x in L.items():
+                if x["st"] != "açık":
+                    continue
+                if (lo <= x["stop"]) if d > 0 else (hi >= x["stop"]):
+                    kapat(k, o if (o - x["stop"]) * d < 0 and t != sig["ft"] else x["stop"], True, t)
+                    continue
+                x["hw"] = max(x["hw"], hi) if d > 0 else min(x["hw"], lo)
+                br = (x["hw"] - fill) * d / R0
+                if k == "D":
+                    if br >= 1:
+                        kapat(k, fill + d * R0, False, t)
+                    continue
+                if k == "B" and not x["half"] and br >= 1:
+                    x["half"], x["p1"] = 1, pct(fill + d * R0, False)
+                    be = fill + d * fill * 0.0005
+                    if (be - x["stop"]) * d > 0:
+                        x["stop"] = be
+                if br >= 1.5:
+                    ns = x["hw"] - d * R0
+                    if (ns - x["stop"]) * d > 0:
+                        x["stop"] = ns
+                if k == "B" and x["half"] and br >= 3:
+                    kapat(k, fill + d * 3 * R0, False, t)
+            sig["lab_last"] = t
+            sig["lab_c"] = c
+        bitti = all(x["st"] != "açık" for x in L.values())
+        if not bitti and now > sig["end"] + 120:
+            for k, x in L.items():
+                if x["st"] == "açık":
+                    kapat(k, sig.get("lab_c") or sig.get("lc") or fill, True, sig["end"])
+            bitti = True
+        if bitti:
+            sig["lab_ok"] = 1
+            sig["lab_r"] = {k: L[k].get("r") for k in LAB}
+            self.dirty_days.add(sig["day"])
+
     def _update(self, sig, tss, bars, now):
         d, s, h = sig["dir"], sig["s"], sig["h"]
         slip = slip_of(sig)
@@ -1537,12 +1617,19 @@ class Engine:
         if changed:
             self.dirty_days.add(sig["day"])
             self.ver += 1
+        if sig.get("fill") and not sig.get("lab_ok"):
+            try:
+                self._lab(sig, tss, bars, now)
+            except Exception:
+                sig["lab_ok"] = 1
 
     def tick(self, now):
         """Veri gelmese bile süresi dolan sinyalleri kapat."""
         for sig in self.signals[-400:]:
             if sig["st"] in ("bekliyor", "açık") and now > sig["end"] + 120:
                 self._update(sig, [], {}, now)
+            elif sig.get("fill") and not sig.get("lab_ok") and now > sig["end"] + 120:
+                self._lab(sig, [], {}, now)
 
     # ------------------------------------------------------------ kayıt / özet
     def load(self, sigs):
@@ -1573,7 +1660,7 @@ class Engine:
     @staticmethod
     def slim(s):
         out = {k: s.get(k) for k in ("id", "sym", "dir", "setup", "ses", "t", "e", "s", "h", "conf", "conf0", "why", "typ",
-                                     "st", "fill", "ft", "x", "xt", "r", "pct", "runner")}
+                                     "st", "fill", "ft", "x", "xt", "r", "pct", "runner", "lab_r")}
         return out
 
     def stats(self):

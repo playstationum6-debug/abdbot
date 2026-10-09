@@ -107,7 +107,8 @@ def slim(s):
     return {"id": "bt-" + s["id"], "sym": s["sym"], "dir": s["dir"], "setup": s["setup"], "ses": s["ses"], "t": s["t"],
             "day": s["day"], "conf": s["conf"], "st": s["st"], "r": s.get("r"), "f": s.get("f") or {},
             "xt": s.get("xt"), "bt": 1, "rp": round(abs(s["e"] - s["s"]) / s["e"], 5) if s.get("e") else None,
-            **({"plan_tur": s["plan_tur"]} if s.get("plan_tur") else {})}
+            **({"plan_tur": s["plan_tur"]} if s.get("plan_tur") else {}),
+            **({"lab_r": s["lab_r"]} if s.get("lab_r") else {})}
 
 
 def spy_regime(bars, cal):
