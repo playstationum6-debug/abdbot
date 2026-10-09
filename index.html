@@ -464,6 +464,15 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .nedb{display:flex;align-items:center;gap:10px;width:100%;margin:6px 0 10px;padding:11px 14px;border-radius:14px;border:1px solid var(--line);background:var(--card);color:var(--tx);font-weight:600;font-size:14px;text-align:left}
 .nedb svg{width:20px;height:20px;color:var(--up)}.nedb i{margin-left:auto;font-style:normal;color:var(--mut);font-size:18px}
 .nedr{padding:10px 0;border-bottom:1px solid #142024;font-size:14px;line-height:1.45}.nedr:last-child{border-bottom:0}
+.nedg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0 10px}.nedg .nedb{margin:0;font-size:13px;padding:11px 12px}
+.yzb svg{color:#B9A0FF!important}.yzb{border-color:rgba(185,160,255,.35)!important;background:linear-gradient(180deg,rgba(185,160,255,.10),rgba(185,160,255,.03))!important}
+.yzq{display:flex;gap:8px;margin-top:12px}.yzq .btnw{width:auto;margin:0;padding:0 18px}
+.yzm{font-size:14px;line-height:1.55;white-space:pre-wrap}.yzk{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.yzk a{font-size:12px;color:#9FC3FF;border:1px solid var(--line);border-radius:99px;padding:4px 10px;text-decoration:none;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.yzara{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}.yzara div{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 12px}.yzara small{display:block;color:var(--mut);font-size:11px}.yzara b{font-size:14px}
+.yzc{border-radius:18px;padding:14px;background:linear-gradient(160deg,rgba(185,160,255,.10),var(--card) 60%);border:1px solid rgba(185,160,255,.3)}
+.yzc .st{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px}.yzc .st i{width:9px;height:9px;border-radius:50%}
+.yzline{margin-top:8px;font-size:12.5px;padding:7px 10px;border-radius:10px;background:rgba(185,160,255,.08);border:1px solid rgba(185,160,255,.25)}
+.yzline b{color:#C9B5FF}
 /* ---- ana ekran v2 ---- */
 .achart{height:200px}
 .achart .ahd{position:absolute;left:2px;top:0;display:flex;gap:8px;align-items:baseline;font-size:12.5px;color:var(--mut);z-index:2}.achart .ahd b{font-size:13px;font-variant-numeric:tabular-nums}
@@ -648,7 +657,8 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
     <div class="px" id="qpx">—</div><div class="ch" id="qch"></div>
     <div class="seg" id="tf"><button class="chip3" data-m="1">1dk</button><button class="chip3" data-m="5">5dk</button><button class="chip3" data-m="15">15dk</button><button class="chip3" data-m="D">1G</button></div>
   </div>
-  <button class="nedb" id="nedB"><svg><use href="#i-bot"/></svg>Bot bu hisseye neden girmedi?<i>›</i></button>
+  <div class="nedg"><button class="nedb yzb" id="yzB"><svg><use href="#i-brain"/></svg>Yapay zekâ analizi<i>›</i></button>
+  <button class="nedb" id="nedB"><svg><use href="#i-bot"/></svg>Bot neden girmedi?<i>›</i></button></div>
   <div class="warn" id="warn"></div>
   <div class="cwrap" id="cwrap">
     <div class="tools" id="tools"><button class="chip3" data-k="line">Çizgi</button><button class="chip3" data-k="sr">Destek/Direnç</button><button class="chip3" data-k="fx">Formasyon</button><button class="chip3" data-k="zn">Alıcı bölgesi</button><button class="chip3" data-k="kn">Kanal</button><button class="chip3" data-k="fvg">FVG</button><button class="chip3" data-k="yp">Yapı</button><button class="chip3" data-k="fib">Fibonacci</button><button class="chip3" data-k="rsi">RSI</button><button class="chip3" data-k="macd">MACD</button><button class="chip3" data-k="vp">Hacim profili</button><button class="chip3" data-k="vol">Hacim ort.</button><button class="chip3" data-k="vwap">VWAP</button><button class="chip3" data-k="ema">EMA 9/21</button><button class="chip3" data-k="e50">EMA 20/50</button><button class="chip3" data-k="kl">Gün seviyeleri</button><button class="chip3" data-k="mk">Sinyaller</button><button class="chip3 fsb" data-k="fs">Tam ekran</button></div>
@@ -780,6 +790,8 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
   <div id="ayBilgi"></div>
   <h3>Bot ayarları</h3>
   <div class="card" style="padding:2px 14px" id="ayf">
+    <div class="fld" style="flex-wrap:wrap"><label>🧠 Yapay zekâ karar yetkisi<small>Otomatik: kararları önce gölgede ölçülür, karnesi kanıtlanınca (40+ sonuç, AL/PAS farkı +0,15R) botu etkiler</small></label>
+      <input type="hidden" data-k="yz_yetki" id="yzYet"><div class="seg2 yzseg" id="yzSeg" style="width:100%;margin:8px 0 2px"><button class="ff" data-v="0">Kapalı</button><button class="ff" data-v="1">Otomatik</button><button class="ff" data-v="2">Hep karar versin</button></div></div>
     <div class="fld"><label>Yeni işlem aç<small>Kapatırsan açık pozisyonlar yine yönetilir, sadece yeni işlem açılmaz</small></label><button class="tg" data-k="yeni_islem"></button></div>
     <div class="fld"><label>Botun parası ($)<small>Kâr/zararla büyür ya da küçülür</small></label><input type="number" inputmode="decimal" data-k="capital"></div>
     <div class="fld"><label>İşlem başı en fazla ($)<small>Küçük tutarsan aynı anda daha çok işlem açılır</small></label><input type="number" inputmode="decimal" data-k="notional"></div>
@@ -852,7 +864,9 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 <!-- ÖĞRENME -->
 <section class="tab" id="t-ogren">
   <div class="lt">Öğrenme</div>
-  <div class="sh" style="margin-top:4px"><b>Karar Denetçisi</b><span id="denT"></span></div>
+  <div class="sh" style="margin-top:4px"><b>🧠 Yapay Zekâ</b><span id="yzD"></span></div>
+  <div id="yzK"></div>
+  <div class="sh"><b>Karar Denetçisi</b><span id="denT"></span></div>
   <div id="denK"><div class="card meta">Karne hesaplanıyor (açılıştan ~2 dk sonra).</div></div>
   <div class="sh"><b>Modül karnesi</b><span>ayırt gücü</span></div>
   <div class="card" style="padding:4px 14px" id="denM"></div>
@@ -985,6 +999,10 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
   <button class="mitem" data-go="rehber"><svg><use href="#i-learn"/></svg><span>Nasıl çalışır<small>R, VWAP, RSI, formasyonlar ve botun kuralları, sade Türkçe</small></span></button>
   <button class="mitem" data-go="ayar"><svg><use href="#i-gear"/></svg><span>Ayarlar ve bildirimler<small>Sermaye, risk, eşikler, telefon bildirimleri</small></span></button>
 </div></div>
+<div class="sheet" id="yzS"><div class="in"><button class="x" data-close>×</button><div class="lt" id="yzT" style="margin-top:4px">🧠 Yapay zekâ</div>
+  <div id="yzL"></div>
+  <div class="yzq"><input id="yzIn" class="gin" placeholder="Bir şey sor: bu hisse neden yükseliyor?" maxlength="300"><button class="btnw" id="yzGo">Sor</button></div>
+  <div class="meta" style="margin-top:8px">Gemini internette arar, botun verisine bakar. Yatırım tavsiyesi değildir. Telegram'da <b>/yz HİSSE</b> ve <b>/sor soru</b>.</div></div></div>
 <div class="sheet" id="nedS"><div class="in"><button class="x" data-close>×</button><div class="lt" id="nedT" style="margin-top:4px">Bot neden girmedi?</div><div id="nedL"></div>
   <div class="meta" style="margin-top:10px">Aynısını Telegram'da <b>/neden HİSSE</b> yazarak da sorabilirsin.</div></div></div>
 <div class="sheet" id="rp"><div class="in"><button class="x" data-close>×</button><div id="rph"></div><div id="rpc"></div><div id="rpb"></div>
@@ -1478,7 +1496,8 @@ function sigCard(s){const al=s.dir>0;
     <div class="hr"><small>${s.conf}/100 · ${tTR(s.t+60).slice(-5)}</small>${sag}</div></div>
   <div class="g3"><span>Giriş<b>${fp(s.e)}</b></span><span>Stop<b>${fp(s.s)}</b></span><span>Hedef<b>${fp(s.h)}</b></span></div>
   ${s.den?`<div class="meta" style="margin-top:8px">${esc(s.den.neden)}</div>`:''}
-  <ul>${s.den?'<li style="list-style:none;margin-left:-18px">'+denMods(s.den)+'</li>':''}${(s.why||[]).map(w=>'<li>'+esc(w)+'</li>').join('')}<li style="list-style:none;margin:8px 0 0 -18px"><span class="go" data-sym="${esc(s.sym)}">Grafiği aç →</span></li></ul></div>`}
+  ${s.yz&&(s.yz.karar==='AL'||s.yz.karar==='PAS')?`<div class="yzline">🧠 <b>Yapay zekâ: ${s.yz.karar==='AL'?'AL':'PAS GEÇ'}</b> · olasılık %${s.yz.p} (eşik %${s.yz.esik}) · ${esc(s.yz.neden||'')}</div>`:''}
+  <ul>${s.den?'<li style="list-style:none;margin-left:-18px">'+denMods(s.den,s.yz)+'</li>':''}${(s.why||[]).map(w=>'<li>'+esc(w)+'</li>').join('')}<li style="list-style:none;margin:8px 0 0 -18px"><span class="go" data-sym="${esc(s.sym)}">Grafiği aç →</span></li></ul></div>`}
 const DKAD={AL:'ONAYLI',BEKLE:'BEKLE',PAS:'PAS GEÇ'};
 const ADLAR={SPY:'S&P 500 ETF',QQQ:'Nasdaq 100 ETF',IWM:'Russell 2000 ETF',DIA:'Dow Jones ETF',TQQQ:'Nasdaq 3x ETF',SQQQ:'Nasdaq −3x ETF',SOXL:'Yarı iletken 3x ETF',NVDA:'NVIDIA',TSLA:'Tesla',AAPL:'Apple',
 MSFT:'Microsoft',AMZN:'Amazon',META:'Meta Platforms',GOOGL:'Alphabet',AMD:'AMD',AVGO:'Broadcom',PLTR:'Palantir',NFLX:'Netflix',INTC:'Intel',MU:'Micron',COIN:'Coinbase',MSTR:'MicroStrategy',HOOD:'Robinhood',SOFI:'SoFi',
@@ -1487,8 +1506,9 @@ RIVN:'Rivian',BABA:'Alibaba',PYPL:'PayPal',DIS:'Disney',WMT:'Walmart',COST:'Cost
 function adi(x,yedek){return ADLAR[x]||yedek||''}
 const MODAD={firsat:'Fırsat Avcısı',teknik:'Teknik Analist',haber:'Haber Analisti',risk:'Risk Yöneticisi',piyasa:'Piyasa Analisti'};
 const MKAD={olumlu:'OLUMLU','nötr':'NÖTR',olumsuz:'OLUMSUZ',veto:'VETO','küçült':'KÜÇÜLT'};
-function denMods(d){return '<div class="mods">'+Object.keys(MODAD).filter(k=>d.mod&&d.mod[k]).map(k=>{const m=d.mod[k];
-  return `<div class="modr"><b>${MODAD[k]}</b><span>${esc(m.n)}</span><i class="mk2 mk-${m.k}">${MKAD[m.k]||m.k}</i></div>`}).join('')+'</div>'}
+function denMods(d,yz){return '<div class="mods">'+Object.keys(MODAD).filter(k=>d.mod&&d.mod[k]).map(k=>{const m=d.mod[k];
+  return `<div class="modr"><b>${MODAD[k]}</b><span>${esc(m.n)}</span><i class="mk2 mk-${m.k}">${MKAD[m.k]||m.k}</i></div>`}).join('')+
+  (yz&&(yz.karar==='AL'||yz.karar==='PAS')?`<div class="modr"><b>🧠 Yapay Zekâ</b><span>olasılık %${yz.p} · eşik %${yz.esik}</span><i class="mk2 mk-${yz.karar==='AL'?'olumlu':'olumsuz'}">${yz.karar==='AL'?'AL':'PAS'}</i></div>`:'')+'</div>'}
 function renderDenetci(){const L=learn||{},k=L.den,p=L.perf||{};
   if(k){const kr=k.kararlar||{},c=x=>(kr[x]||{});$('denT').textContent=`${k.n} sinyal`;
     $('denK').innerHTML=superKarne()+`<div class="sh"><b>Denetçi kararları</b></div><div class="dkk">${['AL','BEKLE','PAS'].map(x=>`<div><small class="${x==='AL'?'up':x==='PAS'?'dn':''}" style="${x==='BEKLE'?'color:var(--wa)':''}">${DKAD[x]}</small><b class="${cls(c(x).avg)}">${c(x).avg==null?'—':fR(c(x).avg)}</b><span>${c(x).n||0} sinyal · %${c(x).wr==null?'—':c(x).wr}</span></div>`).join('')}</div>
@@ -1589,7 +1609,7 @@ function renderHours(){const H=(learn&&learn.saat)||[];if(!H.length){$('hrs').in
 function renderHava(){const H=status.hava||MKT.hava;if(!H||!H.etiket||H.etiket==='bilinmiyor'){for(const id of['havaA','havaK'])$(id).style.display='none';return}
   const c=H.etiket==='Güçlü'?'g':H.etiket==='Riskli'?'r':'n',t=`<i></i><span><b>Piyasa havası: ${esc(H.etiket)}</b> · ${esc((H.neden||[]).join(', '))}${H.etiket==='Riskli'?' · bot lotu küçültüyor':''}</span>`;
   for(const id of['havaA','havaK']){const e=$(id);e.className='hava '+c;e.innerHTML=t;e.style.display='flex'}}
-function renderLearn(){try{renderDenetci()}catch(e){}renderBT();try{renderKT()}catch(e){}renderHours();const T=sigStats.find(r=>r.k==='Tümü'),n=T?T.n:0;$('pn').textContent=n;$('pbar').style.width=Math.min(100,n)+'%';
+function renderLearn(){try{renderYZ()}catch(e){}try{renderDenetci()}catch(e){}renderBT();try{renderKT()}catch(e){}renderHours();const T=sigStats.find(r=>r.k==='Tümü'),n=T?T.n:0;$('pn').textContent=n;$('pbar').style.width=Math.min(100,n)+'%';
   $('resnote').textContent=n<100?`Henüz ${n}/100 sonuç var. En az 100 işlem görmeden bu sayfadan sonuç çıkarma.`:'';$('resnote').style.display=n<100?'block':'none';
   const main=new Set(['Tümü','Piyasa öncesi','Normal seans','Piyasa sonrası','Güven ≥ 70','Güven < 70','Koşan küçük hisseler']);
   tbl('res',['Grup','Adet','Kazanma','Ort. R','Toplam R','Dolmadı','Açık'],sigStats.length?sigStats.map(r=>`<tr class="${main.has(r.k)?'main':''}"><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr.toFixed(0)+'%'}</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td class="${cls(r.tot)}">${fR(r.tot,1)}</td><td>${r.nf}</td><td>${r.open}</td></tr>`).join(''):'<tr><td colspan="7">Henüz sonuç yok.</td></tr>');
@@ -2072,6 +2092,30 @@ function renderKT(){const el=$('ktc');if(!el)return;const K=(learn&&learn.kosan)
   el.innerHTML=h}
 $('ktc').addEventListener('click',async e=>{if(!e.target.closest('#ktGo'))return;try{await postJSON('/api/kosantest',{});if(learn&&learn.kosan)learn.kosan.istek=1;renderKT();toast('Koşan hisse testi sıraya alındı: normal seans dışında başlar')}catch(x){toast('Başlatılamadı: '+esc(x.message),'sat')}});
 
+// ---------------- 🧠 yapay zekâ
+let yzSym='';
+function yzGoster(j,baslik){const k=(j.kaynak||[]).filter(x=>x&&x.u);const a=j.ara;
+  $('yzL').innerHTML=(a?`<div class="yzara"><div><small>Katalizör</small><b>${esc(a.katalizor||'—')}</b></div><div><small>Seyreltme riski</small><b class="${a.seyreltme==='var'?'dn':a.seyreltme==='yok'?'up':''}">${esc(a.seyreltme||'—')}</b></div></div>`:'')+
+    `<div class="yzm">${esc(j.metin||'')}</div>`+(k.length?`<div class="yzk">${k.slice(0,5).map(x=>`<a href="${esc(x.u)}" target="_blank" rel="noopener">🔗 ${esc(x.t||'kaynak')}</a>`).join('')}</div>`:'')}
+async function yzAc(sym,q){yzSym=sym;$('yzT').textContent=q?'🧠 Yapay zekâya sor':`🧠 #${sym} · yapay zekâ analizi`;$('yzS').classList.add('on');
+  $('yzL').innerHTML=`<div class="meta" style="padding:14px 0">${q?'Düşünüyor…':'İnternette araştırıyor ve botun verisine bakıyor… (10–30 sn)'}</div>`;
+  try{yzGoster(await postJSON('/api/yz',q?{s:sym,q}:{s:sym}))}catch(e){$('yzL').innerHTML=empty('Alınamadı: '+esc(e.message))}}
+$('yzB').addEventListener('click',()=>yzAc(cur));
+$('yzGo').addEventListener('click',()=>{const q=$('yzIn').value.trim();if(q){yzAc(yzSym||cur,q);$('yzIn').value=''}});
+$('yzIn').addEventListener('keydown',e=>{if(e.key==='Enter')$('yzGo').click()});
+function renderYZ(){const el=$('yzK');if(!el)return;const Y=(learn&&learn.yz)||null;if(!Y){el.innerHTML='';return}
+  const k=Y.karne||{al:{},pas:{}},renk=!Y.hazir?'var(--dn)':Y.aktif?'var(--up)':'var(--wa)';
+  const durum=!Y.hazir?"Kapalı: Render Environment'a GEMINI_API_KEY girilmeli":Y.yetki===0?'Kapalı (Ayarlar)':Y.aktif?'Karar veriyor: AL demezse bot girmez':`Gölgede öğreniyor: ${k.n||0}/${k.min||40} sonuç`;
+  $('yzD').textContent=Y.hazir?`bugün ${(Y.gunluk||0)-(Y.kalan||0)}/${Y.gunluk||0} çağrı`:'';
+  el.innerHTML=`<div class="yzc"><div class="st"><i style="background:${renk};box-shadow:0 0 10px ${renk}"></i>${esc(durum)}</div>
+    <div class="meta" style="margin-top:6px">Her uygun sinyalde internette araştırır (haber, katalizör, seyreltme), botun rakamlarını ve 5 modülü okur, hedefe ulaşma olasılığını tahmin eder. Kararı öğrenme modeline de özellik olarak girer.</div>
+    <div class="skb" style="margin-top:12px"><div><small>YZ AL DEDİ</small><b class="${cls(k.al.avg)}">${k.al.avg==null?'—':fR(k.al.avg)}</b><span>${k.al.n||0} sinyal${k.al.wr!=null?' · %'+k.al.wr:''}</span></div>
+      <div><small>YZ PAS DEDİ</small><b class="${cls(k.pas.avg)}">${k.pas.avg==null?'—':fR(k.pas.avg)}</b><span>${k.pas.n||0} sinyal</span></div>
+      <div class="${k.kanit?'gold':''}"><small>AYIRT GÜCÜ</small><b class="${cls(k.guc)}">${k.guc==null?'—':fR(k.guc)}</b><span>${k.kanit?'kanıtlandı ✓':'hedef +'+trn(k.esik||.15,2)+'R'}</span></div></div>
+    ${Y.ders?`<div class="sh" style="margin-top:12px"><b style="font-size:14px">Son gün sonu dersi</b><span>${tTR(Y.ders.t)}</span></div><div class="yzm meta">${esc(Y.ders.metin)}</div>`:''}
+    ${Y.hata?`<div class="meta" style="margin-top:8px">Son hata: ${esc(Y.hata)}</div>`:''}${Y.hazir&&!Y.arama?'<div class="meta" style="margin-top:4px">Google arama aracı bu anahtarla kullanılamadı: aramasız çalışıyor.</div>':''}</div>`}
+$('yzSeg').addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(!b)return;$('yzYet').value=b.dataset.v;$('yzYet').dataset.dirty=1;for(const x of $('yzSeg').children)x.classList.toggle('on',x===b)});
+
 $('dmenu').addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b)showTab(b.dataset.go)});
 $('t-ayar').addEventListener('click',e=>{const g=e.target.closest('.ayr[data-go]');if(g){showTab(g.dataset.go);return}const a=e.target.closest('[data-ay]');if(!a)return;
   const d=botD||{},ac=d.account||{},k=d.capital||{};
@@ -2084,6 +2128,7 @@ const AYK=['capital','notional','risk_usd','max_open','sektor_max','daily_loss',
 function renderAyar(){const c=(botD&&botD.cfg)||{};
   for(const i of $('ayf').querySelectorAll('input'))if(document.activeElement!==i&&!i.dataset.dirty)i.value=c[i.dataset.k]!=null?c[i.dataset.k]:'';
   $('ayf').querySelector('[data-k=yeni_islem]').classList.toggle('on',c.yeni_islem!==0);
+  {const v=String($('yzYet').value!==''?$('yzYet').value:(c.yz_yetki!=null?c.yz_yetki:1));for(const x of $('yzSeg').children)x.classList.toggle('on',x.dataset.v===v)}
   for(const b of $('ayf').querySelectorAll('.tg[data-k]'))b.classList.toggle('on',c[b.dataset.k]!==0);
   const P=status.push||{},pref=P.pref||{};
   for(const b of document.querySelectorAll('[data-p]'))b.classList.toggle('on',!!pref[b.dataset.p]);

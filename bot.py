@@ -265,6 +265,17 @@ class Bot:
                 return
         if den and self.cfg.get("denetci", 1):
             den_lot = den.get("lot", 1.0)
+        # Yapay zekâ: karar yetkisi varsa (karnesi kanıtlandı ya da Ayarlar'dan açıldı) kararını bekle / uygula
+        if getattr(self, "yz_kapi", None):
+            try:
+                yk = self.yz_kapi(sig)
+            except Exception:
+                yk = None
+            if yk == "bekle":
+                self.note("yz", f"{head} — yapay zekâ değerlendiriyor (internet araştırması + karar, en fazla 45 sn)", sym)
+                return
+            if yk and yk.startswith("PAS"):
+                return skip("Yapay zekâ PAS GEÇ — " + yk[4:])
         # Öğrenme filtresi (denetçi kapalıysa eski davranış): model bu sinyali zayıf dilimde görüyorsa işlem açma.
         _veto = getattr(self.learner, "veto", None)
         if _veto and not (den and self.cfg.get("denetci", 1)) and self.cfg.get("ogren_filtre", 1) and not sig.get("runner"):
@@ -283,8 +294,11 @@ class Bot:
         if den_lot != 1.0:
             mult *= den_lot
             mwhy = (mwhy + ", " if mwhy else "") + f"denetçi lotu ×{den_lot:g}"
-        if onayli:
+        if onayli and not sig.get("_yz_tekrar"):
             mwhy = (mwhy + ", " if mwhy else "") + "BEKLE sonrası fiyat onayı geldi"
+        y_ = sig.get("yz") or {}
+        if y_.get("karar") == "AL":
+            mwhy = (mwhy + ", " if mwhy else "") + f"yapay zekâ AL (olasılık %{y_.get('p')}, eşik %{y_.get('esik')})"
         if self.extra_mult:
             try:
                 em, enote = self.extra_mult(sig)

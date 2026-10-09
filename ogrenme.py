@@ -34,13 +34,13 @@ REFIT_SEC = 180       # en sık 3 dakikada bir modeli baştan kur
 SINAV_SEC = 1800      # kendi kendine sınav en sık 30 dakikada bir
 BOT_MIN_N = MIN_GROUP  # (eski adıyla uyumluluk)
 
-MODEL_FEATS = ("tod", "spy", "mtf", "volr", "vwap", "ema50", "trend")
+MODEL_FEATS = ("tod", "spy", "mtf", "volr", "vwap", "ema50", "trend", "yz", "yz_ara")   # yz: yapay zekânın kararı
 
 SETUP_AD = {
     "orb": "Açılış aralığı kırılımı", "vwap": "VWAP geri alma", "hacim": "Hacimli seviye kırılımı",
     "trend": "Trend geri çekilme", "gap": "Boşluk devamı", "uz_seviye": "Seviye kırılımı (uzatılmış)",
     "uz_kirilim": "Seans aralığı kırılımı (uzatılmış)", "uz_vwap": "Seans VWAP geri alma (uzatılmış)",
-    "kosu": "Haberli momentum kırılımı", "geri": "Momentum ilk geri çekilme",
+    "kosu": "Haberli momentum kırılımı", "geri": "Momentum ilk geri çekilme", "sicrama": "Dikey sıçrama sonrası geri çekilme",
     "itki": "Hacimli itki (1 dk scalp)", "vwap_sek": "VWAP sekmesi (1 dk scalp)",
     "hizli": "Haberli hızlı kırılım (anlık)",
     "formasyon": "Formasyon kırılımı", "talep": "Alıcı bölgesinden dönüş",

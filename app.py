@@ -56,6 +56,7 @@ import sektor
 import ikon
 import ogrenme
 import sinyal
+import yz as yzmod
 import tarayici
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -108,6 +109,7 @@ BOT_CFG = {
     "yer_min_guven": 85,
     "eko_dur": 1,                                             # yüksek etkili ekonomik veri saatinde yeni işlem yok
     "kapali": [],                                             # kapatılan kurgular: sinyal üretilir (öğrenme sürer), bot girmez
+    "yz_yetki": 1,                                            # yapay zekâ: 0 kapalı · 1 karnesi kanıtlanınca karar verir · 2 hep karar verir
 }
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
@@ -604,10 +606,15 @@ def den_ctx(sig):
     except Exception:
         kalan = None
     return {"model": model, "secici": ogrenme.SECICI, "spread": scanner.spread_of(sig["sym"], ses=sig.get("ses")),
+            "yz_ara": YZM.arastirma(sig["sym"]),
             "kalan": kalan, "risk_usd": BOT_CFG.get("risk_usd"), "hava": HAVA.get("etiket")}
 
 
 def den_hesapla(sig):
+    try:
+        sig.setdefault("f", {})["yz_ara"] = YZM.ara_kova(YZM.arastirma(sig["sym"]))
+    except Exception:
+        pass
     den = denetci.degerlendir(sig, den_ctx(sig))
     try:
         if den.get("sinif") and not sig.get("dis") and PUSH_PREF.get("tg_super", 1) >= 0:
@@ -691,6 +698,7 @@ scanner = tarayici.Scanner(ALPACA_KEY, ALPACA_SECRET, SYMBOLS, min_price=RUN_MIN
 scanner.sec_ua = os.getenv("SEC_UA", "abdbot paper-trading bot")
 scanner.keep = lambda sym: any(p["sym"] == sym for p in bot.open_positions())
 bot = botmod.Bot(engine, learner, store, cal, ET, ALPACA_KEY, ALPACA_SECRET, log, BOT_CFG)
+YZM = yzmod.YZ(scanner, log)          # Gemini + Google arama (anahtar: Render Environment → GEMINI_API_KEY)
 
 
 def runner_pct(sym):
@@ -1265,7 +1273,7 @@ AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd"
             "min_conf_ext": (int, 0, 100), "yeni_islem": (int, 0, 1), "sektor_max": (int, 0, 20),
             "yarim_kapat": (int, 0, 1), "yarim_r": (float, 0.5, 3), "kalan_r": (float, 1, 8),
             "tg_min_guven": (int, 0, 100), "yer_ac": (int, 0, 1), "yer_min_guven": (int, 50, 100),
-            "eko_dur": (int, 0, 1)}
+            "eko_dur": (int, 0, 1), "yz_yetki": (int, 0, 2)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1,
              "tg_kosan": 1, "tg_tablo": 1, "tg_uyari": 1,
@@ -2060,6 +2068,9 @@ async def send_sig(cl):
                              "den": DEN["karne"], "perf": denetci.performans(bot.positions), "strat": strateji_ozet(), "super": super_ozet(),
                              "kosan": {k: KT[k] for k in ("sum", "t", "running", "prog", "hata", "istek")},
                              "sicrama": golge_kurgu("sicrama"),
+                             "yz": {"durum": YZM.durum, "kalan": YZM.kalan(), "gunluk": yzmod.GUNLUK, "karne": yz_karne(),
+                                    "yetki": BOT_CFG.get("yz_yetki", 1), "aktif": yz_yetki(), "hazir": YZM.hazir,
+                                    "ders": YZM.ders, "hata": YZM.son_hata, "arama": YZM.arama},
                              "bt": {k: BT[k] for k in ("sum", "t", "running", "bekliyor", "prog", "hata")}}})
 
 
@@ -2164,6 +2175,7 @@ async def signal_loop():
                              "AL" if sig["dir"] > 0 else "SAT", sig["setup"], sig["conf"], sig["e"], sig["s"], sig["h"])
                     feed_signal(sig)
                     bot.consider(sig, now)
+                    yz_planla(sig)
             except Exception as e:
                 log.warning("Sinyal hatası %s: %s", sym, e)
         try:
@@ -2174,6 +2186,10 @@ async def signal_loop():
 
 def kosan_eklendi(new):
     """Tarayıcıya yeni giren hisseler: akışa / Telegram'a yaz, veri çekmeye başla."""
+    for r in list(new)[:6]:
+        if YZM.hazir and BOT_CFG.get("yz_yetki", 1) and YZM.kalan() > 80:
+            info_ = scanner.runners.get(r) or {}
+            _gorev(YZM.arastir(r, "", info_.get("price"), info_.get("pct")))
     for r in new:
         info = scanner.runners.get(r)
         if not info:
@@ -2250,6 +2266,7 @@ async def fast_loop():
                                  sym, sig["conf"], sig["e"], sig["s"], sig["h"])
                         feed_signal(sig)
                         bot.consider(sig, now)
+                        yz_planla(sig)
                 except Exception as e:
                     log.warning("Hızlı kırılım hatası %s: %s", sym, e)
 
@@ -2739,6 +2756,12 @@ async def rapor_loop():
                         tg.send(y, quiet=True, konu="rapor")
                 except Exception as e:
                     log.warning("Akşam ekleri hatası: %s", e)
+            try:
+                ders = await yz_gun_sonu()
+                if ders and tg.ok and PUSH_PREF["tg_rapor"]:
+                    tg.send("🧠 <b>Yapay zekâ · gün sonu dersi</b>\n" + _h(ders[:2500]), quiet=True, konu="rapor")
+            except Exception as e:
+                log.warning("Yapay zekâ dersi hatası: %s", e)
             if datetime.now(ET).weekday() == 4 and tg.ok and PUSH_PREF["tg_rapor"]:   # cuma: haftalık rapor
                 try:
                     w_txt, w_png = tg_karne(gun=7)
@@ -3695,7 +3718,7 @@ async def tg_analiz(sym):
     return "\n".join(out), png
 
 
-YARDIM = ("<b>Komutlar</b>\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
+YARDIM = ("<b>Komutlar</b>\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
           "/analiz QNME — 15 dk analiz ve plan (grafikli)\n/alarm QNME 0.90 — fiyat alarmı\n/alarmlar — kurulu alarmlar\n"
           "/alarmsil QNME — alarmı sil\n/yorum — yapay zekalı piyasa yorumu\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
           "/basla — yeni işlem açmaya devam\n/ogren — bot ne öğrendi (model karnesi)\n"
@@ -3760,6 +3783,40 @@ async def tg_komut(text, chat, thread=None):
         send(t_, png)
     elif cmd in ("super", "süper"):
         send(super_komut())
+    elif cmd in ("yz", "analiz2", "yapayzeka"):
+        if not arg:
+            send("Kullanım: /yz QNME — yapay zekâ internette araştırıp analiz eder")
+            return
+        if not YZM.hazir:
+            send("Yapay zekâ için Render Environment'a GEMINI_API_KEY girilmeli.")
+            return
+        sym = re.sub(r"[^A-Z.\-]", "", arg[0])[:8]
+        sm = summary(sym) or {}
+        txt, kay = await YZM.analiz(sym, {"ad": ADLAR_TR.get(sym, ""), "p": sm.get("p"), "ch": sm.get("ch"), "metin": yz_hisse_metni(sym)})
+        if not txt:
+            send(f"Yapay zekâ şu an cevap veremedi ({_h(YZM.durum)}). Biraz sonra tekrar dene.")
+            return
+        send(f"🧠 <b>#{_h(sym)} · yapay zekâ analizi</b>\n{_h(txt[:2800])}"
+             + ("\n\n🔗 " + " · ".join(f'<a href="{_h(k["u"])}">{_h(k["t"] or "kaynak")}</a>' for k in kay[:4]) if kay else ""), sym=sym)
+    elif cmd in ("sor", "soru"):
+        q = text.strip().split(None, 1)[1] if len(text.strip().split(None, 1)) > 1 else ""
+        if not q:
+            send("Kullanım: /sor bugün neden zarar ettik?")
+            return
+        txt, kay = await YZM.sor(q[:500], yz_bot_ozeti())
+        send(("🧠 " + _h(txt[:3000])) if txt else f"Yapay zekâ şu an cevap veremedi ({_h(YZM.durum)}).")
+    elif cmd in ("yzkarne", "yapayzekakarne"):
+        k = yz_karne()
+        al_, pas_ = k["al"], k["pas"]
+        if yz_yetki():
+            dur_ = "✅ kararları botu etkiliyor"
+        else:
+            dur_ = f"⏳ gölgede ölçülüyor (en az {k['min']} sonuç ve AL/PAS farkı +{k['esik']}R gerekli)"
+        fr_ = lambda v: "—" if v is None else f"{v:+.2f}R"
+        send(f"🧠 <b>Yapay zekâ karnesi</b>\nAL dedikleri: {al_['n']} sinyal, ort. {fr_(al_['avg'])}"
+             + (f", %{al_['wr']} kazandı" if al_['wr'] is not None else "") + "\n"
+             f"PAS dedikleri: {pas_['n']} sinyal, ort. {fr_(pas_['avg'])}\nAyırt gücü: {fr_(k['guc'])} · {dur_}\n"
+             f"Durum: {_h(YZM.durum)}")
     elif cmd in ("neden", "niye"):
         if not arg:
             send("Kullanım: /neden VIVK — bot bu hisseye neden girmedi / girdi")
@@ -3883,7 +3940,8 @@ async def tg_komut(text, chat, thread=None):
         send("Bilinmeyen komut. /yardim yaz.")
 
 
-KOMUTLAR = (("neden", "Bot bu hisseye neden girmedi: /neden VIVK"), ("super", "💎 Bugünün süper fırsatları"), ("hisse", "Hisse kartı: /hisse QNME"), ("panel", "Kontrol panelini yeniden kur"), ("durum", "Bot ve para durumu"), ("pozisyon", "Açık pozisyonlar"),
+KOMUTLAR = (("yz", "🧠 Yapay zekâ analizi: /yz QNME"), ("sor", "🧠 Yapay zekâya sor: /sor bugün nasıl gitti"),
+            ("neden", "Bot bu hisseye neden girmedi: /neden VIVK"), ("super", "💎 Bugünün süper fırsatları"), ("hisse", "Hisse kartı: /hisse QNME"), ("panel", "Kontrol panelini yeniden kur"), ("durum", "Bot ve para durumu"), ("pozisyon", "Açık pozisyonlar"),
             ("karne", "Sonuçlar + grafik"), ("analiz", "Hisse analizi: /analiz QNME"),
             ("alarm", "Fiyat alarmı: /alarm QNME 0.90"), ("alarmlar", "Kurulu alarmlar"), ("rapor", "Gün sonu raporu"),
             ("yorum", "Yapay zekalı piyasa yorumu"), ("ogren", "Bot ne öğrendi"),
@@ -4608,6 +4666,192 @@ ADLAR_TR = {"SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100 ETF", "NVDA": "NVIDIA", "TS
             "PLTR": "Palantir", "SOUN": "SoundHound AI", "COIN": "Coinbase", "MSTR": "MicroStrategy", "SMCI": "Super Micro"}
 
 
+# ----------------------------------------------------------------- 🧠 yapay zekâ: araştırır, karar verir, öğrenmeye katılır
+_YZ_SAAT = []
+_YZK = {"t": 0, "d": None}
+_GOREV = set()
+
+
+def _gorev(coro):
+    """Arka plan görevi (referansı tutulur, bitince bırakılır)."""
+    try:
+        t = asyncio.get_running_loop().create_task(coro)
+    except RuntimeError:
+        coro.close()
+        return None
+    _GOREV.add(t)
+    t.add_done_callback(_GOREV.discard)
+    return t
+
+
+def yz_karne():
+    if _YZK["d"] is None or time.time() - _YZK["t"] > 300:
+        _YZK.update(t=time.time(), d=YZM.karne(list(engine.signals)))
+    return _YZK["d"]
+
+
+def yz_yetki():
+    """Yapay zekâ botun kararını etkiliyor mu? (0 kapalı · 1 karnesi kanıtlanınca · 2 her zaman)"""
+    m = BOT_CFG.get("yz_yetki", 1)
+    if not m or not YZM.hazir:
+        return False
+    return m == 2 or bool(yz_karne().get("kanit"))
+
+
+def yz_uygun(sig):
+    if sig.get("dis") or "yz" in sig or sig["id"] in YZM.bekleyen or not YZM.hazir or not BOT_CFG.get("yz_yetki", 1):
+        return False
+    if YZM.kalan() < 40:                       # analiz / soru için pay bırak
+        return False
+    den = (sig.get("den") or {}).get("karar")
+    return bool(sig.get("super") or den in ("AL", "BEKLE"))
+
+
+def yz_baglam(sig):
+    sm = summary(sig["sym"]) or {}
+    f = sig.get("f") or {}
+    sat = [f"Şimdi {sm.get('p')} $ ({(sm.get('ch') or 0):+.1f}% önceki kapanışa göre) · TR saati {datetime.now(TR):%H:%M}",
+           "Koşullar: " + ", ".join(f"{k}={v}" for k, v in f.items() if k in ("volr", "vwap", "trend", "tod", "mtf", "ema50",
+                                                                                "obv", "fiyat", "formasyon", "haber", "sec", "yapi"))]
+    try:
+        p, q = learner.predict(sig["setup"], sig.get("ses"), f) if learner.ready() else (None, None)
+        if q is not None:
+            sat.append(f"Botun öğrenme modeli: beklenen {p:+.2f}R, sırası {round(100 * q)}/100")
+        n, avg = learner.group(sig["setup"], sig.get("ses"))
+        if n:
+            sat.append(f"Bu kurgunun geçmişi: {n} sonuç, ortalama {avg:+.2f}R" if isinstance(avg, (int, float)) else f"Bu kurgunun geçmişi: {n} sonuç")
+    except Exception:
+        pass
+    den = sig.get("den") or {}
+    if den.get("mod"):
+        sat.append("5 modül: " + "; ".join(f"{denetci.MOD_AD.get(k, k)} {v['k']} ({v['n']})" for k, v in den["mod"].items()))
+    sat.append(f"Piyasa havası: {HAVA.get('etiket')} · SPY {((summary('SPY') or {}).get('ch') or 0):+.2f}%")
+    n = ((scanner.runners.get(sig["sym"]) or {}).get("news") or {}).get("headline")
+    if n:
+        sat.append(f"Son haber başlığı: {n[:160]}")
+    return "\n".join(sat)
+
+
+def yz_kapi(sig):
+    """bot.consider içinden: None → kurallarla devam · 'bekle' → yapay zekâ çalışıyor · 'PAS …' → girme."""
+    if not yz_yetki() or sig.get("dis"):
+        return None
+    y = sig.get("yz")
+    if y:
+        return ("PAS " + f"olasılık %{y.get('p')} < eşik %{y.get('esik')}: {y.get('neden', '')}") if y.get("karar") == "PAS" else None
+    if sig["id"] in YZM.bekleyen:
+        return "bekle"
+    YZM.bekleyen.add(sig["id"])
+    if not _gorev(_yz_calis(sig, tekrar=True)):
+        YZM.bekleyen.discard(sig["id"])
+        return None
+    return "bekle"
+
+
+bot.yz_kapi = yz_kapi
+
+
+def yz_planla(sig):
+    """Yetki yokken de: uygun sinyalleri gölgede değerlendir (karne birikir). Saatte en fazla 30."""
+    if not yz_uygun(sig):
+        return
+    now = time.time()
+    _YZ_SAAT[:] = [t for t in _YZ_SAAT if now - t < 3600]
+    if len(_YZ_SAAT) >= 30 and not sig.get("super"):
+        return
+    _YZ_SAAT.append(now)
+    YZM.bekleyen.add(sig["id"])
+    if not _gorev(_yz_calis(sig, tekrar=False)):
+        YZM.bekleyen.discard(sig["id"])
+
+
+async def _yz_calis(sig, tekrar):
+    y = None
+    try:
+        sm = summary(sig["sym"]) or {}
+        try:
+            await asyncio.wait_for(YZM.arastir(sig["sym"], ADLAR_TR.get(sig["sym"], ""), sm.get("p"), sm.get("ch")), 30)
+        except asyncio.TimeoutError:
+            pass
+        y = await asyncio.wait_for(YZM.karar(sig, yz_baglam(sig)), 25)
+    except Exception as e:
+        log.debug("Yapay zekâ kararı alınamadı %s: %s", sig.get("sym"), e)
+    finally:
+        YZM.bekleyen.discard(sig["id"])
+    if not y:
+        y = {"karar": "YOK", "neden": "yapay zekâ cevap vermedi (kota / hata): kurallarla devam", "t": int(time.time())}
+    sig["yz"] = y
+    f = sig.setdefault("f", {})
+    if y.get("ara"):
+        f["yz_ara"] = y["ara"]
+    if y["karar"] in ("AL", "PAS"):
+        f["yz"] = ("AL güçlü" if y["p"] >= y["esik"] + 15 else "AL") if y["karar"] == "AL" else "PAS"
+    try:
+        engine.dirty_days.add(sig["day"])
+        engine.ver += 1
+    except Exception:
+        pass
+    # Telegram'daki sinyal mesajına yapay zekâ satırı
+    m = tg.meta.get(f"s:{sig['id']}")
+    if m and y["karar"] in ("AL", "PAS") and "🧠" not in m["base"]:
+        m["base"] += (f"\n🧠 <b>Yapay zekâ: {'AL' if y['karar'] == 'AL' else 'PAS GEÇ'}</b> · olasılık %{y['p']} (eşik %{y['esik']})"
+                      f"\n<i>{_h(y.get('neden', ''))}</i>")
+        m["durum"] = None
+    if tekrar:
+        now = time.time()
+        px = _px(sig["sym"])
+        risk = abs(sig["e"] - sig["s"]) or sig["e"] * 0.01
+        if px and sig["dir"] * (px - sig["e"]) > 0.5 * risk:
+            bot.note("atla", f"{'AL' if sig['dir'] > 0 else 'SAT'} {sig['setup']} güven {sig['conf']} — atlandı: yapay zekâ "
+                             f"cevap verene kadar fiyat girişten 0,5R uzaklaştı, kovalanmıyor", sig["sym"])
+            return
+        sig["_yz_tekrar"] = 1
+        bot.consider(sig, now, onayli=True)
+
+
+def yz_bot_ozeti():
+    b = bot.summary()
+    td, tot = b.get("today") or {}, b.get("total") or {}
+    sat = [f"Bugün: {td.get('n', 0)} işlem, {td.get('pnl', 0):+.2f} $ · toplam {tot.get('n', 0)} işlem, {tot.get('pnl', 0):+.2f} $",
+           f"Açık pozisyonlar: " + (", ".join(f"{p['sym']} {p.get('ur') or 0:+.2f}R" for p in b.get("open") or []) or "yok")]
+    son = [x for x in list(engine.signals)[-8:]]
+    if son:
+        sat.append("Son sinyaller: " + "; ".join(f"{x['sym']} {x['setup']} {x['st']}" + (f" {x['r']:+.2f}R" if x.get("r") is not None else "")
+                                                  for x in son))
+    k = yz_karne()
+    sat.append(f"Yapay zekâ karnesi: {k['n']} sonuç, AL ort {k['al']['avg']}, PAS ort {k['pas']['avg']}")
+    sat.append(f"Piyasa havası: {HAVA.get('etiket')}")
+    return "\n".join(sat)
+
+
+def yz_hisse_metni(sym):
+    sm = summary(sym) or {}
+    lv = levels(sym) or {}
+    sup = (lv.get("sup") or {}).get("p") if isinstance(lv.get("sup"), dict) else lv.get("sup")
+    res = (lv.get("res") or {}).get("p") if isinstance(lv.get("res"), dict) else lv.get("res")
+    sg = [x for x in engine.signals if x["sym"] == sym][-3:]
+    return (f"Fiyat {sm.get('p')} $, değişim {(sm.get('ch') or 0):+.2f}%, gün yüksek {sm.get('dh')}, gün düşük {sm.get('dl')}, "
+            f"önceki kapanış {sm.get('pc')}; destek {sup}, direnç {res}. "
+            + ("Botun son sinyalleri: " + "; ".join(f"{x['setup']} giriş {x['e']} stop {x['s']} hedef {x['h']} ({x['st']})" for x in sg)
+               if sg else "Botun bu hissede yakın sinyali yok."))
+
+
+async def yz_gun_sonu():
+    if not YZM.hazir or YZM.kalan() < 5:
+        return None
+    t_, s_ = gun_sonu_raporu()
+    gun = datetime.now(ET).date().isoformat()
+    sg = [x for x in engine.signals if x.get("day") == gun and x.get("r") is not None]
+    by = {}
+    for x in sg:
+        by.setdefault(x["setup"], []).append(x["r"])
+    sat = [t_, s_] + [f"{k}: {len(v)} sinyal, ort {sum(v) / len(v):+.2f}R" for k, v in sorted(by.items(), key=lambda kv: -len(kv[1]))[:8]]
+    yy = [x for x in sg if (x.get("yz") or {}).get("karar") in ("AL", "PAS")]
+    if yy:
+        sat.append("Yapay zekâ bugün: " + ", ".join(f"{x['sym']} {x['yz']['karar']} → {x['r']:+.2f}R" for x in yy[:12]))
+    return await YZM.gun_dersi("\n".join(sat))
+
+
 # ---- sinyal mesajının alt satırı (durum) sonuca göre kendini günceller
 def sinyal_durumu(sig):
     st = sig.get("st")
@@ -5145,6 +5389,31 @@ async def api_simulasyon(request: Request):
         return JSONResponse(await asyncio.to_thread(simulasyon, p))
     except Exception as e:
         return JSONResponse({"hata": str(e)[:120]})
+
+
+@app.post("/api/yz")
+async def api_yz(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    try:
+        d = await request.json()
+    except Exception:
+        d = {}
+    if not YZM.hazir:
+        return JSONResponse({"metin": "Yapay zekâ kapalı: Render Environment'a GEMINI_API_KEY girilmeli.", "kaynak": []})
+    sym = re.sub(r"[^A-Z.\-]", "", str(d.get("s") or "").upper())[:8]
+    q = str(d.get("q") or "").strip()[:500]
+    if q:
+        txt, kay = await YZM.sor(q + (f" (konu hisse: {sym})" if sym else ""),
+                                 yz_bot_ozeti() + ("\n" + yz_hisse_metni(sym) if sym else ""))
+    elif sym:
+        sm = summary(sym) or {}
+        txt, kay = await YZM.analiz(sym, {"ad": ADLAR_TR.get(sym, ""), "p": sm.get("p"), "ch": sm.get("ch"),
+                                          "metin": yz_hisse_metni(sym)})
+    else:
+        return JSONResponse({"hata": "hisse ya da soru yok"}, status_code=400)
+    return JSONResponse({"metin": txt or f"Yapay zekâ şu an cevap veremedi ({YZM.durum}). Biraz sonra tekrar dene.",
+                         "kaynak": kay or [], "ara": (YZM.arastirma(sym) or {}).get("d") if sym else None})
 
 
 @app.get("/api/neden")

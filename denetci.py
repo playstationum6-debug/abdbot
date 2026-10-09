@@ -115,14 +115,21 @@ def m_haber(sig, ctx):
     """Haber Analisti: haber yönü, yapay zeka puanı, SEC bildirimi (seyreltme = veto)."""
     f = sig.get("f") or {}
     sec, hb, ai = f.get("sec"), f.get("haber"), f.get("ai")
+    ya = ((ctx.get("yz_ara") or {}).get("d") or {}) if ctx.get("yz_ara") else {}
     if sec == "seyreltme":
         return _m("veto", "SEC: hisse ihracı / seyreltme")
+    if ya.get("seyreltme") == "var" and sig.get("dir", 1) > 0:
+        return _m("veto", "yapay zekâ araştırması: hisse ihracı / seyreltme riski")
     if hb == "kötü" or ai == "−30 ve altı":
         return _m("veto" if sig.get("dir", 1) > 0 else "olumlu", "olumsuz haber")
     if hb == "iyi" or ai == "+70 ve üstü":
         return _m("olumlu", "olumlu haber" + (" · YZ puanı yüksek" if ai == "+70 ve üstü" else ""))
     if f.get("bilanco") not in (None, "yok"):
         return _m("küçült", f"bilanço günü ({f.get('bilanco')})", lot=0.5)
+    if ya and (ya.get("skor") or 0) >= 50:
+        return _m("olumlu", "yapay zekâ araştırması olumlu: " + str(ya.get("katalizor") or "")[:50])
+    if ya and (ya.get("skor") or 0) <= -40:
+        return _m("olumsuz", "yapay zekâ araştırması olumsuz: " + str(ya.get("katalizor") or "")[:50])
     if hb in (None, "yok"):
         return _m("nötr", "yeni haber yok")
     return _m("nötr", "haber nötr")
