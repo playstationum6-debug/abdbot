@@ -604,6 +604,41 @@ dinle = dinleyici.Dinleyici(os.getenv("TG_API_ID", ""), os.getenv("TG_API_HASH",
 engine.learner = learner
 
 
+SPREAD_LIKIT_DV = 3_000_000      # bugün bu kadar $ işlem gören hisse likittir: IEX'in geniş kotası gerçek farkı göstermez
+
+
+def gun_dv(sym):
+    """Bugün (ABD günü) işlem gören toplam dolar hacmi — 1 dk mumlardan."""
+    bars = store.bars.get(sym) or {}
+    if not bars:
+        return 0.0
+    gun = datetime.now(ET).date()
+    tot = 0.0
+    for t in sorted(bars)[-1000:]:
+        if bar_info(t)[0] == gun:
+            b = bars[t]
+            tot += (b[3] or 0) * (b[4] or 0)
+    return tot
+
+
+def spread_guvenilir(sym, ses):
+    """Karar Denetçisi'ne verilecek spread. Ücretsiz IEX kotası ulusal en iyi fiyat (NBBO) değil: küçük hisselerde IEX'in
+    defteri ince olduğu için fark %10–15 görünür, gerçekte birkaç sent olabilir (WFF 9 Eki: 95 mn adet işlem varken %13
+    göründü, +%42'lik işlem bu yüzden kaçtı). Ana listedeki hisselerde ve bugün 3 mn $'dan fazla işlem görenlerde
+    spread kullanılmaz; diğerlerinde IEX kotası yine temkinli bir uyarı olarak kalır."""
+    if sym in SYMBOLS:
+        return None
+    sp = scanner.spread_of(sym, ses=ses)
+    if sp is None:
+        return None
+    try:
+        if gun_dv(sym) >= SPREAD_LIKIT_DV:
+            return None
+    except Exception:
+        pass
+    return sp
+
+
 def den_ctx(sig):
     """Karar Denetçisi için bağlam: model tahmini, spread, günlük zarar hakkı, piyasa havası."""
     try:
@@ -614,7 +649,7 @@ def den_ctx(sig):
         kalan = max(0.0, BOT_CFG["daily_loss"] + min(0.0, bot.today_pnl()))
     except Exception:
         kalan = None
-    return {"model": model, "secici": ogrenme.SECICI, "spread": None if sig["sym"] in SYMBOLS else scanner.spread_of(sig["sym"], ses=sig.get("ses")),
+    return {"model": model, "secici": ogrenme.SECICI, "spread": spread_guvenilir(sig["sym"], sig.get("ses")),
             # ana listedeki büyük hisselerde IEX kotası ulusal en iyi fiyat değil (JPM %5, ARM %15 görünüyordu): kullanma
             "yz_ara": YZM.arastirma(sig["sym"]),
             "kalan": kalan, "risk_usd": BOT_CFG.get("risk_usd"), "hava": HAVA.get("etiket")}
@@ -2372,7 +2407,7 @@ async def fast_loop():
                         feed_add("plan", sym, f"{fp_(plan['lvl'])} üstünü kırarsa giriş",
                                  sub=f"stop {fp_(plan['stop'])}   hedef {fp_(plan['tgt'])}   şu an {fp_(p)}   "
                                      f"bugün {plan['move']:+.0f}%", tone="bilgi",
-                                 extra={"lvl": plan["lvl"], "stop": plan["stop"], "tgt": plan["tgt"]})
+                                 extra={"lvl": plan["lvl"], "stop": plan["stop"], "tgt": plan["tgt"], "tg_skip_plan": 1})
                     sig = engine.fast_check(sym, p, now)
                     if sig:
                         log.info("HIZLI SİNYAL %s AL güven=%s giriş=%s stop=%s hedef=%s",
@@ -2410,12 +2445,12 @@ async def pattern_loop():
                     feed_add("plan", sym, f"{p['ad']} oluşuyor: {fp_(p['neck_now'])} {yon} kırarsa hedef {fp_(p['hedef'])}",
                              sub=f"şu an {fp_(last)}   boyun çizgisine {row['uzak']:+.2f}%   formasyon yüksekliği {fp_(p['boy'])}",
                              tone="bilgi" if p["bull"] else "sat",
-                             key=f"p:{sym}:{p['ad']}:{p['t1']}", extra={"pat": p["ad"]})
+                             key=f"p:{sym}:{p['ad']}:{p['t1']}", extra={"pat": p["ad"], "tg_skip_plan": 1})
             for z in fx.get("zones", [])[:1]:
                 if last and z["hi"] < last <= z["hi"] * 1.01:
                     feed_add("plan", sym, f"Alıcı bölgesine yaklaştı: {fp_(z['lo'])}–{fp_(z['hi'])}",
                              sub=f"bu bantta hacmin %{z['alici']}'i alıcı mumlarında   şu an {fp_(last)}",
-                             tone="bilgi", key=f"z:{sym}:{z['lo']}:{datetime.now(ET).date()}", extra={"zone": 1})
+                             tone="bilgi", key=f"z:{sym}:{z['lo']}:{datetime.now(ET).date()}", extra={"zone": 1, "tg_skip_plan": 1})
         found.sort(key=lambda r: (r["durum"] != "oluşuyor", abs(r["uzak"] or 99)))
         PATS[:] = found[:80]
         _pat_ver[0] += 1
@@ -5531,7 +5566,9 @@ async def yz_gun_sonu():
 # ----------------------------------------------------------------- 📐 kırılım planı: izleme listesi + Telegram
 PLAN_DURUM = {}                # "k:<id>" -> güncel durum satırı
 _PLAN_TG = {"gun": None, "n": 0}
-PLAN_TG_GUNLUK = int(os.getenv("PLAN_TG_GUNLUK", "30"))
+PLAN_TG_GUNLUK = int(os.getenv("PLAN_TG_GUNLUK", "20"))
+PLAN_TG_HISSE = 3            # aynı hisse için günde en fazla 3 plan mesajı (koşan hissede seviye sürekli kayıyor)
+PLAN_TG_ARA = 30 * 60        # aynı hisseye iki plan mesajı arasında en az 30 dk
 
 
 def izle_guncelle():
@@ -5695,7 +5732,7 @@ def plan_olaylari():
     olay, PLAN.olay = PLAN.olay[:], []
     gun = datetime.now(ET).date()
     if _PLAN_TG["gun"] != gun:
-        _PLAN_TG.update(gun=gun, n=0)
+        _PLAN_TG.update(gun=gun, n=0, sym={})
     for ev, p in olay:
         key = f"k:{p['id']}"
         sym = p["sym"]
@@ -5706,8 +5743,11 @@ def plan_olaylari():
                          f"{' + '.join(planmod.TUR_AD.get(t, t) for t in p['tur'])}",
                      tone="bilgi", extra={"lvl": p["giris"], "stop": p["stop"], "tgt": p["hedefler"][1], "tg_skip_plan": 1,
                                           "plan": p["id"]})
+            hs = _PLAN_TG.setdefault("sym", {}).setdefault(sym, [0, 0])
             if tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK \
-                    and not sustur_mu(sym):
+                    and not sustur_mu(sym) and hs[0] < PLAN_TG_HISSE and time.time() - hs[1] >= PLAN_TG_ARA:
+                hs[0] += 1
+                hs[1] = time.time()
                 _PLAN_TG["n"] += 1
                 PLAN_DURUM[key] = DURUM_AD["yeni"]
                 tg.send(_plan_html(p), plan_grafik_ch(p), key=key, sym=sym, quiet=not p.get("liste"), konu="plan",

@@ -20,10 +20,12 @@ import math
 import time
 from datetime import datetime
 
-AGIRLIK = {"taban": 2.0, "kaybedilen": 2.0, "pmh": 1.5, "pdh": 1.5, "hod": 1.0, "yuvarlak": 0.5, "kanal": 3.0, "liste": 2.5}
+AGIRLIK = {"taban": 2.0, "kaybedilen": 2.0, "pmh": 1.5, "pdh": 1.5, "hod": 1.0, "yuvarlak": 0.5, "kanal": 3.0, "liste": 2.5,
+           "direnç": 1.5, "tam sayı": 1.0}
 TUR_AD = {"taban": "sabahki / gün içi tabanın tavanı", "kaybedilen": "kaybedilen seviye (geri alma)",
           "pmh": "piyasa öncesi tepesi", "pdh": "dünkü tepe", "hod": "gün tepesi", "yuvarlak": "yuvarlak sayı",
-          "kanal": "kanalın verdiği seviye", "liste": "sabah listesinin seviyesi"}
+          "kanal": "kanalın verdiği seviye", "liste": "sabah listesinin seviyesi",
+          "direnç": "gün içinde birkaç kez dönülen tepe", "tam sayı": "tam dolar (herkesin baktığı sayı)"}
 MIN_PUAN = 2.0
 UZAK_MIN, UZAK_MAX = 0.005, 0.12
 TEKRAR_SN = 15 * 60          # bitmiş plandan sonra aynı hissede yeni plan için bekleme
@@ -102,6 +104,41 @@ class Planci:
         out.sort(key=lambda b: -(b[3] - b[2]))
         return out[:3]
 
+    @staticmethod
+    def _direncler(tss, bars, ds, k, c):
+        """Bugün birkaç kez dönülen tepeler (kanalların '4,00 kırılırsa' dediği yer): 7 mumluk pencerede tepe olan
+        noktalar %1 içinde kümelenir; en az 2 dokunuş = direnç. Fiyat bir ara %2 üstüne çıkıp geri düştüyse
+        'kaybedilen' (geri alma) sayılır."""
+        n = k - ds + 1
+        if n < 20:
+            return []
+        H = [bars[tss[i]][1] for i in range(ds, k + 1)]
+        C = [bars[tss[i]][3] for i in range(ds, k + 1)]
+        tepe = []
+        for j in range(3, n - 3):
+            if H[j] >= max(H[j - 3:j + 4]):
+                tepe.append((H[j], j))
+        tepe.sort()
+        kume, out = [], []
+        for v, j in tepe:
+            if kume and v <= kume[0][0] * 1.01:
+                kume.append((v, j))
+                continue
+            if len(kume) >= 2:
+                out.append(kume)
+            kume = [(v, j)]
+        if len(kume) >= 2:
+            out.append(kume)
+        lv = []
+        for g in out:
+            ust = max(v for v, _ in g)
+            if not (c * (1 + UZAK_MIN) <= ust <= c * (1 + UZAK_MAX)):
+                continue
+            ilk = min(j for _, j in g)
+            ustunde = any(C[j] > ust * 1.02 for j in range(ilk, n))
+            lv.append((ust, "kaybedilen" if ustunde else "direnç", None, None))
+        return lv
+
     def seviyeler(self, sym, tss, bars, ds, k, x):
         c = x["c"]
         lv = []
@@ -126,7 +163,8 @@ class Planci:
         if x.get("hod") and c < x["hod"]:
             lv.append((x["hod"], "hod", None, None))
         for v in yuvarlaklar(c):
-            lv.append((v, "yuvarlak", None, None))
+            lv.append((v, "tam sayı" if v >= 2 and abs(v - round(v)) < 1e-6 else "yuvarlak", None, None))
+        lv += self._direncler(tss, bars, ds, k, c)
         lv = [v for v in lv if v[0] and c * (1 + UZAK_MIN) <= v[0] <= c * (1 + UZAK_MAX)]
         lv.sort(key=lambda v: v[0])
         kume = []
@@ -261,7 +299,9 @@ class Planci:
                     else:
                         self._bitir(p, "onaylı", "kırılım tuttu", T)
             elif p["st"] == "kaçtı":
-                if c < p["lvl"] * 0.99:
+                if c > p["giris"] * 1.10:
+                    self._bitir(p, "süre", "kaçtı ve %10'dan fazla uzaklaştı: yeni seviyeye bakılıyor", T)
+                elif c < p["lvl"] * 0.99:
                     self._bitir(p, "sahte", f"kaçtıktan sonra {p['lvl']} altına döndü", T)
                 elif x["l"] <= p["giris"] * 1.02 and c >= p["lvl"] and c > x["o"]:
                     a = self._aday(eng, p, c, T, "retest", dip10)
