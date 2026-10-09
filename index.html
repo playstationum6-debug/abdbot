@@ -623,8 +623,8 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
 <script>
 const TR_OFF=3*3600;
 const SES_TR={pre:'Piyasa öncesi',regular:'Normal seans',post:'Piyasa sonrası',closed:'Kapalı'};
-const SETUP={formasyon:'Formasyon kırılımı',talep:'Alıcı bölgesinden dönüş',poc:'Hacim profili (POC) dönüşü',gapgo:'Boşlukla açılış kırılımı',fade:'Koşan hissede dönüş (açığa satış)',fvg:'FVG dönüşü',kanal:'Kanal alt bandından dönüş',yapi:'Yapı kırılımı (BOS)',fib:'Fibonacci geri çekilme dönüşü',hizli:'Haberli hızlı kırılım',orb:'Açılış aralığı kırılımı',vwap:'VWAP geri alma',hacim:'Hacimli seviye kırılımı',trend:'Trend geri çekilme',gap:'Boşluk devamı',uz_seviye:'Seviye kırılımı',uz_kirilim:'Seans aralığı kırılımı',uz_vwap:'Seans VWAP geri alma',kosu:'Haberli momentum kırılımı',geri:'Momentum ilk geri çekilme',itki:'Hacimli itki (scalp)',vwap_sek:'VWAP sekmesi (scalp)'};
-const SETUP_K={formasyon:'Formasyon',talep:'Talep',poc:'POC',gapgo:'Gap&Go',fade:'Dönüş',fvg:'FVG',kanal:'Kanal',yapi:'Yapı',fib:'Fibo',hizli:'Hızlı',orb:'ORB',vwap:'VWAP',hacim:'Hacim',trend:'Trend',gap:'Boşluk',uz_seviye:'Seviye',uz_kirilim:'Aralık',uz_vwap:'sVWAP',kosu:'Koşu',geri:'Geri',itki:'İtki',vwap_sek:'Sekme'};
+const SETUP={onay:'Kırılım onayı (1 dk)',formasyon:'Formasyon kırılımı',talep:'Alıcı bölgesinden dönüş',poc:'Hacim profili (POC) dönüşü',gapgo:'Boşlukla açılış kırılımı',fade:'Koşan hissede dönüş (açığa satış)',fvg:'FVG dönüşü',kanal:'Kanal alt bandından dönüş',yapi:'Yapı kırılımı (BOS)',fib:'Fibonacci geri çekilme dönüşü',hizli:'Haberli hızlı kırılım',orb:'Açılış aralığı kırılımı',vwap:'VWAP geri alma',hacim:'Hacimli seviye kırılımı',trend:'Trend geri çekilme',gap:'Boşluk devamı',uz_seviye:'Seviye kırılımı',uz_kirilim:'Seans aralığı kırılımı',uz_vwap:'Seans VWAP geri alma',kosu:'Haberli momentum kırılımı',geri:'Momentum ilk geri çekilme',itki:'Hacimli itki (scalp)',vwap_sek:'VWAP sekmesi (scalp)'};
+const SETUP_K={onay:'Onay',formasyon:'Formasyon',talep:'Talep',poc:'POC',gapgo:'Gap&Go',fade:'Dönüş',fvg:'FVG',kanal:'Kanal',yapi:'Yapı',fib:'Fibo',hizli:'Hızlı',orb:'ORB',vwap:'VWAP',hacim:'Hacim',trend:'Trend',gap:'Boşluk',uz_seviye:'Seviye',uz_kirilim:'Aralık',uz_vwap:'sVWAP',kosu:'Koşu',geri:'Geri',itki:'İtki',vwap_sek:'Sekme'};
 const SES_K={pre:'Öncesi',regular:'Normal',post:'Sonrası'};
 const ST_TR={bekliyor:'Emir bekliyor','açık':'Açık',hedef:'Hedef ✓',stop:'Stop ✗','süre':'Süre doldu','dolmadı':'Dolmadı'};
 const BST_TR={emir:'Emir gönderildi','açık':'Açık','çıkış':'Çıkış emri','kapandı':'Kapandı',iptal:'İptal'};
@@ -1090,7 +1090,7 @@ function renderStatus(){const s=status.ses||'closed',b=$('ses');b.textContent=SE
   if(p)t+=`<b>${p.today?'Bugün':p.d}</b> (TR): Öncesi ${p.pre} · Açılış ${p.open} · Kapanış ${p.close}${p.early?' (erken kapanış)':''} · Sonrası biter ${p.post}<br>`;
   t+=`IEX canlı akış: ${esc(status.iex||'—')} (${status.iexN||0} sembol)<br>`;
   t+=`Yahoo son çekim: ${status.yAge==null?'henüz yok':fage(nowS()-status.yAge)+' önce'}${status.yErr?' · '+esc(status.yErr):''}<br>`;
-  t+=`Takvim: ${status.cal==='alpaca'?'Alpaca (tatiller dahil)':'hafta içi kuralı'} · Bot: ${esc(status.bot||'—')} · Tarayıcı: ${esc(status.scan||'—')} · Yapay zeka: ${esc(status.ai||'—')} · SEC: ${esc(status.sec||'—')} · Bilanço takvimi: ${esc(status.bil||'—')} · Ekonomik takvim: ${esc(status.eko||'—')}<br>`;
+  t+=`Takvim: ${status.cal==='alpaca'?'Alpaca (tatiller dahil)':'hafta içi kuralı'} · Bot: ${esc(status.bot||'—')} · Tarayıcı: ${esc(status.scan||'—')} · Yapay zeka: ${esc(status.ai||'—')} · SEC: ${esc(status.sec||'—')} · Seans dışı tarama: ${esc(status.tv||'—')} · Bilanço takvimi: ${esc(status.bil||'—')} · Ekonomik takvim: ${esc(status.eko||'—')}<br>`;
   t+=`Sunucu açık: ${status.up!=null?fage(nowS()-status.up):'—'}${status.rs7!=null?' · 7 günde yeniden başlama: '+status.rs7:''} · GitHub yedeği: ${esc(status.bk||'—')}${status.tg?' · Telegram: '+esc(status.tg.ok?'açık':(status.tg.st||'kapalı')):''}`;
   $('foot').innerHTML=t;nb('nbS',status.sigOpen||0)}
 
@@ -1160,7 +1160,7 @@ function renderKesfet(){for(const b of $('kseg').children)b.classList.toggle('on
     <div class="tiles">${g.h.map(x=>{const b=(MKT.bil||{})[x.s];return `<div class="tile" data-s="${esc(x.s)}" style="background:${heat(x.ch)}"${b?` title="Bilanço ${b}"`:''}>${b?`<span class="bl">B ${b}</span>`:''}<b>${esc(x.s)}</b><i>${fch(x.ch)}</i></div>`}).join('')}</div></div>`).join('')
     :empty('Sektör verisi yükleniyor. Fiyatlar seans içinde dakikada bir güncellenir.');
   else if(kTab==='gain'||kTab==='lose'||kTab==='act'){const L=MKT[kTab]||[];
-    $('kList').innerHTML=`<div class="note" style="margin:0 2px 8px">${kTab==='act'?'Bugün bütün ABD piyasasında en çok işlem gören hisseler.':'Bütün ABD piyasası (küçük hisseler dahil). Dokununca grafiği ve analizi açılır.'}</div>`+
+    $('kList').innerHTML=`<div class="note" style="margin:0 2px 8px">${kTab==='act'?'Bugün bütün ABD piyasasında en çok işlem gören hisseler.':(MKT.gsrc==='pre'?'Açılış öncesi (pre-market) değişim · bütün ABD piyasası, en az 2 bin adet işlem görenler. Dokununca grafiği açılır.':MKT.gsrc==='post'?'Kapanış sonrası (after-hours) değişim · bugünkü kapanışa göre, bütün ABD piyasası. Dokununca grafiği açılır.':'Bütün ABD piyasası (küçük hisseler dahil). Dokununca grafiği ve analizi açılır.')}</div>`+
       (L.length?L.map((x,i)=>mrow(x,i,kTab==='act')).join(''):empty('Liste seans içinde dolar.'))}}
 function renderBil(){const L=MKT.bilhafta||[];
   if(!L.length){$('kBil').innerHTML=empty('Bu hafta takip edilen hisselerde bilanço görünmüyor.'+(status.bil&&!/^tamam/.test(status.bil)?' Takvim durumu: '+esc(status.bil):''));return}

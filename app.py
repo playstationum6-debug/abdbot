@@ -820,6 +820,7 @@ def status_payload():
         "hava": {k: HAVA.get(k) for k in ("etiket", "puan", "neden", "vix", "genislik")},
         "push": {"ok": push.ok, "n": len(push.subs), "st": push.status, "pref": PUSH_PREF},
         "sec": scanner.sec_status,
+        "tv": scanner.tv_status,
         "nRun": len(scanner.runners),
         "sigN": len(engine.signals),
         "sigOpen": engine.open_count(),
@@ -1941,7 +1942,8 @@ def kosan_eklendi(new):
         if not info:
             continue
         n = info.get("news") or {}
-        src = {"haber": "Haber düştü, fiyat tepki verdi", "seans dışı": "Seans dışı hareket"}.get(info.get("src"), "")
+        src = {"haber": "Haber düştü, fiyat tepki verdi", "seans dışı": "Seans dışı hareket",
+               "öncesi seans": "Açılış öncesi yükselen", "sonrası seans": "Kapanış sonrası yükselen"}.get(info.get("src"), "")
         feed_add("tara", r, f"Koşan hisseler listesine girdi: {info.get('pct') or 0:+.0f}%" + (f" ({src})" if src else ""),
                  sub=n.get("headline", "Haber bulunamadı")[:140], tone="iyi" if n else "nötr",
                  key=f"r:{r}:{datetime.now(ET).date()}",
@@ -2096,7 +2098,7 @@ async def market_loop():
                     for extra in ("SPY", "^VIX"):
                         await get_daily(extra)
                     hava_hesapla(q)
-                    MARKET.update(sek=sek, gain=mv(scanner.gainers), lose=mv(scanner.losers), act=act, t=int(time.time()),
+                    MARKET.update(sek=sek, gain=mv(scanner.gainers), lose=mv(scanner.losers), act=act, gsrc=scanner.gain_src, t=int(time.time()),
                                   hava=dict(HAVA), bil={k: v for k, v in ((x, bilanco_durum(x)) for x in (set(EARN) & izlenen())) if v},
                                   bilhafta=bilanco_hafta())
                     _mkt_ver[0] += 1

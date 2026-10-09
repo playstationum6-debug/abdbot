@@ -42,6 +42,7 @@ SETUP_AD = {
     "poc": "Hacim profili (POC) dönüşü",
     "gapgo": "Boşlukla açılış kırılımı (gap and go)",
     "fade": "Koşan hissede dönüş (açığa satış)",
+    "onay": "Kırılım onayı (1 dk)",
 }
 SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa sonrası"}
 SES_NAME = {0: "pre", 1: "regular", 2: "post", 3: "closed"}
@@ -60,7 +61,11 @@ RUN_MIN_SES_DV = 1_000_000   # bu seansta en az 1 mn $ işlem hacmi
 RUN_MIN_BAR_DV = 50_000      # sinyal mumunda en az 50 bin $ işlem
 IEX_SHARE = 0.05             # öncesi/sonrası seansta hacim sadece IEX: $ hacim eşikleri bu oranla küçültülür
 COOLDOWN = 10 * 60       # aynı hisse + kurgu + yön için bekleme (sık işlem: 10 dk)
-R_SETUP = {"itki": 1.5, "vwap_sek": 1.5}   # 1 dk scalp kurgularında hedef = 1,5R
+R_SETUP = {"itki": 1.5, "vwap_sek": 1.5}
+# Kırılım onayı (1 dk trader): 1. mum yeşil ve direncin üstünde kapanır, 2. mum hacimli ve seviyenin üstünde
+ONAY_VOLR = 1.5          # onay mumu hacmi: seans ortalamasının en az 1,5 katı
+ONAY_VOL_KIRILIM = 0.8   # ve kırılım mumunun hacminin en az %80'i (hacim sönmemiş olmalı)
+ONAY_MAX_UZAK = 1.5      # kırılım mumu seviyeden en fazla 1,5 ATR uzakta kapanmış olmalı (kovalamaz)   # 1 dk scalp kurgularında hedef = 1,5R
 MIN_STOP_PCT = 0.0025    # stop girişten en az fiyatın %0,25'i uzakta (1 dk gürültüsünde patlamasın)
 MIN_STOP_ATR = 2.2       # ve en az 1 dk ATR × 2,2 (≈ 5 dk mum oynaklığı)
 FILL_BARS = 3            # uzatılmış seansta limit emir en fazla 3 mum bekler
@@ -255,6 +260,8 @@ class Engine:
         x["orl"] = min((bars[t][2] for t in orb), default=None)
         x["hod"] = G["rhi"][j1] if j1 >= 0 else None
         x["lod"] = G["rlo"][j1] if j1 >= 0 else None
+        x["hod2"] = G["rhi"][j2] if j2 >= 0 else None        # kırılım mumundan önceki gün tepesi/dibi
+        x["lod2"] = G["rlo"][j2] if j2 >= 0 else None
         x["rc"] = bars[reg[-1]][3] if reg and sc == 2 else None   # bugünün normal seans kapanışı (sonrası için)
         x["dopen"] = bars[reg[0]][0] if reg else None
         or5 = [t for t in reg if t < b["open"] + 300]
@@ -307,6 +314,8 @@ class Engine:
         x["vol5"] = sum(bars[t][4] for t in ses_today[-5:])
         x["active10"] = sum(1 for t in last10 if bars[t][4] > 0)
         x["prev_c"] = pb[3] if pb else c
+        x["prev_o"] = pb[0] if pb else o
+        x["prev_v"] = pb[4] if pb else v
         x["prev2_c"] = bars[tss[k - 2]][3] if k > 1 else x["prev_c"]
         x["prev_l"] = pb[2] if pb else l
         x["prev_h"] = pb[1] if pb else h
@@ -334,6 +343,9 @@ class Engine:
             num += bv_ if bc_ > pc_ else (-bv_ if bc_ < pc_ else 0)
             den += bv_
         x["obv"] = num / den if den > 0 else 0.0
+        old = x["recent"][:-2]                             # kırılım mumundan önceki ≤10 mum
+        x["rh10"] = max((r[1] for r in old), default=None) if len(old) >= 5 else None
+        x["rl10"] = min((r[2] for r in old), default=None) if len(old) >= 5 else None
         prev5 = x["recent"][-6:-1]
         x["ph5"] = max((r[1] for r in prev5), default=None)
         x["pl5"] = min((r[2] for r in prev5), default=None)
@@ -694,6 +706,84 @@ class Engine:
             why.append("Uzatılmış seans: sadece limit emir, daha küçük lot")
             out.append((setup, d, c, stop, risk, base + min(10, abs(move) * 2), why))
             break
+        return out
+
+    def _onay(self, sym, x, runner=False):
+        """Kırılım onayı (1 dk trader): bir önceki mum yeşil ve direncin ÜSTÜNDE kapandı (ilk kapanış),
+        bu mum hacimli ve fiyat hâlâ seviyenin üstünde → onay mumu kapandığı an giriş.
+        Aşağı yönde tersi (kırmızı mum desteğin altında + hacimli onay). Koşan hissede sadece alış."""
+        out = []
+        T, c, o, atr = x["T"], x["c"], x["o"], x["atr"]
+        po, pc_, p2 = x["prev_o"], x["prev_c"], x["prev2_c"]
+        ph, pl = x["prev_h"], x["prev_l"]
+        if not x.get("avgv") or atr <= 0:
+            return out
+        ext = x["ses"] != "regular"
+        if ext and not runner and (x["ses_vol"] < EXT_MIN_SES_VOL or x["active10"] < EXT_MIN_ACTIVE):
+            return out
+        if runner:
+            k_ = IEX_SHARE if ext else 1.0
+            if x["ses_dv"] < RUN_MIN_SES_DV * k_ or x["active10"] < 6:
+                return out
+        if x["mins"] < 3 and not ext:
+            return out                                     # açılışın ilk 3 dakikası çok gürültülü
+        volr = x["volr"]
+        vol_ok = volr >= (EXT_MIN_VOLR if ext and not runner else ONAY_VOLR) and x["v"] >= ONAY_VOL_KIRILIM * (x["prev_v"] or 0)
+        if not vol_ok:
+            return out
+        for d in ((1,) if runner else (1, -1)):
+            if d > 0:
+                lv = [("hod2", "gün tepesi"), ("pmh2", "piyasa öncesi tepesi"), ("pdh", "önceki gün tepesi"),
+                      ("orh", "açılış aralığı tepesi"), ("rh10", "son 10 mumun tepesi (direnç)")]
+                if ext:
+                    lv = [("sh2", "seans tepesi")] + lv[1:3] + [("rh10", lv[4][1])]
+            else:
+                lv = [("lod2", "gün dibi"), ("pml2", "piyasa öncesi dibi"), ("pdl", "önceki gün dibi"),
+                      ("orl", "açılış aralığı dibi"), ("rl10", "son 10 mumun dibi (destek)")]
+                if ext:
+                    lv = [("sl2", "seans dibi")] + lv[1:3] + [("rl10", lv[4][1])]
+            # 1. mum: yön renginde, gövdesi güçlü
+            rng1 = ph - pl
+            if rng1 <= 0 or (pc_ - po) * d <= 0 or abs(pc_ - po) < 0.5 * rng1:
+                continue
+            # 2. mum (onay): seviyenin kırık tarafında kapanıyor, ters renkte değil
+            if (c - o) * d < 0:
+                continue
+            for key, ad in lv:
+                R = x.get(key)
+                if key in ("orh", "orl") and not x.get("or_ok"):
+                    continue
+                if not R:
+                    continue
+                if not ((pc_ - R) * d > 0 and (p2 - R) * d <= 0):      # ilk kez kapanışla kırıldı
+                    continue
+                if key in ("rh10", "rl10"):
+                    # kısa vadeli direnç/destek: en az 2 kez test edilmiş olmalı (tek iğne seviye sayılmaz)
+                    old = x["recent"][:-2]
+                    tst = sum(1 for r in old if abs((r[1] if d > 0 else r[2]) - R) <= 0.25 * atr)
+                    if tst < 2:
+                        continue
+                    ad = f"{ad}, {tst} kez test edildi"
+                if abs(pc_ - R) > ONAY_MAX_UZAK * atr:
+                    continue                                          # kırılım mumu çok uzamış: kovalamaz
+                if (c - R) * d <= 0:
+                    continue                                          # onay mumu seviyenin gerisine düştü
+                if not ext and x["vwap"] and (c - x["vwap"]) * d <= 0:
+                    continue                                          # VWAP'ın ters tarafında kırılım zayıf
+                if not self._ready(sym, "onay", d, T):
+                    break
+                base_stop = (min(pl, R) - 0.1 * atr) if d > 0 else (max(ph, R) + 0.1 * atr)
+                stop, risk = self._clamp(c, base_stop, d, atr, 0.7, 2.5)
+                if runner:
+                    risk = max(risk, c * 0.01)
+                    stop = c - risk
+                why = [f"Kırılım onaylandı: {'yeşil' if d > 0 else 'kırmızı'} mum {ad} ({f2(R)}) "
+                       f"{'üstünde' if d > 0 else 'altında'} kapandı, sonraki mum hacimle tuttu",
+                       f"Onay mumu hacmi ortalamanın {volr:.1f} katı (kırılım mumu {x['prev_v'] / x['avgv']:.1f} katı)",
+                       f"Stop kırılım mumunun {'dibinin' if d > 0 else 'tepesinin'} {'altında' if d > 0 else 'üstünde'}",
+                       "Giriş onay mumu kapanır kapanmaz (1 dk trader)"]
+                out.append(("onay", d, c, stop, risk, 56 if key in ("rh10", "rl10") else 58, why))
+                break
         return out
 
     def _runner(self, sym, x):
@@ -1108,6 +1198,24 @@ class Engine:
                 pass
         else:
             cands = self._regular(sym, x) if x["ses"] == "regular" else self._extended(sym, x)
+        if True:
+            try:
+                oc = self._onay(sym, x, runner=sym in self.runners)
+                if oc and sym in self.runners:
+                    # koşan hissede haber / SEC / 1 $ altı uyarıları aynı şekilde eklensin
+                    info = self.runners.get(sym, {})
+                    if info.get("news_kind") == "kötü" or (info.get("sec") or {}).get("kind") == "seyreltme":
+                        oc = []
+                    for o_ in oc:
+                        if info.get("news_kind") == "iyi":
+                            o_[6].insert(0, f"Haber olumlu: {(info.get('news') or {}).get('headline', '')[:90]}")
+                        elif not info.get("news"):
+                            o_[6].append("Haber bulunamadı — hareketin sebebi belirsiz (risk yüksek)")
+                    oc = [(a, b, c_, d_, e_, f_ + (12 if info.get("news_kind") == "iyi" else -8 if not info.get("news") else 3), g_)
+                          for a, b, c_, d_, e_, f_, g_ in oc]
+                cands = list(cands) + oc
+            except Exception:
+                pass
         try:
             cands = list(cands) + self._chart(sym, x, tss, bars, k)
         except Exception:

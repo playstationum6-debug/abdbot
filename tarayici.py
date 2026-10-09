@@ -5,6 +5,9 @@ Kaynaklar (Alpaca ücretsiz Market Data):
   - /v1beta1/screener/stocks/most-actives → en yüksek hacimliler
   - /v1beta1/news                         → Benzinga haber başlıkları
   - /v2/assets/{sembol}                   → işlem görebilir mi, hangi borsa (OTC elenir)
+Öncesi / sonrası seans (04:00–09:30 ve 16:00–20:00 ET): Alpaca'nın yükselenler listesi bu saatlerde
+dünün seansını gösterir ve ücretsiz IEX verisinde küçük hisselerin işlemleri çoğu zaman görünmez.
+Bu yüzden bütün ABD piyasasının seans dışı değişimi TradingView tarayıcısından (ücretsiz, anahtarsız) alınır.
 Bulunan hisseler gün boyu izlenir (Yahoo dakikalık veri + 5 sn'de bir Alpaca anlık fiyat) ve
 sinyal motoruna "koşan hisse" olarak verilir.
 Haber yorumu: başlık okunur → "iyi" (FDA onayı, sözleşme, satın alma…), "kötü" (hisse ihracı, ters bölünme,
@@ -27,6 +30,9 @@ DATA = "https://data.alpaca.markets"
 PAPER = "https://paper-api.alpaca.markets"
 SYM_RE = re.compile(r"^[A-Z]{1,5}$")
 OK_EXCH = {"NASDAQ", "NYSE", "AMEX", "ARCA", "BATS", "NYSEARCA"}
+TV_URL = "https://scanner.tradingview.com/america/scan"
+TV_MIN_VOL = 20000          # seans dışı en az bu kadar adet işlem görmüş olsun (hayalet fiyatları ele)
+TV_LIST_VOL = 2000          # Keşfet listesinde gösterim sınırı
 BAD_NAME = ("warrant", "unit", "right", "wt ", " wts", "units")
 
 
@@ -118,6 +124,10 @@ class Scanner:
         self.news_seen = set()
         self.recent_news_syms = {}   # sembol -> zaman (seans dışı taramada aday havuzu)
         self.ext_status = "—"
+        self.tv_status = "—"
+        self.gain_src = "alpaca"     # Keşfet yükselenler listesinin kaynağı: alpaca | pre | post
+        self._tv_fail = 0
+        self._tv_next = 0.0
 
     def _h(self):
         return {"APCA-API-KEY-ID": self.key, "APCA-API-SECRET-KEY": self.secret}
@@ -246,6 +256,80 @@ class Scanner:
                         self.news_pending.pop(sym, None)
         return added
 
+    async def tv_movers(self, c, ses, desc=True, n=60):
+        """TradingView tarayıcısı: bütün ABD piyasasında öncesi/sonrası seansın en çok yükselen (desc) ya da
+        düşen hisseleri. Dönüş Alpaca movers biçiminde: [{symbol, percent_change, price, volume}]"""
+        k = "premarket" if ses == "pre" else "postmarket"
+        body = {
+            "markets": ["america"],
+            "symbols": {"query": {"types": []}, "tickers": []},
+            "options": {"lang": "en"},
+            "columns": ["name", f"{k}_change", f"{k}_close", f"{k}_volume", "exchange", "type", "close"],
+            "filter": [
+                {"left": "type", "operation": "in_range", "right": ["stock", "dr"]},
+                {"left": "exchange", "operation": "in_range", "right": ["NASDAQ", "NYSE", "AMEX"]},
+                {"left": f"{k}_close", "operation": "greater", "right": 0},
+                {"left": f"{k}_volume", "operation": "greater", "right": TV_LIST_VOL},
+                {"left": f"{k}_change", "operation": "greater" if desc else "less", "right": 0},
+            ],
+            "sort": {"sortBy": f"{k}_change", "sortOrder": "desc" if desc else "asc"},
+            "range": [0, n],
+        }
+        r = await c.post(TV_URL, json=body, headers={
+            "User-Agent": "Mozilla/5.0", "Origin": "https://www.tradingview.com",
+            "Referer": "https://www.tradingview.com/", "Content-Type": "application/json"})
+        r.raise_for_status()
+        out = []
+        for row in (r.json() or {}).get("data") or []:
+            d = row.get("d") or []
+            if len(d) < 4:
+                continue
+            sym = str(d[0] or (row.get("s") or ":").split(":")[-1]).upper()
+            if not SYM_RE.match(sym) or not is_common(sym):
+                continue
+            try:
+                out.append({"symbol": sym, "percent_change": round(float(d[1] or 0), 2),
+                            "price": float(d[2] or 0), "volume": int(d[3] or 0), "src": ses})
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    async def tv_scan(self, c, ses):
+        """Seans dışı: Keşfet listelerini TradingView verisiyle doldur, %10+ ve yeterli hacimli olanları izlemeye al."""
+        now = time.time()
+        if now < self._tv_next:
+            return 0
+        try:
+            up = await self.tv_movers(c, ses, True)
+            try:
+                dn = await self.tv_movers(c, ses, False, 30)
+            except Exception:
+                dn = []
+            self._tv_fail = 0
+        except Exception as e:
+            self._tv_fail += 1
+            self._tv_next = now + min(600, 60 * self._tv_fail)     # hata: giderek seyrek dene
+            self.tv_status = f"hata: {str(e)[:60]}"
+            return 0
+        self.gainers, self.gain_src = up[:30], ses
+        if dn:
+            self.losers = dn[:30]
+        n_add = 0
+        for g in up:
+            pct, px, vol = g["percent_change"], g["price"], g["volume"]
+            if pct < self.min_pct:
+                break
+            if vol < TV_MIN_VOL or g["symbol"] in self.core:
+                continue
+            if g["symbol"] in self.runners:
+                self.runners[g["symbol"]].update(pct=pct, price=px, vol=vol, seen=now)
+                continue
+            if await self._add(c, g["symbol"], pct, px, "öncesi seans" if ses == "pre" else "sonrası seans"):
+                self.runners[g["symbol"]]["vol"] = vol
+                n_add += 1
+        self.tv_status = f"{len(up)} yükselen, {n_add} eklendi ({datetime.now().strftime('%H:%M')})"
+        return n_add
+
     async def ext_scan(self, c, ses):
         """Öncesi/sonrası seans: en yüksek hacimliler + yükselenler + son haberli hisseler canlı fiyatla taranır."""
         now = time.time()
@@ -283,8 +367,11 @@ class Scanner:
                 mj = mv.json()
                 gainers = mj.get("gainers") or []
                 # Keşfet sayfası: bütün piyasanın en çok yükselen / düşen / en yüksek hacimli hisseleri
-                self.gainers = [g for g in gainers if SYM_RE.match(g.get("symbol", "")) and is_common(g.get("symbol", ""))][:30]
-                self.losers = [g for g in (mj.get("losers") or []) if SYM_RE.match(g.get("symbol", "")) and is_common(g.get("symbol", ""))][:30]
+                if ses not in ("pre", "post") or self.gain_src == "alpaca":
+                    self.gainers = [g for g in gainers if SYM_RE.match(g.get("symbol", "")) and is_common(g.get("symbol", ""))][:30]
+                    self.losers = [g for g in (mj.get("losers") or []) if SYM_RE.match(g.get("symbol", "")) and is_common(g.get("symbol", ""))][:30]
+                if ses not in ("pre", "post"):
+                    self.gain_src = "alpaca"
                 vols = {}
                 try:
                     ma = await c.get(f"{DATA}/v1beta1/screener/stocks/most-actives",
@@ -332,8 +419,9 @@ class Scanner:
                     self.runners[sym] = {"sym": sym, "pct": pct, "price": price, "vol": vols.get(sym),
                                          "first": time.time(), "seen": time.time(), "news": None}
                     added += 1
-                # öncesi/sonrası seans: canlı fiyatla ek tarama (yükselenler listesi bu saatlerde eksik kalabiliyor)
+                # öncesi/sonrası seans: bütün piyasa (TradingView) + canlı fiyatla ek tarama
                 if ses in ("pre", "post"):
+                    await self.tv_scan(c, ses)
                     try:
                         await self.ext_scan(c, ses)
                     except Exception as e:
