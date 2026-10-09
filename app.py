@@ -677,8 +677,14 @@ def compute_static(sym):
         elif d < ref_day and sc == 1:
             pc = b[3]   # önceki işlem gününün son normal seans mumu
             break
+    # küçük grafik (sparkline): o günün kapanışlarından en fazla 32 nokta
+    gun = [bars[t][3] for t in tss[-1200:] if bar_info(t)[0] == ref_day]
+    adim = max(1, len(gun) // 32)
+    sp = [round(x, 4) for x in gun[::adim][-32:]]
+    if gun and (not sp or sp[-1] != round(gun[-1], 4)):
+        sp.append(round(gun[-1], 4))
     return {"last_ts": last_ts, "ref_day": ref_day, "pc": pc, "dh": dh, "dl": dl,
-            "ph": ph, "pl": pl, "last_close": bars[last_ts][3]}
+            "ph": ph, "pl": pl, "last_close": bars[last_ts][3], "sp": sp}
 
 
 def summary(sym):
@@ -709,6 +715,7 @@ def summary(sym):
         "day": st["ref_day"].isoformat(),
         "t": int(last_t),
         "src": src,
+        "sp": st.get("sp") or [],
         # Seans açıkken uzun süredir veri yoksa
         "st": ses_now != "closed" and now - last_t > STALE_SEC,
         # Seans açık ama elimizdeki en son veri bugüne ait değil (eski günü bugün sanma hatası)
@@ -720,7 +727,7 @@ def list_row(sym):
     s = summary(sym)
     if not s:
         return None
-    return {k: s[k] for k in ("p", "ch", "t", "src", "st", "wd")}
+    return {k: s[k] for k in ("p", "ch", "t", "src", "st", "wd", "sp")}
 
 
 def bar_out(ts, b):
