@@ -30,6 +30,7 @@ SETUP_AD = {
     "uz_vwap": "Seans VWAP geri alma (uzatılmış)",
     "kosu": "Haberli momentum kırılımı",
     "sicrama": "Dikey sıçrama sonrası ilk geri çekilme",
+    "kirilim": "Kırılım planı (seviye önceden çizilir)",
     "geri": "Momentum ilk geri çekilme",
     "itki": "Hacimli itki (1 dk scalp)",
     "vwap_sek": "VWAP sekmesi (1 dk scalp)",
@@ -1291,6 +1292,24 @@ class Engine:
             x["_mtf"] = self.mtf(sym, tss, bars, k)
         except Exception:
             x["_mtf"] = (0, 0)
+        # Kırılım planı (kanallar gibi seviyeyi önceden çizer): onaylanan kırılım ayrı sinyal olarak ölçülür
+        pl = getattr(self, "plan", None)
+        if pl is not None:
+            try:
+                for entry, stop, risk, base, why, p in pl.kontrol(self, sym, tss, bars, k, x):
+                    T_ = x["T"]
+                    self._tgt_over[(sym, T_, "kirilim", 1)] = p["hedefler"][1]
+                    self._create(sym, x, "kirilim", 1, entry, stop, risk, self._score(x, 1, base, why, risk, sym), why)
+                    sg = self.by_id.get(f"{sym}-{T_}-kirilim-1")
+                    if sg:
+                        sg.update(plan=p["id"], hedefler=p["hedefler"], plan_tur=p["tur"], plan_tip=p.get("tip"),
+                                  plan_kanal=p.get("kanal"))
+                        sg.setdefault("f", {})["plan"] = "+".join(p["tur"])[:40]
+                        p["sig"] = sg["id"]
+            except Exception:
+                pass
+        if sym in getattr(self, "sadece_plan", ()):
+            return                                         # izleme listesindeki hisse: sadece kırılım planı
         sic = []
         if sym in self.runners:
             cands = list(self._runner(sym, x))
@@ -1424,7 +1443,7 @@ class Engine:
             return
         runner = sym in self.runners
         tgt = self._tgt_over.pop((sym, T, setup, d), None) or \
-            entry + d * (R_SICRAMA if setup == "sicrama" else R_RUNNER if runner else R_SETUP.get(setup, R_MULT)) * risk
+            entry + d * (R_SICRAMA if setup in ("sicrama", "kirilim") else R_RUNNER if runner else R_SETUP.get(setup, R_MULT)) * risk
         feats = self._features(sym, x, d)
         conf0 = conf
         if self.learner:

@@ -473,6 +473,17 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .yzc .st{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px}.yzc .st i{width:9px;height:9px;border-radius:50%}
 .yzline{margin-top:8px;font-size:12.5px;padding:7px 10px;border-radius:10px;background:rgba(185,160,255,.08);border:1px solid rgba(185,160,255,.25)}
 .yzline b{color:#C9B5FF}
+.plk{border-radius:18px;padding:13px 14px;background:var(--card);border:1px solid var(--line);margin-bottom:10px;cursor:pointer}
+.plk .h{display:flex;align-items:center;gap:10px}.plk .h b{font-size:16px}.plk .h small{display:block;color:var(--mut);font-size:12px}
+.plk .lv{margin-left:auto;text-align:right}.plk .lv b{font-size:18px;color:#7FB8FF;font-variant-numeric:tabular-nums}.plk .lv small{display:block;color:var(--mut);font-size:11.5px}
+.plk .bar{position:relative;height:8px;border-radius:9px;background:#142024;margin:12px 0 6px;overflow:visible}
+.plk .bar i{position:absolute;top:0;bottom:0;left:0;border-radius:9px;background:linear-gradient(90deg,#123A2C,#1EE3A0)}
+.plk .bar u{position:absolute;top:-4px;width:3px;height:16px;border-radius:2px;background:#7FB8FF}
+.plk .g4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-size:11px;color:var(--mut);margin-top:8px}.plk .g4 b{display:block;color:var(--tx);font-size:13.5px;font-variant-numeric:tabular-nums}
+.plk .tr{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}.plk .tr span{font-size:11px;padding:3px 8px;border-radius:99px;background:rgba(127,184,255,.1);color:#9FC3FF;border:1px solid rgba(127,184,255,.3)}
+.plk .st{font-size:11px;font-weight:800;padding:3px 9px;border-radius:99px}
+.st-bekliyor{background:rgba(127,184,255,.12);color:#9FC3FF}.st-kaçtı{background:rgba(242,193,78,.14);color:var(--wa)}.st-onaylı{background:rgba(30,227,160,.14);color:var(--up)}.st-sahte{background:rgba(255,84,104,.14);color:var(--dn)}.st-iptal,.st-süre{background:var(--card2);color:var(--mut)}
+.pls{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #142024;font-size:13px}.pls:last-child{border:0}.pls small{color:var(--mut);display:block;font-size:11.5px}
 /* ---- ana ekran v2 ---- */
 .achart{height:200px}
 .achart .ahd{position:absolute;left:2px;top:0;display:flex;gap:8px;align-items:baseline;font-size:12.5px;color:var(--mut);z-index:2}.achart .ahd b{font-size:13px;font-variant-numeric:tabular-nums}
@@ -725,7 +736,8 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 <section class="tab" id="t-tara">
   <div class="ptl"><b>Keşfet</b><span>Piyasa, haberler ve fırsatlar</span></div>
   <div class="seg2" id="kTop"><button class="ff" data-k="tumu">Tümü</button><button class="ff" data-k="hisse">Hisseler</button><button class="ff" data-k="haber">Haberler</button><button class="ff" data-k="ai">AI Sinyalleri</button><button class="ff" data-k="strateji">Stratejiler</button></div>
-  <div id="kOz"><div class="sh"><b>Öne Çıkanlar</b><span data-k2="gain">Tümü ›</span></div><div class="wl" id="kOne"></div>
+  <div id="kOz"><div class="sh"><b>📐 Kırılım planları</b><span id="kPlanN"></span></div><div id="kPlan"></div>
+  <div class="sh"><b>Öne Çıkanlar</b><span data-k2="gain">Tümü ›</span></div><div class="wl" id="kOne"></div>
     <div class="sh"><b>Bugünün En Çok Yükselenleri</b><span data-k2="gain">Tümü ›</span></div><div class="wl" id="kYuk"></div></div>
   <div id="kDet">
   <div class="hava" id="havaK"></div>
@@ -790,6 +802,8 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
   <div id="ayBilgi"></div>
   <h3>Bot ayarları</h3>
   <div class="card" style="padding:2px 14px" id="ayf">
+    <div class="fld" style="flex-wrap:wrap"><label>📐 Kırılım planı işlemleri<small>Kanallar gibi seviye çizip "X kırılırsa giriş" der. Otomatik: işlem açar, canlıda 20+ sonuçta ort. −0,2R'nin altına düşerse ya da geçmiş testte zararlı çıkarsa durur</small></label>
+      <input type="hidden" data-k="kirilim_yetki" id="kirYet"><div class="seg2 yzseg" id="kirSeg" style="width:100%;margin:8px 0 2px"><button class="ff" data-v="0">Kapalı</button><button class="ff" data-v="1">Otomatik</button><button class="ff" data-v="2">Hep açık</button></div></div>
     <div class="fld" style="flex-wrap:wrap"><label>🧠 Yapay zekâ karar yetkisi<small>Otomatik: kararları önce gölgede ölçülür, karnesi kanıtlanınca (40+ sonuç, AL/PAS farkı +0,15R) botu etkiler</small></label>
       <input type="hidden" data-k="yz_yetki" id="yzYet"><div class="seg2 yzseg" id="yzSeg" style="width:100%;margin:8px 0 2px"><button class="ff" data-v="0">Kapalı</button><button class="ff" data-v="1">Otomatik</button><button class="ff" data-v="2">Hep karar versin</button></div></div>
     <div class="fld"><label>Yeni işlem aç<small>Kapatırsan açık pozisyonlar yine yönetilir, sadece yeni işlem açılmaz</small></label><button class="tg" data-k="yeni_islem"></button></div>
@@ -866,6 +880,8 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
   <div class="lt">Öğrenme</div>
   <div class="sh" style="margin-top:4px"><b>🧠 Yapay Zekâ</b><span id="yzD"></span></div>
   <div id="yzK"></div>
+  <div class="sh"><b>📐 Kırılım planı karnesi</b><span id="plK"></span></div>
+  <div id="plKarne"></div>
   <div class="sh"><b>Karar Denetçisi</b><span id="denT"></span></div>
   <div id="denK"><div class="card meta">Karne hesaplanıyor (açılıştan ~2 dk sonra).</div></div>
   <div class="sh"><b>Modül karnesi</b><span>ayırt gücü</span></div>
@@ -1609,7 +1625,7 @@ function renderHours(){const H=(learn&&learn.saat)||[];if(!H.length){$('hrs').in
 function renderHava(){const H=status.hava||MKT.hava;if(!H||!H.etiket||H.etiket==='bilinmiyor'){for(const id of['havaA','havaK'])$(id).style.display='none';return}
   const c=H.etiket==='Güçlü'?'g':H.etiket==='Riskli'?'r':'n',t=`<i></i><span><b>Piyasa havası: ${esc(H.etiket)}</b> · ${esc((H.neden||[]).join(', '))}${H.etiket==='Riskli'?' · bot lotu küçültüyor':''}</span>`;
   for(const id of['havaA','havaK']){const e=$(id);e.className='hava '+c;e.innerHTML=t;e.style.display='flex'}}
-function renderLearn(){try{renderYZ()}catch(e){}try{renderDenetci()}catch(e){}renderBT();try{renderKT()}catch(e){}renderHours();const T=sigStats.find(r=>r.k==='Tümü'),n=T?T.n:0;$('pn').textContent=n;$('pbar').style.width=Math.min(100,n)+'%';
+function renderLearn(){try{renderYZ()}catch(e){}try{renderPlanKarne()}catch(e){}try{renderDenetci()}catch(e){}renderBT();try{renderKT()}catch(e){}renderHours();const T=sigStats.find(r=>r.k==='Tümü'),n=T?T.n:0;$('pn').textContent=n;$('pbar').style.width=Math.min(100,n)+'%';
   $('resnote').textContent=n<100?`Henüz ${n}/100 sonuç var. En az 100 işlem görmeden bu sayfadan sonuç çıkarma.`:'';$('resnote').style.display=n<100?'block':'none';
   const main=new Set(['Tümü','Piyasa öncesi','Normal seans','Piyasa sonrası','Güven ≥ 70','Güven < 70','Koşan küçük hisseler']);
   tbl('res',['Grup','Adet','Kazanma','Ort. R','Toplam R','Dolmadı','Açık'],sigStats.length?sigStats.map(r=>`<tr class="${main.has(r.k)?'main':''}"><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr.toFixed(0)+'%'}</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td class="${cls(r.tot)}">${fR(r.tot,1)}</td><td>${r.nf}</td><td>${r.open}</td></tr>`).join(''):'<tr><td colspan="7">Henüz sonuç yok.</td></tr>');
@@ -1690,7 +1706,7 @@ function heat(ch){if(ch==null)return'var(--card2)';const a=Math.min(1,Math.abs(c
   return `rgba(${base[0]},${base[1]},${base[2]},${(.16+a*.62).toFixed(2)})`}
 function mrow(x,i,vol){const r=rows[x.s]||{},ch=x.ch!=null?x.ch:r.ch;return `<div class="wr kr" data-s="${esc(x.s)}">${logo(x.s)}<div class="n"><b>${esc(x.s)}</b><small>${esc(adi(x.s,x.sek||(vol?'hacim '+fvol(x.v):'')))}</small></div>${spk(r.sp,(ch||0)>=0)}<span class="p">${x.p!=null?fp(x.p):r.p!=null?fp(r.p):'—'}</span><span class="po ${ch>0?'up':ch<0?'dn':''}">${ch!=null?fch(ch):'—'}</span></div>`}
 let kTop=ls('ktop')||'tumu';
-function renderKesfetOz(){const rr=Object.keys(rows).filter(k=>rows[k]&&rows[k].ch!=null).sort((a,b)=>Math.abs(rows[b].ch)-Math.abs(rows[a].ch)).slice(0,5);
+function renderKesfetOz(){try{renderPlanlar()}catch(e){}const rr=Object.keys(rows).filter(k=>rows[k]&&rows[k].ch!=null).sort((a,b)=>Math.abs(rows[b].ch)-Math.abs(rows[a].ch)).slice(0,5);
   $('kOne').innerHTML=rr.length?rr.map((k,i)=>mrow({s:k,p:rows[k].p,ch:rows[k].ch},i)).join(''):'<div class="meta" style="padding:14px 0">Fiyatlar yükleniyor…</div>';
   const g=(MKT.gain||[]).slice(0,6);$('kYuk').innerHTML=g.length?g.map((x,i)=>mrow(x,i)).join(''):'<div class="meta" style="padding:14px 0">Liste seans içinde dolar.</div>'}
 function renderKesfet(){for(const b of $('kTop').children)b.classList.toggle('on',b.dataset.k===kTop);
@@ -2116,6 +2132,32 @@ function renderYZ(){const el=$('yzK');if(!el)return;const Y=(learn&&learn.yz)||n
     ${Y.hata?`<div class="meta" style="margin-top:8px">Son hata: ${esc(Y.hata)}</div>`:''}${Y.hazir&&!Y.arama?'<div class="meta" style="margin-top:4px">Google arama aracı bu anahtarla kullanılamadı: aramasız çalışıyor.</div>':''}</div>`}
 $('yzSeg').addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(!b)return;$('yzYet').value=b.dataset.v;$('yzYet').dataset.dirty=1;for(const x of $('yzSeg').children)x.classList.toggle('on',x===b)});
 
+// ---------------- 📐 kırılım planları
+const PLST={bekliyor:'⏳ BEKLİYOR','kaçtı':'🏃 KAÇTI · RETEST',onaylı:'✅ KIRILDI',sahte:'❌ SAHTE',iptal:'⌛ İPTAL','süre':'⌛ SÜRE'};
+const PLTUR={taban:'taban tavanı',kaybedilen:'kaybedilen seviye',pmh:'öncesi seans tepesi',pdh:'dünkü tepe',hod:'gün tepesi',yuvarlak:'yuvarlak sayı',kanal:'kanal seviyesi'};
+function plKart(p){const px=(rows[p.sym]&&rows[p.sym].p)||p.simdi||p.px,dist=px?(p.giris/px-1)*100:null,h=p.hedefler||[];
+  const lo=p.stop,hi=h[1]||p.giris*1.1,pos=v=>Math.max(0,Math.min(100,(v-lo)/((hi-lo)||1)*100));
+  return `<div class="plk" data-sym="${esc(p.sym)}"><div class="h">${logo(p.sym)}<div><b>${esc(p.sym)}</b><small>${p.kanal?'@'+esc(p.kanal)+' seviyesi':'bot çizdi'} · şu an ${fp(px)}</small></div>
+    <div class="lv"><small>kırılırsa giriş</small><b>${fp(p.giris)}</b></div></div>
+    <div class="bar"><i style="width:${pos(px).toFixed(0)}%"></i><u style="left:${pos(p.giris).toFixed(0)}%"></u></div>
+    <div style="display:flex;justify-content:space-between;align-items:center"><span class="st st-${esc(p.st)}">${PLST[p.st]||esc(p.st)}</span><span class="meta">${dist!=null?(dist>0?'seviyeye %'+trn(dist,1):'seviyenin üstünde'):''}</span></div>
+    <div class="g4"><div>Stop<b class="dn">${fp(p.stop)}</b></div><div>K1<b>${fp(h[0])}</b></div><div>K2<b>${fp(h[1])}</b></div><div>K3<b>${fp(h[2])}</b></div></div>
+    <div class="tr">${(p.tur||[]).map(t=>`<span>${esc(PLTUR[t]||t)}</span>`).join('')}${p.yz&&p.yz.katalizor?`<span style="background:rgba(185,160,255,.1);color:#C9B5FF;border-color:rgba(185,160,255,.3)">🧠 ${esc(String(p.yz.katalizor).slice(0,40))}</span>`:''}</div></div>`}
+function renderPlanlar(){const P=(learn&&learn.plan)||null,el=$('kPlan');if(!el)return;
+  if(!P){el.innerHTML='';return}
+  const akt=(P.aktif||[]).slice().sort((a,b)=>(a.uzak||99)-(b.uzak||99));$('kPlanN').textContent=`${akt.length} aktif · ${P.izle||0} hisse izleniyor`;
+  const son=(P.son||[]).filter(p=>p.st!=='bekliyor').slice(0,5);
+  el.innerHTML=(akt.length?akt.map(plKart).join(''):`<div class="card meta" style="margin-bottom:10px">Şu an aktif plan yok. Bot yükselmeye başlayan (%3–10), koşup sönen ve kanalların seviye verdiği hisseleri izliyor; uygun seviye çıkınca "X kırılırsa giriş" planı burada ve Telegram'da görünür.</div>`)+
+    (son.length?`<div class="card" style="padding:2px 14px;margin-bottom:6px">${son.map(p=>`<div class="pls" data-sym="${esc(p.sym)}">${logo(p.sym)}<div><b>${esc(p.sym)} ${fp(p.giris)}</b><small>${esc(p.neden||'')}</small></div><span class="st st-${esc(p.st)}" style="font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:99px">${PLST[p.st]||esc(p.st)}</span></div>`).join('')}</div>`:'')}
+$('kPlan').addEventListener('click',e=>{const c=e.target.closest('[data-sym]');if(c)select(c.dataset.sym)});
+function renderPlanKarne(){const P=(learn&&learn.plan)||null,el=$('plKarne');if(!el||!P)return;
+  $('plK').textContent=P.golge?'gölgede':'işlem açıyor';
+  const K=P.karne||[];
+  el.innerHTML=`<div class="card" style="padding:4px 14px"><div class="kmr h" style="grid-template-columns:minmax(0,1fr) 44px 50px 50px 60px"><span>Seviye türü</span><span style="text-align:right">Plan</span><span style="text-align:right">Sahte</span><span style="text-align:right">Sonuç</span><span style="text-align:right">Ort. R</span></div>
+    ${K.length?K.map(r=>`<div class="kmr" style="grid-template-columns:minmax(0,1fr) 44px 50px 50px 60px"><b style="font-weight:600">${esc(r.ad)}</b><span style="text-align:right">${r.plan}</span><span style="text-align:right">${r.sahte}</span><span style="text-align:right">${r.n}</span><span style="text-align:right" class="${cls(r.avg)}">${r.avg==null?'—':fR(r.avg)}</span></div>`).join(''):'<div class="meta" style="padding:10px 0">Plan oldukça hangi seviye türünün tuttuğu burada ölçülür (taban tavanı, kaybedilen seviye, dünkü tepe, kanal seviyesi…).</div>'}</div>
+    <div class="meta" style="margin:8px 2px 0">${P.golge?esc(P.golge):'Bot onaylanan kırılımlarda işlem açıyor.'} Kanalların verdiği seviyeler de aynı onayla ölçülür.</div>`}
+$('kirSeg').addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(!b)return;$('kirYet').value=b.dataset.v;$('kirYet').dataset.dirty=1;for(const x of $('kirSeg').children)x.classList.toggle('on',x===b)});
+
 $('dmenu').addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b)showTab(b.dataset.go)});
 $('t-ayar').addEventListener('click',e=>{const g=e.target.closest('.ayr[data-go]');if(g){showTab(g.dataset.go);return}const a=e.target.closest('[data-ay]');if(!a)return;
   const d=botD||{},ac=d.account||{},k=d.capital||{};
@@ -2129,6 +2171,7 @@ function renderAyar(){const c=(botD&&botD.cfg)||{};
   for(const i of $('ayf').querySelectorAll('input'))if(document.activeElement!==i&&!i.dataset.dirty)i.value=c[i.dataset.k]!=null?c[i.dataset.k]:'';
   $('ayf').querySelector('[data-k=yeni_islem]').classList.toggle('on',c.yeni_islem!==0);
   {const v=String($('yzYet').value!==''?$('yzYet').value:(c.yz_yetki!=null?c.yz_yetki:1));for(const x of $('yzSeg').children)x.classList.toggle('on',x.dataset.v===v)}
+  {const v=String($('kirYet').value!==''?$('kirYet').value:(c.kirilim_yetki!=null?c.kirilim_yetki:1));for(const x of $('kirSeg').children)x.classList.toggle('on',x.dataset.v===v)}
   for(const b of $('ayf').querySelectorAll('.tg[data-k]'))b.classList.toggle('on',c[b.dataset.k]!==0);
   const P=status.push||{},pref=P.pref||{};
   for(const b of document.querySelectorAll('[data-p]'))b.classList.toggle('on',!!pref[b.dataset.p]);
@@ -2181,7 +2224,7 @@ function connect(){if(document.hidden||ws)return;
     else if(m.type==='bar'&&m.sym===cur){const pc=info&&info.pc;info=m.i;setLV(m.lv);applyBars(m.bars);if(info&&info.pc!==pc)setPrevLine();updateQuote()}
     else if(m.type==='daily'){daily[m.sym]={at:Date.now(),bars:(m.bars||[]).map(x=>[Date.parse(x[0]+'T00:00:00Z')/1000,x[1],x[2],x[3],x[4],x[5],1])};
       if(m.sym===cur&&isD()){srKey='';vpKey='';render(true)}}
-    else if(m.type==='sig'){sigList=m.list||[];setTimeout(renderOzet,0);setTimeout(renderAna,0);sigStats=m.stats||[];learn=m.learn||learn;if(tab==='strateji')setTimeout(renderStrateji,0);if(tab==='basari')setTimeout(renderBasari,0);if(m.mine)mine=m.mine;
+    else if(m.type==='sig'){sigList=m.list||[];setTimeout(renderOzet,0);setTimeout(renderAna,0);sigStats=m.stats||[];learn=m.learn||learn;if(tab==='tara')setTimeout(()=>{try{renderPlanlar()}catch(e){}},0);if(tab==='strateji')setTimeout(renderStrateji,0);if(tab==='basari')setTimeout(renderBasari,0);if(m.mine)mine=m.mine;
       if(knownIds===null)knownIds=new Set(sigList.map(s=>s.id));
       else for(const s of sigList.slice().reverse())if(!knownIds.has(s.id)){knownIds.add(s.id);
         if(s.super&&nowS()-s.t<900){toast(`<b>💎 Süper Fırsat · ${esc(s.sym)}</b><br><span class="meta">Giriş ${fp(s.e)} · Stop ${fp(s.s)} · Hedef ${fp(s.h)}</span>`,'',()=>select(s.sym));try{navigator.vibrate&&navigator.vibrate([220,90,220,90,420])}catch(e){}continue}

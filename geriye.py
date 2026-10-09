@@ -106,7 +106,8 @@ def slim(s):
     """Öğrenme ve raporlar için hafif kayıt."""
     return {"id": "bt-" + s["id"], "sym": s["sym"], "dir": s["dir"], "setup": s["setup"], "ses": s["ses"], "t": s["t"],
             "day": s["day"], "conf": s["conf"], "st": s["st"], "r": s.get("r"), "f": s.get("f") or {},
-            "xt": s.get("xt"), "bt": 1, "rp": round(abs(s["e"] - s["s"]) / s["e"], 5) if s.get("e") else None}
+            "xt": s.get("xt"), "bt": 1, "rp": round(abs(s["e"] - s["s"]) / s["e"], 5) if s.get("e") else None,
+            **({"plan_tur": s["plan_tur"]} if s.get("plan_tur") else {})}
 
 
 def spy_regime(bars, cal):
@@ -242,6 +243,8 @@ def summary(sigs, days, secs):
 # hızlı kırılım (5 sn'lik canlı fiyat) ve haber bilgisi test edilmez.
 import re as _re
 
+import plan as _plan
+
 _SYM_OK = _re.compile(r"^[A-Z]{1,5}$")
 
 
@@ -333,6 +336,8 @@ def kosan_test(key, secret, n_days, et, progress=None, should_stop=None, ekle=No
             eng.learner = None
             eng.bt_mode = True
             eng.runners = {}
+            eng.plan = _plan.Planci(bt=True)          # kırılım planı: hisse koşmadan önce de çalışır
+            eng.sadece_plan = {sym}
             base = len(tss) - len(day_tss)
             for k in range(max(base, 25), len(tss)):
                 T = tss[k]
@@ -341,11 +346,13 @@ def kosan_test(key, secret, n_days, et, progress=None, should_stop=None, ekle=No
                 if sym not in eng.runners and bars[T][3] >= prev_c * 1.10:
                     eng.runners[sym] = {"sym": sym, "pct": round((bars[T][3] / prev_c - 1) * 100, 1), "news": None,
                                         "src": "test", "first": T, "price": bars[T][3]}
-                if sym in eng.runners:
-                    try:
-                        eng._evaluate(sym, tss, bars, k, T + 60)
-                    except Exception:
-                        pass
+                    eng.sadece_plan.discard(sym)
+                if cal.bar_info(T)[0] != d:
+                    continue
+                try:
+                    eng._evaluate(sym, tss, bars, k, T + 60)
+                except Exception:
+                    pass
             fin = day_tss[-1] + 4 * 3600
             for sig in eng.signals:
                 eng._update(sig, day_tss, bars, fin)

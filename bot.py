@@ -256,6 +256,10 @@ class Bot:
         # Karar Denetçisi: 5 bağımsız kontrol → AL / BEKLE / PAS GEÇ (sinyal her durumda gölgede takip edilir)
         den = sig.get("den")
         den_lot = 1.0
+        if den and sig.get("setup") == "kirilim" and den["karar"] in ("PAS", "BEKLE") \
+                and not any(v.get("k") == "veto" for v in (den.get("mod") or {}).values()):
+            # kırılım planında onay (hacim + mum kapanışı) zaten alındı; sadece VETO (seyreltme, spread, zarar hakkı) durdurur
+            den = dict(den, karar="AL")
         if den and self.cfg.get("denetci", 1) and not onayli:
             if den["karar"] == "PAS":
                 return skip("Karar Denetçisi PAS GEÇ — " + den["neden"])
@@ -329,9 +333,11 @@ class Bot:
             for p in self.open_positions():
                 if p["st"] != "açık" or not p.get("entry") or not p.get("risk") or (p.get("half") or {}).get("st") == "doldu":
                     continue
+                if now - (p.get("et") or p.get("opened") or now) < 20 * 60:
+                    continue                      # yeni açılmış pozisyonu hemen kapatma (al-sat-al masrafı)
                 px_ = self.price(p["sym"])[0] or p["entry"]
                 ur = p["dir"] * (px_ - p["entry"]) / p["risk"]
-                if ur <= 0.3 and (p.get("conf") or 0) < conf:
+                if ur <= 0.3 and (p.get("conf") or 0) + 10 <= conf:
                     adaylar.append((ur, p.get("conf") or 0, p, px_))
             if adaylar:
                 ur, _, yer, px_ = min(adaylar, key=lambda a: (a[0], a[1]))

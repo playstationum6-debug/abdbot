@@ -100,6 +100,10 @@ class DisSinyal:
         key = f"{kanal}-{mid}-{c['sym']}" if mid else f"{kanal}-{t_post}-{c['sym']}"
         if any(x["id"] == key for x in self.items):
             return None, f"Bu mesaj zaten kayıtlı ({c['sym']})."
+        if re.search(r"gün\s*sonu|özet|bugün\s+[^\n]{0,40}\d+\s*işlem", text, re.I):
+            return None, f"Bu bir gün sonu / özet mesajı ({c['sym']}); sonradan yazıldığı için sinyal sayılmadı."
+        if any(x["kanal"] == str(kanal)[:40] and x["sym"] == c["sym"] and abs(x["t"] - t_post) < 900 for x in self.items):
+            return None, f"{c['sym']} için bu kanaldan 15 dk içinde zaten sinyal var; tekrarı sayılmadı."
         if c["cikis"]:
             return None, (f"Bu bir çıkış/sonuç mesajı gibi görünüyor ({c['sym']}); yeni sinyal olarak kaydetmedim. "
                           f"Bot, kanalın verdiği sinyalin sonucunu kendi ölçüyor.")

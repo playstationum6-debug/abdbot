@@ -140,6 +140,8 @@ class Scanner:
         self.news_seen = set()
         self.spread = {}             # sembol -> (spread %, zaman): Alpaca IEX en iyi alış/satış
         self.red = {}                # sembol -> {"t", "n"}: listeye neden alınmadı (/neden komutu)
+        self.aday = {}               # yükselmeye başlayan (%3–10) hisseler: kırılım planı için izlenir
+        self.sonen = {}              # bugün koşup sönen hisseler (zirve %25+): geri alma planı için izlenir
         self.recent_news_syms = {}   # sembol -> zaman (seans dışı taramada aday havuzu)
         self.ext_status = "—"
         self.tv_status = "—"
@@ -212,6 +214,14 @@ class Scanner:
         p_ses = (px / day - 1) * 100 if ses == "post" and day else None   # sonrası seans: bugünkü kapanışa göre
         t = _ts(lt.get("t"))
         return p_prev, p_ses, px, t
+
+    def _aday_ekle(self, sym, pct, price, vol=None, src=""):
+        if not SYM_RE.match(sym or "") or sym in self.core or sym in self.runners or not price or price < 0.5:
+            return
+        self.aday[sym] = {"pct": round(pct, 2), "price": price, "vol": vol, "t": time.time(), "src": src}
+        if len(self.aday) > 200:
+            for k in sorted(self.aday, key=lambda z: self.aday[z]["t"])[:60]:
+                self.aday.pop(k, None)
 
     def _red(self, sym, n):
         self.red[sym] = {"t": time.time(), "n": n}
@@ -368,7 +378,9 @@ class Scanner:
             if pct < self.min_pct:
                 if pct >= 3 and g["symbol"] not in self.runners:
                     self._red(g["symbol"], f"{'öncesi' if ses == 'pre' else 'sonrası'} seansta {pct:+.1f}% "
-                                           f"(listeye girmek için en az +%{self.min_pct:.0f})")
+                                           f"(listeye girmek için en az +%{self.min_pct:.0f}) · kırılım planı için izlemede")
+                    if vol >= TV_MIN_VOL / 2:
+                        self._aday_ekle(g["symbol"], pct, px, vol, "seans dışı")
                     continue
                 break
             if g["symbol"] in self.core:
@@ -405,7 +417,8 @@ class Scanner:
                 if await self._add(c, sym, p_prev if p_prev is not None else ses_move, px, "seans dışı"):
                     n_add += 1
             elif p_prev is not None and p_prev >= 3:
-                self._red(sym, f"seans dışı {p_prev:+.1f}% (listeye girmek için en az +%{self.min_pct:.0f})")
+                self._red(sym, f"seans dışı {p_prev:+.1f}% (listeye girmek için en az +%{self.min_pct:.0f}) · kırılım planı için izlemede")
+                self._aday_ekle(sym, p_prev, px, None, "seans dışı")
         self.ext_status = f"{len(snaps)} hisse tarandı, {n_add} eklendi ({datetime.now().strftime('%H:%M')})"
 
     async def scan(self, et, ses=None):
@@ -416,6 +429,8 @@ class Scanner:
             self.day = today
             self.runners = {}
             self.dropped = {}
+            self.aday = {}
+            self.sonen = {}
             self.ver += 1
         try:
             async with httpx.AsyncClient(timeout=20) as c:
@@ -450,7 +465,8 @@ class Scanner:
                     if not SYM_RE.match(sym) or not is_common(sym) or sym in self.core \
                             or pct < self.min_pct or price <= 0 or price < self.min_price:
                         if SYM_RE.match(sym) and sym not in self.core and sym not in self.runners and 3 <= pct < self.min_pct:
-                            self._red(sym, f"gün içinde {pct:+.1f}% (listeye girmek için en az +%{self.min_pct:.0f})")
+                            self._red(sym, f"gün içinde {pct:+.1f}% (listeye girmek için en az +%{self.min_pct:.0f}) · kırılım planı için izlemede")
+                            self._aday_ekle(sym, pct, price, None, "gün içi")
                         continue
                     cands.append((pct, sym, price))
                 cands.sort(reverse=True)
@@ -682,6 +698,8 @@ class Scanner:
             if why:
                 del self.runners[sym]
                 self.dropped[sym] = (now, why)
+                if (info.get("peak") or info.get("pct") or 0) >= 25:   # koşup sönen: geri alma planı için izlemeye devam
+                    self.sonen[sym] = {"peak": info.get("peak") or info.get("pct"), "t": now, "why": why}
                 changed = True
                 if self.log:
                     self.log.info("Tarayıcı: %s elendi — %s", sym, why)
