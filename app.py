@@ -13,6 +13,9 @@ ABD Trade Botu — Adım 1: Canlı veri + grafik
 """
 import asyncio
 import base64
+import ctypes
+import gc
+import sys
 import hashlib
 import hmac
 import json
@@ -122,7 +125,34 @@ DB_PATH = BASE / os.getenv("DB_PATH", "data/piyasa.db")
 POLL_ACTIVE = int(os.getenv("YAHOO_POLL_SEC", "60"))  # seans içindeyken
 POLL_IDLE = 900                                       # piyasa kapalıyken
 KEEP_DAYS = int(os.getenv("KEEP_DAYS", "20"))         # veritabanında tutulan gün
-MEM_SEC = 7 * 86400                                   # bellekte tutulan süre
+MEM_SEC = int(os.getenv("MEM_DAYS", "4")) * 86400     # ana liste: bellekte tutulan süre (sinyaller ~4 gün yeter)
+YAN_SEC = 86400                                       # koşusu biten / bakılıp geçilen hisseler: 1 gün
+BELLEK_SINIR = int(os.getenv("BELLEK_SINIR_MB", "430"))  # Render ücretsiz: 512 MB; bunu geçince önbellek boşaltılır
+try:   # Python'un boşalan belleği işletim sistemine geri vermesi + iş parçacığı başına ayrı bellek havuzunu sınırla
+    _LIBC = ctypes.CDLL("libc.so.6")
+    _LIBC.mallopt(-8, 2)                              # M_ARENA_MAX = 2
+except Exception:
+    _LIBC = None
+
+
+def bellek_mb():
+    try:
+        with open("/proc/self/status") as f:
+            for ln in f:
+                if ln.startswith("VmRSS:"):
+                    return int(ln.split()[1]) // 1024
+    except Exception:
+        pass
+    return 0
+
+
+def bellek_bosalt():
+    gc.collect()
+    if _LIBC:
+        try:
+            _LIBC.malloc_trim(0)
+        except Exception:
+            pass
 STALE_SEC = 180                                       # seans açıkken bu kadar veri yoksa "eski"
 BAD_TICK = 0.10                                       # son canlı fiyattan %10+ sapan tek işlem = hatalı tick
 
@@ -536,10 +566,14 @@ class Store:
         self.db.executemany("INSERT OR REPLACE INTO bars VALUES (?,?,?,?,?,?,?,?)", rows)
         self.db.commit()
 
-    def prune(self):
-        cut = int(time.time() - MEM_SEC)
+    def prune(self, aktif=None, ana_sec=None):
+        """Eski mumları bellekten at. aktif dışındaki hisselerde (koşusu bitmiş, bakılıp geçilmiş) 1 gün tutulur."""
+        now = time.time()
+        cut = int(now - (ana_sec or MEM_SEC))
+        cut_yan = int(now - YAN_SEC)
         for sym, bars in self.bars.items():
-            for ts in [t for t in bars if t < cut]:
+            c = cut if (aktif is None or sym in aktif) else max(cut, cut_yan)
+            for ts in [t for t in bars if t < c]:
                 del bars[ts]
         self.db.execute("DELETE FROM bars WHERE ts < ?", (int(time.time() - KEEP_DAYS * 86400),))
         self.db.commit()
@@ -572,6 +606,38 @@ def runner_pct(sym):
 
 def all_syms():
     return SYMBOLS + [s for s in scanner.runners if s not in SYMBOLS]
+
+
+def aktif_semboller():
+    """Bellekte uzun tutulacak hisseler: ana liste, koşanlar, açık pozisyonlar, yeni bakılanlar, açık kanal sinyalleri."""
+    a = set(SYMBOLS) | set(scanner.runners)
+    now = time.time()
+    a |= {s_ for s_, t_ in VIEWED.items() if now - t_ < 3600}
+    try:
+        a |= {p["sym"] for p in bot.open_positions()}
+    except Exception:
+        pass
+    a |= {x["sym"] for x in dis.acik()}
+    return a
+
+
+def bellek_acil():
+    """Bellek sınırı aşılıyor: önbellekleri boşalt, mumları kısalt (çökmektense biraz yavaşlamak iyidir)."""
+    once = bellek_mb()
+    for c_ in (_static_cache, _lv_cache, _daily_cache, _kar_cache, _m15_cache):
+        c_.clear()
+    try:
+        tg.tr_cache.clear()
+    except Exception:
+        pass
+    store.prune(aktif_semboller(), ana_sec=min(MEM_SEC, 3 * 86400))
+    store.prune_xvol()
+    bellek_bosalt()
+    BELLEK["acil"] += 1
+    log.warning("Bellek %d MB → %d MB (önbellek boşaltıldı)", once, bellek_mb())
+
+
+BELLEK = {"mb": 0, "max": 0, "acil": 0}
 
 
 def ensure_sym(sym):
@@ -828,6 +894,9 @@ def status_payload():
         "tv": scanner.tv_status,
         "dis": dis.status,
         "dinle": dinle.status,
+        "gecikme": f"şu an {LAG['son']:.1f} sn · son 1 saatte en çok {LAG['max']:.1f} sn",
+        "bellek": f"{BELLEK['mb']} MB (en çok {BELLEK['max']}, sınır 512)"
+                  + (f" · {BELLEK['acil']} kez boşaltıldı" if BELLEK["acil"] else ""),
         "nRun": len(scanner.runners),
         "sigN": len(engine.signals),
         "sigOpen": engine.open_count(),
@@ -1916,7 +1985,7 @@ async def signal_loop():
         cu = state.yahoo_t0
         engine.runners = scanner.runners
         try:
-            learner.rebuild(engine.signals + BT["sigs"] + dis.as_signals())
+            await asyncio.to_thread(learner.rebuild, list(engine.signals) + BT["sigs"] + dis.as_signals())
         except Exception as e:
             log.warning("Öğrenme hatası: %s", e)
         syms = all_syms()
@@ -2252,7 +2321,17 @@ async def bt_load():
         async with httpx.AsyncClient(timeout=60) as c:
             d = await backup._get(c, BT_PATH)
         if isinstance(d, dict):
-            BT.update(sigs=d.get("sigs") or [], sum=d.get("sum"), t=d.get("t") or 0)
+            sigs_ = d.get("sigs") or []
+            for x_ in sigs_:      # aynı metinler (kurgu, koşul değerleri) bellekte tek kopya: ~10 MB tasarruf
+                for k_ in ("sym", "setup", "ses", "st", "day"):
+                    if isinstance(x_.get(k_), str):
+                        x_[k_] = sys.intern(x_[k_])
+                f_ = x_.get("f")
+                if isinstance(f_, dict):
+                    x_["f"] = {sys.intern(k): (sys.intern(v) if isinstance(v, str) else v) for k, v in f_.items()}
+            BT.update(sigs=sigs_, sum=d.get("sum"), t=d.get("t") or 0)
+            del d
+            bellek_bosalt()
         async with httpx.AsyncClient(timeout=60) as c:
             dv = await backup._get(c, BT_DEVAM)
         # yarıda kalan test: sunucu yeniden başladıysa kaldığı yerden devam eder (24 saat içinde)
@@ -3510,7 +3589,7 @@ async def dis_iletildi(m):
         tg.send(_h(why), chat=chat, thread=thread)
         return
     backup.data["dis"] = dis.st
-    backup.dirty = True
+    yedek_hemen()
     sym = it["sym"]
     if tarayici.SYM_RE.match(sym):
         ensure_sym(sym)
@@ -3532,7 +3611,7 @@ async def dis_oto(m):
     if not it:
         return False
     backup.data["dis"] = dis.st
-    backup.dirty = True
+    yedek_hemen(60)
     sym = it["sym"]
     if tarayici.SYM_RE.match(sym) and time.time() - it["t"] < 6 * 3600:
         ensure_sym(sym)
@@ -3547,9 +3626,20 @@ async def dis_oto(m):
     return True
 
 
+_YEDEK_HEMEN = {"t": 0.0}
+
+
+def yedek_hemen(min_ara=20):
+    """Önemli değişiklikte yedeği beklemeden al (bot sık yeniden başlarsa kayıt kaybolmasın)."""
+    backup.dirty = True
+    if backup.enabled and time.time() - _YEDEK_HEMEN["t"] >= min_ara:
+        _YEDEK_HEMEN["t"] = time.time()
+        asyncio.create_task(backup.save(engine, bot))
+
+
 def _dinle_kaydet():
     backup.data["dinle"] = dinle.st
-    backup.dirty = True
+    yedek_hemen()
 
 
 async def dinle_loop():
@@ -3594,7 +3684,7 @@ async def dis_loop():
                 VIEWED[s_] = now
         if degisti:
             backup.data["dis"] = dis.st
-            backup.dirty = True
+            yedek_hemen(60)
         dis.status = f"{len(dis.items)} kayıt, {len(dis.acik())} açık"
 
 
@@ -3987,16 +4077,33 @@ def compare_rows():
                  {"usd": round(sum(p["pnl"] for p in real), 2)})]
 
 
+LAG = {"max": 0.0, "son": 0.0, "t": 0.0}
+
+
 async def housekeeping():
     n = 0
     while True:
+        t0 = time.monotonic()
         await asyncio.sleep(15)
+        lag = time.monotonic() - t0 - 15
+        LAG["son"] = round(lag, 1)
+        if lag > LAG["max"] or time.time() - LAG["t"] > 3600:
+            LAG["max"], LAG["t"] = round(max(lag, 0.0), 1), time.time()
+        if lag > 8:
+            log.warning("Ana döngü %.1f sn kilitlendi", lag)
         n += 1
         try:
             store.flush()
+            mb = bellek_mb()
+            BELLEK["mb"], BELLEK["max"] = mb, max(BELLEK["max"], mb)
+            if mb > BELLEK_SINIR:
+                bellek_acil()
+            elif n % 20 == 0:  # 5 dk'da bir: eski mumları at, belleği sisteme geri ver
+                store.prune(aktif_semboller())
+                bellek_bosalt()
             if n % 240 == 0:   # saatte bir
                 await cal.refresh()
-                store.prune()
+                store.prune(aktif_semboller())
                 store.prune_xvol()
             if backup.enabled and (n * 15) % BACKUP_SEC < 15:
                 await backup.save(engine, bot)
@@ -4020,6 +4127,9 @@ async def lifespan(app):
     await bt_load()
     dis.st = backup.data.setdefault("dis", {"items": []})
     dinle.st = backup.data.setdefault("dinle", {"kanallar": {}})
+    for _k in re.split(r"[,\s]+", os.getenv("TG_KANALLAR", "")):   # Render'da sabit liste: @a,@b
+        if _k.strip():
+            dinle.ekle(_k)
     dinle.on_msg = dis_oto
     learner.rebuild(engine.signals + BT["sigs"] + dis.as_signals())
     apply_ayar(backup.data.get("ayar"))
