@@ -1900,7 +1900,8 @@ async def news_loop():
                             feed_add("haber", syms, n.get("headline", ""), sub=n.get("source", ""),
                                      tone=kind, t=_iso_epoch(n.get("created_at", "")), url=n.get("url", ""),
                                      key=f"n:{n.get('id')}",
-                                     extra={"word": word, "watched": bool(watched), "ai": ai or None})
+                                     extra={"word": word, "watched": bool(watched), "ai": ai or None,
+                                            "oz": (n.get("summary") or "")[:170]})
                         # haber düşen izlenmeyen hisse: fiyat tepki verdiyse hemen koşanlara al
                         try:
                             yeni = await scanner.haber_tara(items, cal.session(time.time()))
@@ -1980,7 +1981,7 @@ async def send_sig(cl):
                    "mine": engine.for_symbol(cl.sym, time.time() - 4 * 86400) if cl.sym else [],
                    "learn": {"ins": learner.insights(), "groups": learner.group_rows(), "cmp": compare_rows(),
                              "saat": saat_tablosu(), "dis": dis.karne(),
-                             "den": DEN["karne"], "perf": denetci.performans(bot.positions),
+                             "den": DEN["karne"], "perf": denetci.performans(bot.positions), "strat": strateji_ozet(),
                              "bt": {k: BT[k] for k in ("sum", "t", "running", "bekliyor", "prog", "hata")}}})
 
 
@@ -3128,6 +3129,44 @@ def kurgu_istat(gun=30):
              "tot": round(v[2], 1), "kapali": k in kap} for k, v in sorted(rows.items(), key=lambda kv: -kv[1][0])] + \
            [{"k": k, "ad": a, "n": 0, "wr": None, "avg": None, "tot": 0, "kapali": k in kap}
             for k, a in sinyal.SETUP_AD.items() if k not in rows]
+
+
+_STRAT = {"t": 0, "d": None}
+
+
+def strateji_ozet(gun=30):
+    """Stratejiler sayfası: kurgu başına son N gün (canlı sinyaller + geçmiş test ayrı), eğri ve sık hisseler. 60 sn önbellek."""
+    now = time.time()
+    if _STRAT["d"] is not None and now - _STRAT["t"] < 60:
+        return _STRAT["d"]
+    kap = set(BOT_CFG.get("kapali") or [])
+    canli, test = {}, {}
+    for s_ in _sim_sinyaller(gun):
+        g = (test if s_["bt"] else canli).setdefault(s_["setup"], {"n": 0, "w": 0, "tot": 0.0, "eq": [], "sym": {}, "son": 0})
+        g["n"] += 1
+        g["w"] += 1 if s_["r"] > 0 else 0
+        g["tot"] += s_["r"]
+        g["eq"].append(round(g["tot"], 2))
+        g["sym"][s_["sym"]] = g["sym"].get(s_["sym"], 0) + 1
+        g["son"] = max(g["son"], s_["t"])
+
+    def bic(d):
+        out = []
+        for k, g in d.items():
+            eq = g["eq"]
+            if len(eq) > 40:
+                adim = len(eq) / 40.0
+                eq = [eq[int(i * adim)] for i in range(40)] + [eq[-1]]
+            out.append({"k": k, "ad": sinyal.SETUP_AD.get(k, k), "n": g["n"], "wr": round(100 * g["w"] / g["n"]),
+                        "tot": round(g["tot"], 1), "avg": round(g["tot"] / g["n"], 3), "eq": eq,
+                        "sym": [x for x, _ in sorted(g["sym"].items(), key=lambda kv: -kv[1])[:3]],
+                        "son": int(g["son"]), "kapali": k in kap})
+        out.sort(key=lambda x: -x["tot"])
+        return out
+
+    d = {"gun": gun, "canli": bic(canli), "test": bic(test)}
+    _STRAT.update(t=now, d=d)
+    return d
 
 
 def simulasyon(p):
