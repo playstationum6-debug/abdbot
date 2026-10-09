@@ -230,3 +230,137 @@ def summary(sigs, days, secs):
             "hacim": by(lambda s: s["f"].get("volr", "?")),
             "seans": by(lambda s: s["ses"]),
             "yon": by(lambda s: "AL" if s["dir"] > 0 else "SAT")}
+
+
+# ----------------------------------------------------------------- koşan hisse testi (küçük hisseler)
+# Ana test koşan hisseleri ölçemiyordu (o günlerin tarayıcı listesi yok). Burada liste yeniden kurulur:
+# bütün ABD hisselerinin günlük mumlarından "gün içinde önceki kapanışa göre +%25 üstüne çıkan, hacimli" günler
+# bulunur; o günün dakikalık mumlarında hisse +%10'u geçtiği dakikadan itibaren "koşan" sayılır (canlı tarayıcı gibi)
+# ve koşan kurguları (kosu, geri, onay, gapgo, sicrama …) aynı motorla çalıştırılır.
+# Sınırlar: sadece normal seans günlük mumuyla aday seçilir (yalnız öncesi seansta koşup sönenler kaçar);
+# veri bütün borsalardan (SIP) gelir, canlıda öncesi/sonrası seans hacmi sadece IEX: hacim kapıları testte daha gevşek;
+# hızlı kırılım (5 sn'lik canlı fiyat) ve haber bilgisi test edilmez.
+import re as _re
+
+_SYM_OK = _re.compile(r"^[A-Z]{1,5}$")
+
+
+def _get(c, url, hdr, params):
+    for _ in range(6):
+        r = c.get(url, headers=hdr, params=params)
+        if r.status_code == 429:
+            time.sleep(3)
+            continue
+        r.raise_for_status()
+        return r.json()
+    raise RuntimeError("Alpaca istek sınırı")
+
+
+def kosan_adaylari(c, hdr, trade_days, et, min_pct=25.0, min_vol=500_000, max_n=120, ekle=None):
+    """[(sym, gün, önceki kapanış, gün içi en yüksek %)] — en yeni günler önce."""
+    js = _get(c, "https://paper-api.alpaca.markets/v2/assets", hdr, {"status": "active", "asset_class": "us_equity"})
+    syms = [a["symbol"] for a in js if a.get("tradable") and _SYM_OK.match(a.get("symbol") or "")
+            and a.get("exchange") in ("NASDAQ", "NYSE", "AMEX", "ARCA", "BATS")]
+    start = datetime.combine(trade_days[0], dtime(0), tzinfo=et).astimezone(UTC)
+    end = datetime.now(UTC) - timedelta(minutes=20)
+    gunler = set(trade_days[1:])
+    out = []
+    for i in range(0, len(syms), 200):
+        params = {"symbols": ",".join(syms[i:i + 200]), "timeframe": "1Day", "feed": "sip", "limit": 10000,
+                  "adjustment": "raw", "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"), "end": end.strftime("%Y-%m-%dT%H:%M:%SZ")}
+        rows = {}
+        for _ in range(20):
+            js = _get(c, "https://data.alpaca.markets/v2/stocks/bars", hdr, params)
+            for s_, bs in (js.get("bars") or {}).items():
+                rows.setdefault(s_, []).extend(bs)
+            tok = js.get("next_page_token")
+            if not tok:
+                break
+            params["page_token"] = tok
+        for s_, bs in rows.items():
+            bs.sort(key=lambda b: b["t"])
+            for a, b in zip(bs, bs[1:]):
+                pc, h, v = float(a["c"]), float(b["h"]), float(b.get("v") or 0)
+                d = datetime.fromisoformat(b["t"].replace("Z", "+00:00")).astimezone(et).date()
+                if d in gunler and pc >= 0.5 and v >= min_vol and h / pc - 1 >= min_pct / 100:
+                    out.append((s_, d, pc, round((h / pc - 1) * 100, 1)))
+        time.sleep(0.3)
+    for s_, d in (ekle or []):                      # canlıda koşan listesine girmiş / kanalda geçmiş olanlar
+        if d in gunler and not any(x[0] == s_ and x[1] == d for x in out):
+            out.append((s_, d, None, None))
+    out.sort(key=lambda x: (x[1], x[3] or 0), reverse=True)
+    return out[:max_n], len(syms)
+
+
+def kosan_test(key, secret, n_days, et, progress=None, should_stop=None, ekle=None, max_n=120):
+    """Dönüş: (sinyaller, özet). Ayrı iş parçacığında çalıştırılır."""
+    hdr = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
+    now = datetime.now(UTC)
+    t0 = time.time()
+    out = []
+    with httpx.Client(timeout=40) as c:
+        days = calendar(c, hdr, (now - timedelta(days=int(n_days * 1.6) + 10)).date(), now.date())
+        trade_days = sorted(d for d in days if d <= datetime.now(et).date())[-(n_days + 1):]
+        if len(trade_days) < 2:
+            return [], {"hata": "takvim alınamadı"}
+        cal = BtCal({d: days[d] for d in trade_days}, et)
+        if progress:
+            progress(0, 0, 0, 0, "aday hisseler bulunuyor (bütün borsa, günlük mumlar)…")
+        adaylar, n_tum = kosan_adaylari(c, hdr, trade_days, et, ekle=ekle, max_n=max_n)
+        for n, (sym, d, pc, hp) in enumerate(adaylar):
+            if should_stop and should_stop():
+                break
+            i = trade_days.index(d)
+            p = trade_days[i - 1]
+            start = datetime.combine(p, dtime(4), tzinfo=et).astimezone(UTC)
+            end = min(datetime.combine(d, dtime(20), tzinfo=et).astimezone(UTC), now - timedelta(minutes=20))
+            try:
+                bars = fetch(c, hdr, sym, start, end)
+            except Exception:
+                continue
+            tss = sorted(bars)
+            day_tss = [t for t in tss if cal.bar_info(t)[0] == d]
+            prev_c = None
+            for t in tss:
+                if cal.bar_info(t)[0] == p and cal.bar_info(t)[1] == 1:
+                    prev_c = bars[t][3]
+            prev_c = prev_c or pc
+            if len(day_tss) < 30 or not prev_c:
+                continue
+            store = _Store()
+            store.bars[sym] = bars
+            eng = sinyal.Engine(store, cal.bar_info, cal, et)
+            eng.learner = None
+            eng.bt_mode = True
+            eng.runners = {}
+            base = len(tss) - len(day_tss)
+            for k in range(max(base, 25), len(tss)):
+                T = tss[k]
+                if cal.bar_info(T)[1] == 3:
+                    continue
+                if sym not in eng.runners and bars[T][3] >= prev_c * 1.10:
+                    eng.runners[sym] = {"sym": sym, "pct": round((bars[T][3] / prev_c - 1) * 100, 1), "news": None,
+                                        "src": "test", "first": T, "price": bars[T][3]}
+                if sym in eng.runners:
+                    try:
+                        eng._evaluate(sym, tss, bars, k, T + 60)
+                    except Exception:
+                        pass
+            fin = day_tss[-1] + 4 * 3600
+            for sig in eng.signals:
+                eng._update(sig, day_tss, bars, fin)
+            for s_ in eng.signals:
+                if s_.get("r") is not None:
+                    x = slim(s_)
+                    x["id"] = "kt-" + s_["id"]
+                    x["runner"] = 1
+                    out.append(x)
+            del eng, store, bars
+            gc.collect()
+            if progress:
+                progress(n + 1, len(adaylar), len(out), time.time() - t0, sym)
+            time.sleep(0.2)
+    summ = summary(out, trade_days[1:], time.time() - t0)
+    summ["aday"] = len(adaylar)
+    summ["taranan"] = n_tum
+    return out, summ

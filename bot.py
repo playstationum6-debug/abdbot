@@ -240,6 +240,9 @@ class Bot:
                 return skip(f"{sec} sektöründe zaten {len(same)} açık pozisyon var (sınır {lim_s})")
         if sig["setup"] in (self.cfg.get("kapali") or []):
             return skip("bu kurgu Ayarlar'dan kapatıldı (sinyal öğrenme için takip ediliyor)")
+        golge = self.golge(sig["setup"]) if getattr(self, "golge", None) else None
+        if golge:
+            return skip(golge)
         if d < 0 and ses != "regular":
             return skip("uzatılmış seansta açığa satış yapılmıyor")
         if d < 0 and sig.get("runner") and sig["setup"] != "fade":

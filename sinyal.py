@@ -29,6 +29,7 @@ SETUP_AD = {
     "uz_kirilim": "Seans aralığı kırılımı (uzatılmış)",
     "uz_vwap": "Seans VWAP geri alma (uzatılmış)",
     "kosu": "Haberli momentum kırılımı",
+    "sicrama": "Dikey sıçrama sonrası ilk geri çekilme",
     "geri": "Momentum ilk geri çekilme",
     "itki": "Hacimli itki (1 dk scalp)",
     "vwap_sek": "VWAP sekmesi (1 dk scalp)",
@@ -53,6 +54,7 @@ FEE = 0.00005                                              # tek yön masraf pay
 
 R_MULT = 2.0             # hedef = 2R
 R_RUNNER = 3.0           # küçük/haberli koşan hisselerde hedef = 3R
+R_SICRAMA = 2.0          # dikey sıçrama: geniş stop olduğu için hedef 2R
 
 # Haberle koşan küçük hisseler: kayma çok daha yüksek varsayılır
 SLIP_RUNNER = {"regular": 0.005, "pre": 0.008, "post": 0.008}
@@ -787,22 +789,111 @@ class Engine:
                 break
         return out
 
+    def _red(self, sym, x, kapi, neden, hizli=False):
+        """/neden komutu için: bu hisse en son hangi kapıya takıldı (canlıda; geçmiş testte tutulmaz)."""
+        if getattr(self, "bt_mode", False):
+            return
+        d = getattr(self, "red", None)
+        if d is None:
+            d = self.red = {}
+        k = (sym, "hizli" if hizli else "mum")
+        d[k] = {"t": x.get("T"), "kapi": kapi, "n": neden, "ses": x.get("ses")}
+        if len(d) > 400:
+            for kk in sorted(d, key=lambda z: d[z]["t"] or 0)[:100]:
+                d.pop(kk, None)
+
+    def _sicrama(self, sym, x):
+        """Dikey sıçrama sonrası ilk geri çekilme (sadece alış, koşan hisseler):
+        1) son ~12 mum içinde, önceki mumların tepesini (L) tek mumda %6+ aşan, hacmi en az 3 kat dev yeşil mum
+        2) ardından 1–6 mumluk geri çekilme: sıçramanın %20–70'ini geri verir, L'nin üstünde tutar, hacim düşer
+        3) giriş: mum önceki mumun tepesini aşıp yeşil kapanınca; stop geri çekilme dibinin %1 altında
+        Diğer koşan kurallarındaki 'mum çok büyük' ve 'seyrek işlem' kapıları burada yok: kurgunun kendisi o."""
+        out = []
+        info = self.runners.get(sym, {})
+        if info.get("news_kind") == "kötü" or (info.get("sec") or {}).get("kind") == "seyreltme":
+            return out
+        rec = x["recent"]
+        if len(rec) < 7 or not x["pc"]:
+            return out
+        T, c, o = x["T"], x["c"], x["o"]
+        move = (c / x["pc"] - 1) * 100
+        if move < RUN_MIN_MOVE or c <= o or not self._ready(sym, "sicrama", 1, T):
+            return out
+        cur, prev = rec[-1], rec[-2]
+        if c <= prev[1]:
+            return out
+        for j in range(len(rec) - 3, 2, -1):          # en yeni sıçramadan geriye
+            oj, hj, lj, cj, vj = rec[j][:5]
+            pre = rec[max(0, j - 6):j]
+            L = max(b[1] for b in pre)
+            govde = [abs(b[3] - b[0]) for b in pre]
+            med = sorted(govde)[len(govde) // 2] if govde else 0
+            pv = sum(b[4] for b in pre) / len(pre) if pre else 0
+            if not (cj > oj and cj >= L * 1.06 and (cj - oj) >= max(3 * med, oj * 0.04) and vj >= 3 * max(pv, 1)):
+                continue
+            after = rec[j + 1:-1]
+            if not after:
+                return out
+            pk_i = max(range(len(after)), key=lambda i: after[i][1])
+            peak = max(hj, after[pk_i][1])
+            pull = after[pk_i + 1:] if after[pk_i][1] >= hj else after
+            if not 1 <= len(pull) <= 6:
+                self._red(sym, x, "sıçrama", f"sıçrama var ({f2(L)} → {f2(peak)}) ama geri çekilme bekleniyor")
+                return out
+            pull_low = min(b[2] for b in pull)
+            dep = (peak - pull_low) / (peak - L) if peak > L else 9
+            pull_v = sum(b[4] for b in pull) / len(pull)
+            aktif = sum(1 for b in rec[j:] if b[4] > 0) / len(rec[j:])
+            if pull_low <= L:
+                self._red(sym, x, "sıçrama", f"sıçrama geri çekilmede kırılım seviyesinin ({f2(L)}) altına indi: kurgu bozuldu")
+                return out
+            if not (0.2 <= dep <= 0.7) or pull_v > 0.6 * vj or aktif < 0.7 or c > peak * 1.01:
+                self._red(sym, x, "sıçrama", f"sıçrama var ama geri çekilme uygun değil (sıçramanın %{dep * 100:.0f}'i geri verildi, "
+                          f"%20–70 arası bekleniyor)")
+                return out
+            stop = pull_low * 0.99                     # geri çekilme dibinin %1 altı (L çoğu zaman %15+ uzakta)
+            risk = c - stop
+            if risk <= c * 0.01 or risk > c * 0.15:
+                self._red(sym, x, "sıçrama", f"sıçrama kurgusunda stop %{risk / c * 100:.0f} uzakta (en fazla %15)")
+                return out
+            why = [f"Dikey sıçrama: {f2(L)} seviyesi tek mumda +%{(cj / L - 1) * 100:.0f} aşıldı, hacim önceki mumların {vj / max(pv, 1):.0f} katı",
+                   f"İlk geri çekilme sıçramanın %{dep * 100:.0f}'ini geri verdi, {f2(L)} üstünde tuttu, hacim düştü",
+                   f"Devam sinyali: önceki mumun tepesi ({f2(prev[1])}) aşıldı",
+                   f"Stop geri çekilme dibinin altında ({f2(stop)}, %{risk / c * 100:.1f}); {f2(L)} kırılım seviyesi de altta destek",
+                   "Yeni kurgu: önce gölgede ölçülüyor, geçmiş testte kârlı çıkarsa bot girer"]
+            out.append(["sicrama", 1, c, stop, risk, 52, why])
+            self._red(sym, x, "tamam", "sıçrama kurgusu sinyal verdi")
+            return out
+        return out
+
     def _runner(self, sym, x):
         """Haberle/yüksek hacimle koşan küçük hisseler — sadece alış yönü."""
         out = []
         info = self.runners.get(sym, {})
         if info.get("news_kind") == "kötü" or (info.get("sec") or {}).get("kind") == "seyreltme":
+            self._red(sym, x, "haber", "olumsuz haber / seyreltme: koşan hissede alış yapılmıyor")
             return out   # hisse ihracı / ters bölünme / seyreltme (haber ya da SEC bildirimi): genelde tuzak, alış yok
         T, c, atr = x["T"], x["c"], x["atr"]
         ref = x["pc"]
         move = (c / ref - 1) * 100 if ref else float(info.get("pct") or 0)
         if move < RUN_MIN_MOVE:
+            self._red(sym, x, "hareket", f"önceki kapanışa göre {move:+.1f}% (en az +%{RUN_MIN_MOVE:.0f} gerekli)")
             return out
         dv_bar = x["v"] * c
         ext = x["ses"] != "regular"
         k_ = IEX_SHARE if ext else 1.0
-        if x["ses_dv"] < RUN_MIN_SES_DV * k_ or dv_bar < RUN_MIN_BAR_DV * k_ or x["active10"] < 7 \
-                or (x["h"] - x["l"]) > 4 * atr:
+        kaynak = " (IEX)" if ext else ""
+        if x["ses_dv"] < RUN_MIN_SES_DV * k_:
+            self._red(sym, x, "hacim", f"seans işlem hacmi {usd(x['ses_dv'])}{kaynak}, en az {usd(RUN_MIN_SES_DV * k_)} gerekli")
+            return out
+        if dv_bar < RUN_MIN_BAR_DV * k_:
+            self._red(sym, x, "hacim", f"son mum hacmi {usd(dv_bar)}{kaynak}, en az {usd(RUN_MIN_BAR_DV * k_)} gerekli")
+            return out
+        if x["active10"] < 7:
+            self._red(sym, x, "seyrek", f"son 10 dakikanın sadece {x['active10']}'inde işlem var (en az 7)")
+            return out
+        if (x["h"] - x["l"]) > 4 * atr:
+            self._red(sym, x, "mum", f"mum çok büyük: aralık ortalamanın (ATR) {(x['h'] - x['l']) / atr:.1f} katı (sınır 4)")
             return out
         liq = f"Seans işlem hacmi {usd(x['ses_dv'])}, son mum {usd(dv_bar)}" + (" (IEX)" if ext else "")
 
@@ -859,6 +950,10 @@ class Engine:
                    f"Hacim ortalamanın {x['volr']:.1f} katı · {liq}"]
             out.insert(0, ["gapgo", 1, c, c - risk, risk, 56, why])
 
+        if not out:
+            self._red(sym, x, "kurgu", "kapılar geçti ama kurgu oluşmadı: tepe kırılımı, ilk geri çekilme ya da açılış kırılımı yok")
+        else:
+            self._red(sym, x, "tamam", "sinyal üretildi: " + ", ".join(o[0] for o in out))
         news = info.get("news")
         ai = info.get("ai")
         for o in out:
@@ -1058,17 +1153,22 @@ class Engine:
         else:
             lvl = max(v for v in (x["hod"], x["pmh"], x["h"]) if v)
         trig = lvl * 1.002
-        if not (prev < trig <= px) or px > lvl * 1.03:
-            return None                          # kırılım şimdi olmadı ya da fiyat çok kaçtı
+        if not (prev < trig <= px):
+            return None                          # kırılım şimdi olmadı
+        if px > lvl * 1.03:
+            self._red(sym, x, "hızlı", f"hızlı kırılım: fiyat tepenin %{(px / lvl - 1) * 100:.1f} üstüne kaçmıştı (sınır %3)", hizli=True)
+            return None
         ref = x["pc"]
         move = (px / ref - 1) * 100 if ref else float(info.get("pct") or 0)
         if move < RUN_MIN_MOVE:
             return None
         k_ = IEX_SHARE if ext else 1.0
         if x["ses_dv"] < RUN_MIN_SES_DV * k_ or x["active10"] < 6:
+            self._red(sym, x, "hızlı", f"hızlı kırılım: likidite yok (seans hacmi {usd(x['ses_dv'])}, son 10 dk'da {x['active10']} işlemli mum)", hizli=True)
             return None                          # likidite yok
         recent_vol = max(x["volr"], (x["vol5"] / 5 / x["avgv"]) if x.get("avgv") else 0)
         if recent_vol < 1.5:
+            self._red(sym, x, "hızlı", f"hızlı kırılım: kırılımda hacim yok (ortalamanın {recent_vol:.1f} katı, en az 1,5)", hizli=True)
             return None                          # kırılımda hacim yok
         if not self._ready(sym, "hizli", 1, T):
             return None
@@ -1191,12 +1291,17 @@ class Engine:
             x["_mtf"] = self.mtf(sym, tss, bars, k)
         except Exception:
             x["_mtf"] = (0, 0)
+        sic = []
         if sym in self.runners:
             cands = list(self._runner(sym, x))
             try:
                 cands += self._fade(sym, x)
             except Exception:
                 pass
+            try:
+                sic = self._sicrama(sym, x)
+            except Exception:
+                sic = []
         else:
             cands = self._regular(sym, x) if x["ses"] == "regular" else self._extended(sym, x)
         if True:
@@ -1231,6 +1336,8 @@ class Engine:
             conf = self._score(x, d, base, why, risk, sym)
             if d not in best or conf > best[d][-2]:
                 best[d] = (setup, d, entry, stop, risk, conf, why)
+        for setup, d, entry, stop, risk, base, why in sic:      # sıçrama kurgusu kendi başına ölçülür
+            self._create(sym, x, setup, d, entry, stop, risk, self._score(x, d, base, why, risk, sym), why)
         if len(best) == 2:   # aynı anda hem AL hem SAT çıktıysa belirsiz: hiçbirini verme
             return
         for setup, d, entry, stop, risk, conf, why in best.values():
@@ -1317,7 +1424,7 @@ class Engine:
             return
         runner = sym in self.runners
         tgt = self._tgt_over.pop((sym, T, setup, d), None) or \
-            entry + d * (R_RUNNER if runner else R_SETUP.get(setup, R_MULT)) * risk
+            entry + d * (R_SICRAMA if setup == "sicrama" else R_RUNNER if runner else R_SETUP.get(setup, R_MULT)) * risk
         feats = self._features(sym, x, d)
         conf0 = conf
         if self.learner:
@@ -1342,6 +1449,7 @@ class Engine:
                 pass
         self.signals.append(sig)
         self.by_id[sid] = sig
+        self._red(sym, x, "tamam", f"sinyal üretildi: {SETUP_AD.get(setup, setup)} (güven {conf})")
         self.last_fire[(sym, setup, d)] = T
         if setup in ("orb", "gapgo"):
             self.fired_day.add((sym, setup, d, x["day"]))

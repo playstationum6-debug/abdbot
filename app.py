@@ -603,7 +603,7 @@ def den_ctx(sig):
         kalan = max(0.0, BOT_CFG["daily_loss"] + min(0.0, bot.today_pnl()))
     except Exception:
         kalan = None
-    return {"model": model, "secici": ogrenme.SECICI, "spread": scanner.spread_of(sig["sym"]),
+    return {"model": model, "secici": ogrenme.SECICI, "spread": scanner.spread_of(sig["sym"], ses=sig.get("ses")),
             "kalan": kalan, "risk_usd": BOT_CFG.get("risk_usd"), "hava": HAVA.get("etiket")}
 
 
@@ -2058,6 +2058,8 @@ async def send_sig(cl):
                    "learn": {"ins": learner.insights(), "groups": learner.group_rows(), "cmp": compare_rows(),
                              "saat": saat_tablosu(), "dis": dis.karne(),
                              "den": DEN["karne"], "perf": denetci.performans(bot.positions), "strat": strateji_ozet(), "super": super_ozet(),
+                             "kosan": {k: KT[k] for k in ("sum", "t", "running", "prog", "hata", "istek")},
+                             "sicrama": golge_kurgu("sicrama"),
                              "bt": {k: BT[k] for k in ("sum", "t", "running", "bekliyor", "prog", "hata")}}})
 
 
@@ -2224,6 +2226,8 @@ async def fast_loop():
                 p = float(tr.get("p") or 0)
                 t = parse_ts(tr.get("t", "")) if tr.get("t") else 0
                 if p <= 0 or now - t > 120:
+                    FAST_RED[sym] = (now, f"IEX'te son işlem {int(now - t) if t else '?'} sn önce: fiyat bayat, hızlı kırılım bakılmadı"
+                                     if p > 0 else "IEX'te fiyat yok: hızlı kırılım bakılamadı")
                     continue                      # fiyat yok ya da 2 dk'dan eski (işlem durmuş olabilir)
                 prev = float(((sn or {}).get("prevDailyBar") or {}).get("c") or 0)
                 info = scanner.runners.get(sym)
@@ -2581,7 +2585,7 @@ async def bt_loop():
     """İstenen test, piyasa normal seansı kapalıyken başlatılır."""
     while True:
         await asyncio.sleep(30)
-        if BT["bekliyor"] and not BT["running"] and cal.session(time.time()) != "regular":
+        if BT["bekliyor"] and not BT["running"] and not KT["running"] and cal.session(time.time()) != "regular":
             await bt_run(BT["bekliyor"])
 
 
@@ -3256,6 +3260,161 @@ def strateji_ozet(gun=30):
     return d
 
 
+# ----------------------------------------------------------------- koşan hisse testi (sıçrama kurgusu buradan onay alır)
+KT = {"sum": None, "t": 0, "running": False, "prog": "", "hata": "", "istek": 0}
+KT_PATH = "gecmis/kosan.json"
+SICRAMA_ESIK = {"n": 30, "avg": 0.10}          # bot girmeden önce geçmiş testte en az 30 sinyal ve ort. +0,10R
+
+
+async def kt_load():
+    if not backup.enabled:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=60) as c:
+            d = await backup._get(c, KT_PATH)
+        if isinstance(d, dict):
+            KT.update(sum=d.get("sum"), t=d.get("t") or 0)
+    except Exception as e:
+        log.info("Koşan testi yüklenemedi: %s", e)
+
+
+def kt_kurgu(k):
+    return next((x for x in ((KT.get("sum") or {}).get("kurgu") or []) if x["k"] == k), None)
+
+
+def golge_kurgu(setup):
+    """Bot bu kurguya girebilir mi? None: girebilir; metin: neden giremez (sinyal yine gölgede ölçülür)."""
+    if setup != "sicrama":
+        return None
+    x = kt_kurgu("sicrama")
+    if not x or x.get("n", 0) < SICRAMA_ESIK["n"]:
+        return (f"yeni kurgu: geçmiş testte {x.get('n', 0) if x else 0} örnek var, en az {SICRAMA_ESIK['n']} gerekli "
+                "(sinyal gölgede ölçülüyor)")
+    if (x.get("avg") or 0) < SICRAMA_ESIK["avg"]:
+        return f"geçmiş testte kârsız çıktı ({x['n']} sinyal, ort. {x['avg']:+.2f}R): sadece gölgede ölçülüyor"
+    canli = [y for y in engine.signals if y.get("setup") == "sicrama" and y.get("r") is not None
+             and y.get("st") in ("hedef", "stop", "süre")]
+    if len(canli) >= 15 and sum(y["r"] for y in canli) / len(canli) < 0:
+        return f"canlıda zarar ediyor ({len(canli)} sonuç): tekrar gölgeye alındı"
+    return None
+
+
+bot.golge = golge_kurgu
+
+
+async def kt_run(n_days=20):
+    KT.update(running=True, prog="başlıyor…", hata="")
+    gecmis = set()
+    try:
+        for y in engine.signals:
+            if y.get("runner"):
+                gecmis.add((y["sym"], date.fromisoformat(y["day"])))
+        for it in (dis.items if hasattr(dis, "items") else [])[-300:]:
+            if it.get("sym") and it.get("t"):
+                gecmis.add((it["sym"], datetime.fromtimestamp(it["t"], ET).date()))
+    except Exception:
+        pass
+
+    def prog(i, n, ns, sn, sym=""):
+        KT["prog"] = sym if not n else f"{i}/{n} hisse-gün · {ns} sinyal · {int(sn // 60)} dk · {sym}"
+
+    try:
+        sigs, summ = await asyncio.to_thread(geriye.kosan_test, ALPACA_KEY, ALPACA_SECRET, n_days, ET, prog,
+                                             lambda: cal.session(time.time()) == "regular", list(gecmis))
+        if summ.get("hata"):
+            KT["hata"] = summ["hata"]
+        else:
+            KT.update(sum=summ, t=int(time.time()))
+            sic = kt_kurgu("sicrama") or {}
+            feed_add("bot", "", f"Koşan hisse testi bitti: {summ.get('aday', 0)} hisse-gün, {summ['tum'].get('n', 0)} sinyal, "
+                     f"ort. {summ['tum'].get('avg', 0) or 0:+.2f}R",
+                     sub=(f"Dikey sıçrama kurgusu: {sic.get('n', 0)} sinyal, ort. {sic.get('avg') or 0:+.2f}R. " if sic else
+                          "Dikey sıçrama kurgusu bu dönemde sinyal vermedi. ") + "Ayrıntılar Öğren sekmesinde.", tone="bilgi")
+            if backup.enabled:
+                async with httpx.AsyncClient(timeout=120) as c:
+                    await backup._put(c, KT_PATH, {"sum": summ, "t": KT["t"], "sigs": sigs[-4000:]})
+        del sigs
+        bellek_bosalt()
+    except Exception as e:
+        KT["hata"] = str(e)[:160]
+        log.warning("Koşan testi hatası: %s", e)
+    KT.update(running=False, prog="", istek=0)
+
+
+async def kt_loop():
+    """Normal seans dışında: istenince ya da 3 günde bir koşan hisse testi (ana test çalışmıyorken)."""
+    await asyncio.sleep(240)
+    while True:
+        await asyncio.sleep(60)
+        if KT["running"] or BT["running"] or not (ALPACA_KEY and ALPACA_SECRET):
+            continue
+        if cal.session(time.time()) == "regular":
+            continue
+        if KT["istek"] or time.time() - (KT["t"] or 0) > 3 * 86400:
+            await kt_run(20)
+
+
+# ----------------------------------------------------------------- "bot neden girmedi?" teşhisi
+FAST_RED = {}
+
+
+def _sa(t):
+    return datetime.fromtimestamp(t, TR).strftime("%H:%M") if t else "—"
+
+
+def neden_rapor(sym):
+    """Bir hisse için: izleniyor mu, koşan listesinde mi, hangi kapıya takıldı, sinyal ve bot kararları."""
+    now = time.time()
+    out = []
+    sm = summary(sym) or {}
+    if sm.get("p"):
+        out.append(f"💲 Şimdi {fp_(sm['p'])}" + (f" · önceki kapanışa göre {sm['ch']:+.1f}%" if sm.get("ch") is not None else ""))
+    info = scanner.runners.get(sym)
+    if sym in SYMBOLS:
+        out.append("📋 Ana listede: bot bu hisseye her dakika bakıyor (koşan küçük hisse kuralları uygulanmaz)")
+    elif info:
+        out.append(f"📋 Koşan listesinde: ✅ {_sa(info.get('first'))}'de girdi ({info.get('src') or 'tarayıcı'}, "
+                   f"{(info.get('pct') or 0):+.0f}%)" + (" · haberli" if info.get("news") else " · haber bulunamadı"))
+    else:
+        r = (getattr(scanner, "red", {}) or {}).get(sym)
+        out.append("📋 Koşan listesinde: ❌ değil" + (f" — {_sa(r['t'])}: {r['n']}" if r else
+                   f" — tarayıcının yükselenler listesinde hiç görünmedi (listeye girmek için gün içinde en az +%{scanner.min_pct:.0f})"))
+    bars = store.bars.get(sym) or {}
+    bugun = [t for t in bars if bar_info(t)[0] == datetime.now(ET).date()]
+    if bars:
+        out.append(f"📊 Veri: bugün {len(bugun)} dakikalık mum" + (f", son mum {int((now - max(bugun)) // 60)} dk önce" if bugun else ""))
+    elif sym not in SYMBOLS and not info:
+        out.append("📊 Veri: bot bu hissenin mumlarını çekmiyor (listede olmayan hisse)")
+    lv = store.live.get(sym)
+    fr = FAST_RED.get(sym)
+    if fr and now - fr[0] < 3600:
+        out.append(f"⚡ Canlı fiyat ({_sa(fr[0])}): {fr[1]}")
+    elif lv:
+        out.append(f"⚡ Canlı fiyat: son IEX işlemi {int(now - lv['t'])} sn önce")
+    red = getattr(engine, "red", {}) or {}
+    for k, ad in (((sym, "mum"), "🚦 Son kapı"), ((sym, "hizli"), "🏃 Hızlı kırılım")):
+        r = red.get(k)
+        if r and now - (r["t"] or 0) < 6 * 3600:
+            out.append(f"{ad} ({_sa(r['t'])}): {'✅' if r['kapi'] == 'tamam' else '❌'} {r['n']}")
+    gun = datetime.now(ET).date().isoformat()
+    sg = [x for x in engine.signals if x["sym"] == sym and x.get("day") == gun]
+    if sg:
+        for x in sg[-4:]:
+            den = (x.get("den") or {}).get("karar")
+            out.append(f"🎯 Sinyal {_sa(x['t'])}: {sinyal.SETUP_AD.get(x['setup'], x['setup'])} · güven {x['conf']}"
+                       + (f" · denetçi {denetci.KARAR_AD.get(den, den)}" if den else "") + f" · {x['st']}"
+                       + (f" {x['r']:+.2f}R" if x.get("r") is not None else ""))
+    else:
+        out.append("🎯 Bugün bu hissede sinyal yok")
+    js = [j for j in bot.journal[-600:] if j.get("sym") == sym and now - j["t"] < 86400]
+    for j in js[-3:]:
+        out.append(f"🤖 {_sa(j['t'])}: {j['msg'][:150]}")
+    pos = next((p for p in bot.open_positions() if p["sym"] == sym), None)
+    if pos:
+        out.append(f"💼 Açık pozisyon: {pos['qty']:g} adet @ {fp_(pos.get('entry') or pos.get('plan'))}")
+    return out
+
+
 def simulasyon(p):
     """Ayarlarla geçmiş sinyalleri yeniden oynat: para sınırı, eşik, işlem başı tutar, risk, kapalı kurgular.
     Tahmindir: kayma/masraf sinyal sonucunda var; yarım kapat ve canlı dolum farkları hesaba katılmaz."""
@@ -3536,7 +3695,7 @@ async def tg_analiz(sym):
     return "\n".join(out), png
 
 
-YARDIM = ("<b>Komutlar</b>\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
+YARDIM = ("<b>Komutlar</b>\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
           "/analiz QNME — 15 dk analiz ve plan (grafikli)\n/alarm QNME 0.90 — fiyat alarmı\n/alarmlar — kurulu alarmlar\n"
           "/alarmsil QNME — alarmı sil\n/yorum — yapay zekalı piyasa yorumu\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
           "/basla — yeni işlem açmaya devam\n/ogren — bot ne öğrendi (model karnesi)\n"
@@ -3601,6 +3760,18 @@ async def tg_komut(text, chat, thread=None):
         send(t_, png)
     elif cmd in ("super", "süper"):
         send(super_komut())
+    elif cmd in ("neden", "niye"):
+        if not arg:
+            send("Kullanım: /neden VIVK — bot bu hisseye neden girmedi / girdi")
+            return
+        sym = re.sub(r"[^A-Z.\-]", "", arg[0])[:8]
+        send(f"🔎 <b>#{_h(sym)} · bot neden girmedi?</b>\n" + "\n".join(_h(x) for x in neden_rapor(sym)), sym=sym)
+    elif cmd in ("kosantest", "koşantest"):
+        if KT["running"]:
+            send(f"Koşan hisse testi zaten çalışıyor: {_h(KT['prog'])}")
+        else:
+            KT["istek"] = 1
+            send("🧪 Koşan hisse testi sıraya alındı: normal seans dışında başlar (20 gün, 10–40 dk sürer). Bitince haber veririm.")
     elif cmd == "hisse":
         if not arg:
             send("Kullanım: /hisse QNME")
@@ -3712,7 +3883,7 @@ async def tg_komut(text, chat, thread=None):
         send("Bilinmeyen komut. /yardim yaz.")
 
 
-KOMUTLAR = (("super", "💎 Bugünün süper fırsatları"), ("hisse", "Hisse kartı: /hisse QNME"), ("panel", "Kontrol panelini yeniden kur"), ("durum", "Bot ve para durumu"), ("pozisyon", "Açık pozisyonlar"),
+KOMUTLAR = (("neden", "Bot bu hisseye neden girmedi: /neden VIVK"), ("super", "💎 Bugünün süper fırsatları"), ("hisse", "Hisse kartı: /hisse QNME"), ("panel", "Kontrol panelini yeniden kur"), ("durum", "Bot ve para durumu"), ("pozisyon", "Açık pozisyonlar"),
             ("karne", "Sonuçlar + grafik"), ("analiz", "Hisse analizi: /analiz QNME"),
             ("alarm", "Fiyat alarmı: /alarm QNME 0.90"), ("alarmlar", "Kurulu alarmlar"), ("rapor", "Gün sonu raporu"),
             ("yorum", "Yapay zekalı piyasa yorumu"), ("ogren", "Bot ne öğrendi"),
@@ -4680,6 +4851,7 @@ async def lifespan(app):
     engine.load(sigs)
     bot.load(botdays)
     await bt_load()
+    await kt_load()
     dis.st = backup.data.setdefault("dis", {"items": []})
     dinle.st = backup.data.setdefault("dinle", {"kanallar": {}})
     for _k in re.split(r"[,\s]+", os.getenv("TG_KANALLAR", "")):   # Render'da sabit liste: @a,@b
@@ -4707,7 +4879,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop)]
+                                                  rapor_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -4973,6 +5145,25 @@ async def api_simulasyon(request: Request):
         return JSONResponse(await asyncio.to_thread(simulasyon, p))
     except Exception as e:
         return JSONResponse({"hata": str(e)[:120]})
+
+
+@app.get("/api/neden")
+async def api_neden(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    sym = re.sub(r"[^A-Z.\-]", "", (request.query_params.get("s") or "").upper())[:8]
+    if not sym:
+        return JSONResponse({"hata": "hisse yok"}, status_code=400)
+    return JSONResponse({"sym": sym, "satir": neden_rapor(sym)})
+
+
+@app.post("/api/kosantest")
+async def api_kosantest(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    if not KT["running"]:
+        KT["istek"] = 1
+    return JSONResponse({"ok": 1, "running": KT["running"]})
 
 
 @app.get("/api/gunluk")

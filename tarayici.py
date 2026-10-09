@@ -94,6 +94,22 @@ def is_common(sym, name=""):
     return not any(b in n for b in BAD_NAME)
 
 
+def _ts(x):
+    """Alpaca zaman damgası (RFC3339, nanosaniyeli olabilir) → epoch sn."""
+    if not x:
+        return None
+    try:
+        x = str(x).replace("Z", "+00:00")
+        if "." in x:
+            a, b = x.split(".", 1)
+            n = 0
+            while n < len(b) and b[n].isdigit():
+                n += 1
+            x = f"{a}.{b[:n][:6].ljust(6, '0')}{b[n:]}"
+        return datetime.fromisoformat(x).timestamp()
+    except Exception:
+        return None
+
 class Scanner:
     def __init__(self, key, secret, core, min_price=0.0, min_pct=10.0, max_runners=12, log=None,
                  ai_key="", ai_model="gemini-2.5-flash"):
@@ -123,6 +139,7 @@ class Scanner:
         self.news_pending = {}   # sembol -> {"item", "until"}: olumlu haber geldi, fiyat tepkisi bekleniyor
         self.news_seen = set()
         self.spread = {}             # sembol -> (spread %, zaman): Alpaca IEX en iyi alış/satış
+        self.red = {}                # sembol -> {"t", "n"}: listeye neden alınmadı (/neden komutu)
         self.recent_news_syms = {}   # sembol -> zaman (seans dışı taramada aday havuzu)
         self.ext_status = "—"
         self.tv_status = "—"
@@ -164,13 +181,19 @@ class Scanner:
                     for k, sn in (part or {}).items():
                         q = (sn or {}).get("latestQuote") or {}
                         ap, bp = float(q.get("ap") or 0), float(q.get("bp") or 0)
-                        if ap > 0 and bp > 0 and ap >= bp:
+                        qt = _ts(q.get("t"))
+                        # eski teklif (60 sn+) gerçek alış-satış farkını göstermez: yok say
+                        if ap > 0 and bp > 0 and ap >= bp and qt and now - qt < 60:
                             self.spread[k] = (round((ap - bp) / ((ap + bp) / 2) * 100, 3), now)
             except Exception:
                 continue
         return out
 
-    def spread_of(self, sym, max_age=300):
+    def spread_of(self, sym, max_age=300, ses=None):
+        """Alış-satış farkı %. Öncesi/sonrası seansta None: ücretsiz IEX kotası o saatlerde çok seyrek ve geniş
+        (TSLA bile %10 görünür), gerçek farkı göstermez."""
+        if ses in ("pre", "post", "closed"):
+            return None
         x = self.spread.get(sym)
         return x[0] if x and time.time() - x[1] < max_age else None
 
@@ -190,6 +213,12 @@ class Scanner:
         t = _ts(lt.get("t"))
         return p_prev, p_ses, px, t
 
+    def _red(self, sym, n):
+        self.red[sym] = {"t": time.time(), "n": n}
+        if len(self.red) > 600:
+            for k in sorted(self.red, key=lambda z: self.red[z]["t"])[:200]:
+                self.red.pop(k, None)
+
     async def _add(self, c, sym, pct, price, src, news=None):
         """Aday hisseyi listeye ekle (liste doluysa en zayıfın yerine). True: eklendi."""
         if sym in self.runners or sym in self.core or not SYM_RE.match(sym) or not is_common(sym):
@@ -197,22 +226,29 @@ class Scanner:
                 self.runners[sym].update(pct=pct, price=price, seen=time.time())
             return False
         if price <= 0 or price < self.min_price:
+            self._red(sym, f"fiyat {price} en düşük fiyat sınırının altında")
             return False
         dr = self.dropped.get(sym)
         if dr and time.time() - dr[0] < DROP_SEC:
+            self._red(sym, f"{pct:+.0f}% ama yakın zamanda listeden çıkarılmıştı (bekleme süresi)")
             return False
         if len(self.runners) >= self.max_runners:
             weak = [r for r in self.runners.values() if not self.keep(r["sym"])]
             if not weak:
+                self._red(sym, f"{pct:+.0f}% ama liste dolu ({self.max_runners} hisse, hepsinde pozisyon var)")
                 return False
             w = min(weak, key=lambda r: r.get("pct_now") if r.get("pct_now") is not None else (r.get("pct") or 0))
             wp = w.get("pct_now") if w.get("pct_now") is not None else (w.get("pct") or 0)
             if pct < wp + (0 if news else 10):        # haberli yeni hisse eşit güçteyse bile öncelikli
+                self._red(sym, f"{pct:+.0f}% ama liste dolu ({self.max_runners} hisse): en zayıfı {w['sym']} {wp:+.0f}%, "
+                          f"yerine geçmek için en az {wp + 10:+.0f}% gerekli")
                 return False
             if not await self._asset_ok(c, sym):
+                self._red(sym, "Alpaca'da işlem görmeyen / uygun olmayan hisse türü")
                 return False
             del self.runners[w["sym"]]
         elif not await self._asset_ok(c, sym):
+            self._red(sym, "Alpaca'da işlem görmeyen / uygun olmayan hisse türü")
             return False
         info = {"sym": sym, "pct": round(pct, 2), "price": price, "vol": None, "first": time.time(),
                 "seen": time.time(), "news": None, "src": src}
@@ -330,8 +366,15 @@ class Scanner:
         for g in up:
             pct, px, vol = g["percent_change"], g["price"], g["volume"]
             if pct < self.min_pct:
+                if pct >= 3 and g["symbol"] not in self.runners:
+                    self._red(g["symbol"], f"{'öncesi' if ses == 'pre' else 'sonrası'} seansta {pct:+.1f}% "
+                                           f"(listeye girmek için en az +%{self.min_pct:.0f})")
+                    continue
                 break
-            if vol < TV_MIN_VOL or g["symbol"] in self.core:
+            if g["symbol"] in self.core:
+                continue
+            if vol < TV_MIN_VOL:
+                self._red(g["symbol"], f"{pct:+.0f}% ama seans dışı hacim {int(vol):,} adet (en az {TV_MIN_VOL:,})".replace(",", "."))
                 continue
             if g["symbol"] in self.runners:
                 self.runners[g["symbol"]].update(pct=pct, price=px, vol=vol, seen=now)
@@ -361,6 +404,8 @@ class Scanner:
             if (p_prev is not None and p_prev >= self.min_pct) or (ses_move is not None and ses_move >= self.min_pct * 0.8):
                 if await self._add(c, sym, p_prev if p_prev is not None else ses_move, px, "seans dışı"):
                     n_add += 1
+            elif p_prev is not None and p_prev >= 3:
+                self._red(sym, f"seans dışı {p_prev:+.1f}% (listeye girmek için en az +%{self.min_pct:.0f})")
         self.ext_status = f"{len(snaps)} hisse tarandı, {n_add} eklendi ({datetime.now().strftime('%H:%M')})"
 
     async def scan(self, et, ses=None):
@@ -404,6 +449,8 @@ class Scanner:
                         continue
                     if not SYM_RE.match(sym) or not is_common(sym) or sym in self.core \
                             or pct < self.min_pct or price <= 0 or price < self.min_price:
+                        if SYM_RE.match(sym) and sym not in self.core and sym not in self.runners and 3 <= pct < self.min_pct:
+                            self._red(sym, f"gün içinde {pct:+.1f}% (listeye girmek için en az +%{self.min_pct:.0f})")
                         continue
                     cands.append((pct, sym, price))
                 cands.sort(reverse=True)
