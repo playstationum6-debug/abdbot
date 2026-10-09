@@ -38,6 +38,9 @@ SETUP_AD = {
     "kanal": "Kanal alt bandından dönüş",
     "yapi": "Yapı kırılımı (BOS)",
     "fib": "Fibonacci geri çekilme dönüşü",
+    "poc": "Hacim profili (POC) dönüşü",
+    "gapgo": "Boşlukla açılış kırılımı (gap and go)",
+    "fade": "Koşan hissede dönüş (açığa satış)",
 }
 SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa sonrası"}
 SES_NAME = {0: "pre", 1: "regular", 2: "post", 3: "closed"}
@@ -117,6 +120,8 @@ class Engine:
         self._fast_px = {}         # koşan hisse -> son anlık fiyat (kırılımın "şimdi" olduğunu anlamak için)
         self._plan_posted = {}     # koşan hisse -> son yayınlanan plan seviyesi
         self._fx = {}              # (sembol, 5 dk dilimi) -> grafik analizi (formasyon, seviye, alıcı bölgesi)
+        self._mtf = {}             # (sembol, 15 dk dilimi) -> 15 dk trend yönü
+        self.gunluk = None         # app.py: sembol -> günlük trend (+1 / -1 / 0)
         self._tgt_over = {}        # formasyon hedefi: (sembol, mum, kurgu, yön) -> hedef fiyat
         self.runners = {}          # tarayıcının bulduğu koşan hisseler: sembol -> bilgi (yüzde, haber)
         self.learner = None        # öğrenme modülü (güven ayarı + not)
@@ -194,6 +199,28 @@ class Engine:
         x["hod"] = max((bars[t][1] for t in reg_before), default=None)
         x["lod"] = min((bars[t][2] for t in reg_before), default=None)
         x["rc"] = bars[reg[-1]][3] if reg and sc == 2 else None   # bugünün normal seans kapanışı (sonrası için)
+        x["dopen"] = bars[reg[0]][0] if reg else None
+        or5 = [t for t in reg if t < b["open"] + 300]
+        x["or5h"] = max((bars[t][1] for t in or5), default=None) if len(or5) >= 4 and T >= b["open"] + 300 else None
+        x["or5l"] = min((bars[t][2] for t in or5), default=None) if x["or5h"] else None
+        # günün hacim profili: en çok işlem gören fiyat (POC), bu mumdan önceki normal seans mumlarından
+        x["poc"] = None
+        rb = [bars[t] for t in reg if t < T]
+        if len(rb) >= 45:
+            plo = min(r[2] for r in rb)
+            phi = max(r[1] for r in rb)
+            if phi > plo:
+                N = 40
+                st_ = (phi - plo) / N
+                bins = [0.0] * N
+                for r in rb:
+                    i0 = min(N - 1, int((r[2] - plo) / st_))
+                    i1 = min(N - 1, int((r[1] - plo) / st_))
+                    per = r[4] / (i1 - i0 + 1)
+                    for i in range(i0, i1 + 1):
+                        bins[i] += per
+                pi = max(range(N), key=lambda i: bins[i])
+                x["poc"] = plo + (pi + 0.5) * st_
 
         # EMA, ATR (son 80 mum, seanslar karışık olabilir)
         win = tss[max(0, k - 79):k + 1]
@@ -315,12 +342,86 @@ class Engine:
                 why.append("Öğle saatleri: hareketler zayıf olabilir")
         return int(max(0, min(100, round(s))))
 
+    def mtf(self, sym, tss, bars, k):
+        """Çoklu zaman: (15 dk trend, günlük trend) — +1 yukarı, -1 aşağı, 0 belirsiz."""
+        T = tss[k]
+        key = (sym, T // 900)
+        t15 = self._mtf.get(key)
+        if t15 is None:
+            closes, cur = [], None
+            for t in tss[max(0, k - 1500):k + 1]:
+                if self.bar_info(t)[1] == 3:
+                    continue
+                b15 = t // 900
+                if b15 != cur:
+                    closes.append(bars[t][3])
+                    cur = b15
+                else:
+                    closes[-1] = bars[t][3]
+            t15 = 0
+            if len(closes) >= 30:
+                e20, e50 = _ema_series(closes, 20)[-1], _ema_series(closes, 50)[-1]
+                c = closes[-1]
+                t15 = 1 if c > e20 > e50 else (-1 if c < e20 < e50 else 0)
+            if len(self._mtf) > 5000:
+                self._mtf.clear()
+            self._mtf[key] = t15
+        td = 0
+        if self.gunluk:
+            try:
+                td = self.gunluk(sym) or 0
+            except Exception:
+                td = 0
+        return t15, td
+
+    def _fade(self, sym, x):
+        """Koşan hissede dönüş: sert yükselişten sonra VWAP aşağı kırıldı → açığa satış (sadece normal seans)."""
+        out = []
+        if x["ses"] != "regular" or x["mins"] < 30 or not x["vwap"] or not x["pc"] or not x["hod"]:
+            return out
+        T, c, o, atr = x["T"], x["c"], x["o"], x["atr"]
+        peak = (x["hod"] / x["pc"] - 1) * 100
+        now = (c / x["pc"] - 1) * 100
+        vw = x["vwap"]
+        if peak < 30 or now < 10 or c < 1.0:
+            return out
+        if not (x["prev_c"] >= vw > c and c < o and x["volr"] >= 1.5 and x["ema9"] < x["ema21"]):
+            return out
+        if not self._ready(sym, "fade", -1, T):
+            return out
+        stop = max(x["high5"], vw) + 0.3 * atr
+        risk = stop - c
+        if risk <= 0 or risk > c * 0.08:
+            return out
+        why = [f"Gün içinde +{peak:.0f}% yükselmiş koşan hisse, tepeden {(1 - c / x['hod']) * 100:.0f}% geri geldi",
+               f"VWAP ({f2(vw)}) hacimle aşağı kırıldı: alıcılar güç kaybetti",
+               f"Hacim ortalamanın {x['volr']:.1f} katı · kısa trend aşağı (EMA9 < EMA21)",
+               "Açığa satış: küçük hisselerde ödünç hisse bulunamazsa emir reddedilebilir"]
+        out.append(("fade", -1, c, stop, risk, 52, why))
+        return out
+
     def _grafik_puan(self, x, d, why, risk):
         """Grafik okuması: piyasa yapısı, kanal, FVG, Fibonacci, mum gövde/fitil, EMA 20/50."""
         s = 0
         fx = x.get("_fx") or {}
         c = x["c"]
         a5 = fx.get("atr") or x["atr"] * 2.2
+        t15, td = x.get("_mtf") or (0, 0)
+        if t15 or td:
+            uy = (t15 == d) + (td == d)
+            ters = (t15 == -d) + (td == -d)
+            if uy == 2:
+                s += 7
+                why.append("Büyük resim uyumlu: 15 dk ve günlük trend aynı yönde")
+            elif uy == 1 and not ters:
+                s += 3
+                why.append(f"{'15 dk' if t15 == d else 'Günlük'} trend aynı yönde")
+            elif ters == 2:
+                s -= 8
+                why.append("Büyük resim ters: 15 dk ve günlük trend karşı yönde (dikkat)")
+            elif ters == 1:
+                s -= 3
+                why.append(f"{'15 dk' if t15 == -d else 'Günlük'} trend ters yönde")
         y = fx.get("yapi") or {}
         tr = y.get("trend")
         if tr in ("yükseliş", "düşüş"):
@@ -602,6 +703,18 @@ class Engine:
                            f"Hacim ortalamanın {x['volr']:.1f} katı · {liq}"]
                     out.append(["geri", 1, c, c - risk, risk, 55, why])
 
+        # 3) Boşlukla açılış kırılımı (gap and go): %5+ boşlukla açılan hisse ilk 5 dk'nın tepesini kırdı
+        if not ext and x.get("or5h") and x.get("dopen") and x["pc"] and 5 <= x["mins"] <= 45 \
+                and (x["dopen"] / x["pc"] - 1) * 100 >= 5 and x["prev_c"] <= x["or5h"] < c and x["volr"] >= 1.5 \
+                and (x["vwap"] is None or c > x["vwap"]) and self._ready(sym, "gapgo", 1, T, once=True, day=x["day"]):
+            stop, risk = self._clamp(c, x["or5l"] - 0.1 * atr, 1, atr, 1.0, 4.0)
+            risk = max(risk, c * 0.01)
+            gap = (x["dopen"] / x["pc"] - 1) * 100
+            why = [f"Güne {gap:+.0f}% boşlukla açıldı, ilk 5 dakikanın tepesi ({f2(x['or5h'])}) hacimle kırıldı",
+                   f"Stop ilk 5 dakikanın dibinin altında ({f2(x['or5l'])})",
+                   f"Hacim ortalamanın {x['volr']:.1f} katı · {liq}"]
+            out.insert(0, ["gapgo", 1, c, c - risk, risk, 56, why])
+
         news = info.get("news")
         ai = info.get("ai")
         for o in out:
@@ -699,6 +812,18 @@ class Engine:
         # Uzatılmış seans / koşan hisse dışında kalan grafik kurguları (sadece alış)
         up_ok = x["ema9"] > x["ema21"] or ((fx.get("yapi") or {}).get("trend") == "yükseliş")
         green = c > o
+        # POC dönüşü: fiyat günün en çok işlem gören seviyesine çekildi, oradan yeşil mumla döndü
+        poc = x.get("poc")
+        if poc and x["ses"] == "regular" and x["mins"] >= 60 and x["vwap"] and c > poc and green \
+                and x["l"] <= poc + 0.1 * a5 and x["prev_c"] >= poc - 0.2 * a5 and c > x["prev_h"] \
+                and x["volr"] >= 1.2 and up_ok and self._ready(sym, "poc", 1, T):
+            stop = poc - 0.6 * a5
+            risk = max(c - stop, c * MIN_STOP_PCT, atr * MIN_STOP_ATR)
+            if risk <= c * 0.03:
+                why = [f"Günün en çok işlem gören fiyatı (POC {f2(poc)}) test edildi, yeşil mumla döndü",
+                       "Kurumsal alıcıların biriktiği seviye destek oldu",
+                       f"Hacim ortalamanın {x['volr']:.1f} katı"]
+                out.append(("poc", 1, c, c - risk, risk, 54, why))
         # 3) FVG dönüşü: fiyat boğa boşluğuna indi, yeşil mumla boşluğun üstünde kapandı
         for z in fx.get("fvg") or []:
             if not z["bull"] or not (x["l"] <= z["hi"] < c and x["prev_c"] >= z["lo"] and green):
@@ -918,8 +1043,16 @@ class Engine:
             return
         if sym == "SPY" and x["vwap"] and x["ses"] == "regular":
             self.mkt = {"dir": 1 if x["c"] > x["vwap"] else -1, "t": x["T"]}
+        try:
+            x["_mtf"] = self.mtf(sym, tss, bars, k)
+        except Exception:
+            x["_mtf"] = (0, 0)
         if sym in self.runners:
-            cands = self._runner(sym, x)
+            cands = list(self._runner(sym, x))
+            try:
+                cands += self._fade(sym, x)
+            except Exception:
+                pass
         else:
             cands = self._regular(sym, x) if x["ses"] == "regular" else self._extended(sym, x)
         try:
@@ -993,6 +1126,10 @@ class Engine:
         else:
             f["fib"] = "yok"
         f["mum"] = x.get("_mum") or formasyon.mum(x["o"], x["h"], x["l"], x["c"])
+        t15, td = x.get("_mtf") or (0, 0)
+        uy, ters = (t15 == d) + (td == d), (t15 == -d) + (td == -d)
+        f["mtf"] = "ikisi uyumlu" if uy == 2 else "ikisi ters" if ters == 2 else "biri uyumlu" if uy and not ters \
+            else "biri ters" if ters and not uy else "karışık"
         if x.get("ema50"):
             f["ema50"] = "uyumlu" if (x["ema20"] - x["ema50"]) * d > 0 else "ters"
         bil = getattr(self, "bilanco", None)
@@ -1039,7 +1176,7 @@ class Engine:
         self.signals.append(sig)
         self.by_id[sid] = sig
         self.last_fire[(sym, setup, d)] = T
-        if setup == "orb":
+        if setup in ("orb", "gapgo"):
             self.fired_day.add((sym, setup, d, x["day"]))
         if len(self.signals) > MAX_KEEP:
             for old in self.signals[:-MAX_KEEP]:
@@ -1122,7 +1259,7 @@ class Engine:
             self.by_id[sig["id"]] = sig
             key = (sig["sym"], sig["setup"], sig["dir"])
             self.last_fire[key] = max(self.last_fire.get(key, 0), sig["t"])
-            if sig["setup"] == "orb":
+            if sig["setup"] in ("orb", "gapgo"):
                 try:
                     self.fired_day.add((sig["sym"], "orb", sig["dir"], datetime.fromisoformat(sig["day"]).date()))
                 except Exception:

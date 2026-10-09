@@ -75,6 +75,7 @@ class Bot:
         self.on_note = None      # app.py: canlı akışa mesaj düşürmek için
         self.extra_mult = None   # app.py: piyasa havası / bilanço günü lot çarpanı → (çarpan, not)
         self.sector_of = None    # app.py: sembol → sektör adı (sektör yoğunluğu sınırı için)
+        self.engel = None        # app.py: zaman → engel sebebi (ekonomik veri saati) ya da None
         self.ver = 0
         self.dirty_days = set()
         self.seen = set()
@@ -210,6 +211,13 @@ class Bot:
 
         if self.cal.session(now) == "closed":
             return skip("seans kapalı")
+        if self.engel:
+            try:
+                eng_ = self.engel(now)
+            except Exception:
+                eng_ = None
+            if eng_:
+                return skip(eng_)
         if not self.cfg.get("yeni_islem", 1):
             return skip("yeni işlem açma duraklatıldı (Ayarlar)")
         lim = self.cfg["daily_loss"]
@@ -228,8 +236,8 @@ class Bot:
                 return skip(f"{sec} sektöründe zaten {len(same)} açık pozisyon var (sınır {lim_s})")
         if d < 0 and ses != "regular":
             return skip("uzatılmış seansta açığa satış yapılmıyor")
-        if d < 0 and sig.get("runner"):
-            return skip("koşan küçük hisselerde sadece alış")
+        if d < 0 and sig.get("runner") and sig["setup"] != "fade":
+            return skip("koşan küçük hisselerde sadece alış (dönüş kurgusu hariç)")
         thr = self.cfg["min_conf"] if ses == "regular" else self.cfg.get("min_conf_ext", self.cfg["min_conf"])
         # Eşik, kuralların ham güvenine bakar (öğrenme işlem sayısını düşürmez, sadece lotu ayarlar)
         conf0 = sig.get("conf0", conf)
@@ -262,6 +270,21 @@ class Bot:
             notional = min(notional, risk_usd / risk_px * px)
         # Sermaye sınırı: elde kalan nakitten fazlasıyla pozisyon açılamaz
         cap, used, free = self.capital()
+        yer = None
+        if free < max(MIN_TRADE_USD, notional * 0.6) and self.cfg.get("yer_ac", 1) \
+                and conf >= int(self.cfg.get("yer_min_guven", 85)) and ses == "regular":
+            # Güçlü sinyale yer aç: kârda olmayan, güveni daha düşük en zayıf pozisyon kapatılır
+            adaylar = []
+            for p in self.open_positions():
+                if p["st"] != "açık" or not p.get("entry") or not p.get("risk") or (p.get("half") or {}).get("st") == "doldu":
+                    continue
+                px_ = self.price(p["sym"])[0] or p["entry"]
+                ur = p["dir"] * (px_ - p["entry"]) / p["risk"]
+                if ur <= 0.3 and (p.get("conf") or 0) < conf:
+                    adaylar.append((ur, p.get("conf") or 0, p, px_))
+            if adaylar:
+                ur, _, yer, px_ = min(adaylar, key=lambda a: (a[0], a[1]))
+                free += abs(yer["qty"]) * px_
         if free < MIN_TRADE_USD:
             return skip(f"sermaye dolu: {cap:.0f} $'ın {used:.0f} $'ı açık pozisyonlarda, önce biri kapanmalı")
         notional = min(notional, free)
@@ -289,6 +312,10 @@ class Bot:
         self.positions.append(pos)
         self.note("al", f"{head} — alındı ({why}); {qty:g} adet ≈ {qty * px:.0f} $", sym)
         self._touch(pos)
+        if yer:
+            yer["st"], yer["xoid"], yer["xr"] = "çıkış", None, "yer açma"
+            self.note("yer", f"{sym} (güven {conf}) için yer açıldı: kârda olmayan bu pozisyon kapatılıyor", yer["sym"])
+            self._touch(yer)
 
     # ------------------------------------------------------------ emirler
     async def _submit_entry(self, pos):

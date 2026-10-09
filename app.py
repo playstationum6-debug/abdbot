@@ -94,6 +94,9 @@ BOT_CFG = {
     "yarim_r": 1.0,
     "kalan_r": 3.0,                                           # yarım kapattıktan sonra kalan kısmın hedefi (R)
     "tg_min_guven": 70,                                       # Telegram'a gidecek sinyallerde en düşük güven
+    "yer_ac": 1,                                              # para doluyken çok güçlü sinyale yer aç
+    "yer_min_guven": 85,
+    "eko_dur": 1,                                             # yüksek etkili ekonomik veri saatinde yeni işlem yok
 }
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
@@ -806,6 +809,7 @@ def status_payload():
         "up": int(now - state.started),
         "bk": backup.status,
         "bil": EARN_ST[0],
+        "eko": EKO["st"],
         "bkAge": int(now - backup.last_ok) if backup.last_ok else None,
         "rs7": backup.starts_last_7d() if backup.enabled else None,
         "bot": bot.status,
@@ -861,7 +865,7 @@ async def get_daily(sym):
         bars = hit[1] if hit else []
     if bars:
         _daily_cache[sym] = (time.time(), bars)
-        if len(_daily_cache) > 80:
+        if len(_daily_cache) > 160:
             _daily_cache.pop(min(_daily_cache, key=lambda k: _daily_cache[k][0]), None)
     return bars
 
@@ -1074,7 +1078,8 @@ AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd"
             "max_open": (int, 1, 50), "daily_loss": (float, 1, 1e6), "min_conf": (int, 0, 100),
             "min_conf_ext": (int, 0, 100), "yeni_islem": (int, 0, 1), "sektor_max": (int, 0, 20),
             "yarim_kapat": (int, 0, 1), "yarim_r": (float, 0.5, 3), "kalan_r": (float, 1, 8),
-            "tg_min_guven": (int, 0, 100)}
+            "tg_min_guven": (int, 0, 100), "yer_ac": (int, 0, 1), "yer_min_guven": (int, 50, 100),
+            "eko_dur": (int, 0, 1)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1,
              "tg_kosan": 1, "tg_tablo": 1, "tg_uyari": 1}
@@ -1664,7 +1669,8 @@ def feed_bot_note(typ, msg, sym, t):
         if m:
             why, usd, r = m.group(1), float(m.group(2)), float(m.group(3))
             head = {"hedef": "Hedef geldi", "stop": "Stop oldu", "kâr koruma": "Başa başta çıktım",
-                    "iz süren stop": "Kârı aldım (iz süren stop)", "seans sonu": "Seans bitti, kapattım"}.get(why, "Kapattım")
+                    "iz süren stop": "Kârı aldım (iz süren stop)", "seans sonu": "Seans bitti, kapattım",
+                    "yer açma": "Güçlü sinyale yer açtım"}.get(why, "Kapattım")
             pos = _pos_of(sym, open_=False)
             sub = ""
             if pos and pos.get("entry") and pos.get("exit"):
@@ -1682,6 +1688,12 @@ def feed_bot_note(typ, msg, sym, t):
                      extra=ex)
         else:
             feed_add("bot", sym, msg, tone="bilgi", t=t)
+    elif typ == "yer":
+        pos = _pos_of(sym, open_=True)
+        ex = {"tg_html": f"🔄 <b>YER AÇMA · #{_h(sym)}</b>\n{_h(msg)}"}
+        if pos:
+            ex["tgr"] = f"p:{pos['id']}"
+        feed_add("bot", sym, "Güçlü sinyale yer açmak için kapatılıyor", sub=msg, tone="bilgi", t=t, extra=ex)
     elif typ == "yarım":
         pos = _pos_of(sym, open_=True)
         m = re.search(r"([+-][\d.]+) \$ cebe", msg)
@@ -2339,6 +2351,10 @@ def sabah_listesi():
         parts.append("Bugün bilanço: " + ", ".join(bil[:12]))
     if HAVA.get("etiket") and HAVA["etiket"] != "bilinmiyor":
         parts.append(f"Piyasa havası: {HAVA['etiket']}")
+    ev = eko_bugun()
+    if ev:
+        parts.append("Bugün önemli veri: " + ", ".join(f"{e['ad']} {datetime.fromtimestamp(e['t'], TR).strftime('%H:%M')}"
+                                                         for e in ev[:5]) + " (bu saatlerde bot yeni işlem açmaz)")
     return "Günaydın: bugünün hazırlık listesi", ("\n".join(parts) or "Henüz veri yok; tarayıcı birkaç dakika içinde dolar.")
 
 
@@ -2608,7 +2624,14 @@ async def piyasa_uyari_loop():
                         _uyari(f"halt-{sym}", f"⛔ <b>#{_h(sym)} işlemi durdurulmuş olabilir</b>\n5 dakikadır işlem gelmiyor "
                                               f"(son fiyat {fp_(lv['p'])}). Sert hareketlerden sonra borsa geçici durdurma yapar.",
                                cooldown=600, sym=sym)
-            # 5) günlük zarar limiti yaklaşıyor / doldu
+            # 5) yüksek etkili ekonomik veri 15 dk sonra
+            for e in EKO["list"]:
+                if e["etki"] == "yüksek" and 0 < e["t"] - now <= 900:
+                    _uyari(f"eko-{e['t']}-{e['en']}", f"📅 <b>15 dk sonra: {_h(e['ad'])}</b> ({datetime.fromtimestamp(e['t'], TR).strftime('%H:%M')} TR)\n"
+                                                      f"Beklenti {_h(e['beklenti'] or '—')} · önceki {_h(e['onceki'] or '—')}\n"
+                                                      "Veri saatinde fiyat sert oynar; bot −5/+15 dk arası yeni işlem açmaz.",
+                           cooldown=86400, loud=True)
+            # 6) günlük zarar limiti yaklaşıyor / doldu
             lim = float(BOT_CFG.get("daily_loss") or 0)
             tp = bot.today_pnl()
             if lim > 0 and tp <= -0.7 * lim:
@@ -2617,7 +2640,7 @@ async def piyasa_uyari_loop():
                        (f"🛑 <b>Günlük zarar limiti doldu</b> ({tp:+.2f} $ / -{lim:.0f} $)\nBot bugün yeni işlem açmayacak."
                         if dolu else f"⚠️ <b>Günlük zarar limitine yaklaşıldı</b> ({tp:+.2f} $ / -{lim:.0f} $)\n"
                                      "Limit dolarsa bot bugün yeni işlem açmaz."), cooldown=86400)
-            # 6) açık pozisyonda bilanço
+            # 7) açık pozisyonda bilanço
             for q in bot.open_positions():
                 b = bilanco_durum(q["sym"])
                 k = (q["sym"], str(gun))
@@ -2629,6 +2652,179 @@ async def piyasa_uyari_loop():
                             konu="bot")
         except Exception as e:
             log.warning("Piyasa uyarısı hatası: %s", e)
+
+
+# ----------------------------------------------------------------- ekonomik takvim (Forex Factory haftalık, ücretsiz)
+EKO = {"list": [], "st": "henüz çekilmedi", "t": 0}
+EKO_TR = (("fomc statement", "Fed faiz kararı açıklaması"), ("federal funds rate", "Fed faiz kararı"),
+          ("fomc press conference", "Fed başkanı basın toplantısı"), ("fomc meeting minutes", "Fed toplantı tutanakları"),
+          ("fed chair", "Fed Başkanı konuşuyor"), ("core cpi", "Çekirdek enflasyon (TÜFE)"), ("cpi", "Enflasyon (TÜFE)"),
+          ("core ppi", "Çekirdek üretici fiyatları (ÜFE)"), ("ppi", "Üretici fiyatları (ÜFE)"),
+          ("core pce", "Çekirdek PCE enflasyonu"), ("pce", "PCE enflasyonu"),
+          ("non-farm employment", "Tarım dışı istihdam"), ("unemployment rate", "İşsizlik oranı"),
+          ("unemployment claims", "Haftalık işsizlik başvuruları"), ("adp", "ADP özel sektör istihdamı"),
+          ("jolts", "JOLTS iş ilanları"), ("average hourly earnings", "Saatlik kazançlar"),
+          ("advance gdp", "Büyüme (GSYH, öncü)"), ("gdp", "Büyüme (GSYH)"), ("core retail sales", "Çekirdek perakende satışlar"),
+          ("retail sales", "Perakende satışlar"), ("ism manufacturing", "ISM imalat endeksi"),
+          ("ism services", "ISM hizmet endeksi"), ("consumer sentiment", "Tüketici güveni (Michigan)"),
+          ("cb consumer confidence", "Tüketici güveni (Conference Board)"), ("durable goods", "Dayanıklı mal siparişleri"),
+          ("crude oil inventories", "Ham petrol stokları"), ("building permits", "İnşaat izinleri"),
+          ("housing starts", "Konut başlangıçları"), ("existing home sales", "İkinci el konut satışları"),
+          ("new home sales", "Yeni konut satışları"), ("empire state", "Empire State imalat endeksi"),
+          ("philly fed", "Philadelphia Fed endeksi"), ("flash manufacturing pmi", "İmalat PMI (öncü)"),
+          ("flash services pmi", "Hizmet PMI (öncü)"), ("trade balance", "Dış ticaret dengesi"))
+
+
+def eko_tr(title):
+    t = (title or "").lower()
+    return next((tr for k, tr in EKO_TR if k in t), title)
+
+
+async def eko_loop():
+    await asyncio.sleep(25)
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
+                r = await c.get("https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+                                headers={"User-Agent": "Mozilla/5.0 abdbot"})
+                r.raise_for_status()
+                out = []
+                for e in r.json() or []:
+                    if e.get("country") != "USD":
+                        continue
+                    try:
+                        ts = datetime.fromisoformat(str(e.get("date"))).timestamp()
+                    except Exception:
+                        continue
+                    out.append({"t": int(ts), "ad": eko_tr(e.get("title")), "en": e.get("title"),
+                                "etki": {"High": "yüksek", "Medium": "orta", "Low": "düşük"}.get(e.get("impact"), e.get("impact") or ""),
+                                "beklenti": e.get("forecast") or "", "onceki": e.get("previous") or "",
+                                "gercek": e.get("actual") or ""})
+                out.sort(key=lambda x: x["t"])
+                EKO.update(list=out, t=int(time.time()), st=f"tamam ({len(out)} veri, {datetime.now(TR).strftime('%H:%M')})")
+                MARKET["eko"] = out
+                _mkt_ver[0] += 1
+            await asyncio.sleep(3 * 3600)
+        except Exception as e:
+            EKO["st"] = f"alınamadı: {str(e)[:60]}"
+            log.warning("Ekonomik takvim alınamadı: %s", e)
+            await asyncio.sleep(1800)
+
+
+def eko_engel(now):
+    """Yüksek etkili veri saatinde (−5 dk … +15 dk) yeni işlem açılmaz."""
+    if not BOT_CFG.get("eko_dur", 1):
+        return None
+    for e in EKO["list"]:
+        if e["etki"] == "yüksek" and e["t"] - 300 <= now <= e["t"] + 900:
+            return f"ekonomik veri saati: {e['ad']} ({datetime.fromtimestamp(e['t'], TR).strftime('%H:%M')} TR), −5/+15 dk işlem yok"
+    return None
+
+
+def eko_bugun():
+    gun = datetime.now(TR).date()
+    return [e for e in EKO["list"] if e["etki"] == "yüksek" and datetime.fromtimestamp(e["t"], TR).date() == gun]
+
+
+# ----------------------------------------------------------------- günlük trend (çoklu zaman onayı için)
+GUN_TREND = {}
+
+
+def gunluk_trend(sym):
+    return (GUN_TREND.get(sym) or (0, 0))[1]
+
+
+async def gun_trend_loop():
+    await asyncio.sleep(90)
+    while True:
+        for sym in list(dict.fromkeys(SYMBOLS + list(scanner.runners))):
+            try:
+                rows = await get_daily(sym)
+                closes = [r[4] for r in rows][-120:]
+                tr = 0
+                if len(closes) >= 50:
+                    e20 = analiz.ema(closes, 20)[-1]
+                    e50 = analiz.ema(closes, 50)[-1]
+                    c = closes[-1]
+                    tr = 1 if c > e20 > e50 else (-1 if c < e20 < e50 else 0)
+                elif len(closes) >= 10:
+                    tr = 1 if closes[-1] > sum(closes[-10:]) / 10 else -1
+                GUN_TREND[sym] = (time.time(), tr)
+            except Exception:
+                pass
+            await asyncio.sleep(1.5)
+        await asyncio.sleep(2 * 3600)
+
+
+# ----------------------------------------------------------------- işlem günlüğü + hisse karşılaştırma
+def gunluk_payload(gun=30):
+    cut = time.time() - gun * 86400
+    out = []
+    for p in sorted(bot.positions, key=lambda p: p.get("xt") or p.get("opened") or 0, reverse=True):
+        if p["st"] != "kapandı" or p.get("pnl") is None or (p.get("xt") or 0) < cut:
+            continue
+        sig = engine.by_id.get(p.get("sig")) or {}
+        out.append({k: p.get(k) for k in ("id", "sym", "dir", "setup", "ses", "conf", "qty", "entry", "exit", "et", "xt",
+                                          "pnl", "r", "pct", "xr", "lesson", "init_stop", "target", "why", "runner")}
+                   | {"neden": (sig.get("why") or [])[:6], "yarim": (p.get("half") or {}).get("pnl")})
+        if len(out) >= 400:
+            break
+    return out
+
+
+_kar_cache = {}
+
+
+def kar_fetch(sym, period, interval):
+    df = yf.download(sym, period=period, interval=interval, auto_adjust=False, progress=False, threads=False,
+                     prepost=False)
+    if df is None or df.empty:
+        return []
+    if isinstance(df.columns, pd.MultiIndex):
+        lv0 = df.columns.get_level_values(0)
+        df = df[sym] if sym in lv0 else df.droplevel(1, axis=1)
+    out = []
+    for idx, r in df.iterrows():
+        try:
+            c = float(r["Close"])
+        except Exception:
+            continue
+        if c == c:
+            ts = idx.tz_localize("UTC") if idx.tzinfo is None else idx
+            out.append((int(ts.timestamp()), c))
+    return out
+
+
+async def karsilastir_payload(syms, donem):
+    out = {}
+    for sym in syms[:4]:
+        rows = []
+        if donem in ("gun", "hafta"):
+            key = (sym, donem)
+            hit = _kar_cache.get(key)
+            if hit and time.time() - hit[0] < 300:
+                rows = hit[1]
+            else:
+                try:
+                    rows = await asyncio.to_thread(kar_fetch, sym, "1d" if donem == "gun" else "5d",
+                                                   "5m" if donem == "gun" else "30m")
+                except Exception:
+                    rows = []
+                _kar_cache[key] = (time.time(), rows)
+        else:
+            d_ = await get_daily(sym)
+            n = {"ay": 22, "3ay": 66, "yil": 252}.get(donem, 22)
+            for x in d_[-n:]:
+                try:
+                    rows.append((int(datetime.strptime(x[0], "%Y-%m-%d").replace(tzinfo=UTC).timestamp()), x[4]))
+                except Exception:
+                    continue
+        if rows:
+            b0 = rows[0][1]
+            out[sym] = [[t, round((c / b0 - 1) * 100, 3)] for t, c in rows]
+        else:
+            out[sym] = []
+    return out
 
 
 def spy_karsilastir(eq, cap0):
@@ -3392,6 +3588,8 @@ async def lifespan(app):
     bot.sector_of = sektor.sektor_of
     engine.bilanco = bilanco_durum
     engine.hava = lambda: HAVA["etiket"]
+    engine.gunluk = gunluk_trend
+    bot.engel = eko_engel
     backup.record_start()
     await backup.save(engine, bot)
     try:
@@ -3401,7 +3599,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, font_task, tg_komut_loop, tg_takip_loop, piyasa_uyari_loop)]
+                                                  rapor_loop, font_task, tg_komut_loop, tg_takip_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -3609,6 +3807,28 @@ async def ayar_kaydet(request: Request):
     bot.ver += 1
     asyncio.create_task(backup.save(engine, bot))
     return JSONResponse({"ok": 1, "cfg": BOT_CFG, "push": PUSH_PREF})
+
+
+@app.get("/api/gunluk")
+async def api_gunluk(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    try:
+        gun = max(1, min(365, int(request.query_params.get("gun") or 30)))
+    except ValueError:
+        gun = 30
+    return JSONResponse({"list": gunluk_payload(gun)})
+
+
+@app.get("/api/karsilastir")
+async def api_karsilastir(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    syms = [x for x in re.split(r"[\s,;]+", (request.query_params.get("s") or "").upper()) if tarayici.SYM_RE.match(x)][:4]
+    d = request.query_params.get("d") or "gun"
+    if d not in ("gun", "hafta", "ay", "3ay", "yil"):
+        d = "gun"
+    return JSONResponse({"seri": await karsilastir_payload(syms, d) if syms else {}})
 
 
 @app.post("/api/gecmis")
