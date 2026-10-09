@@ -23,6 +23,12 @@ ONAY_R = 0.10             # onay: fiyat girişin 0,1R ötesine geçmeli (stopa d
 SPREAD_KUCULT = 0.6       # % spread: üstü lotu yarıya indirir
 SPREAD_VETO = 3.0         # % spread: üstü işlem açtırmaz (ücretsiz IEX kotası geniş görünebilir, temkinli eşik)
 MIN_KARNE = 30            # karnede bir modül satırı için en az sonuç
+# 💎 Süper Fırsat: denetçi AL + model en iyi %3 + Fırsat/Teknik/Piyasa üçü de olumlu + uzun yönlü.
+# Geçmiş testte (son %30, görülmemiş veri) günde en fazla 3 sınırıyla: 9 sinyal, 6 kazanç, ort. +0,85R.
+# Örnek küçük: canlı karnede ort. R eksiye düşerse eşik kendiliğinden %1'e sıkılaşır (app.py).
+SUPER = {"pct": 0.97}
+SUPER_GUN = 3             # günde en fazla süper fırsat
+SUPER_MOD = ("firsat", "teknik", "piyasa")
 
 MODULLER = [("firsat", "Fırsat Avcısı"), ("teknik", "Teknik Analist"), ("haber", "Haber Analisti"),
             ("risk", "Risk Yöneticisi"), ("piyasa", "Piyasa Analisti")]
@@ -191,8 +197,20 @@ def degerlendir(sig, ctx=None):
     else:
         karar, neden = "AL", "bütün kontroller tamam"
     say = {x: sum(1 for v in mod.values() if v["k"] == x) for x in ("olumlu", "nötr", "olumsuz", "küçült", "veto")}
-    return {"karar": karar, "neden": neden, "eksik": list(dict.fromkeys(eksik)), "lot": round(lot, 2),
-            "mod": mod, "say": say, "t": int(time.time())}
+    q = (ctx.get("model") or (None, None))[1]
+    out = {"karar": karar, "neden": neden, "eksik": list(dict.fromkeys(eksik)), "lot": round(lot, 2),
+           "mod": mod, "say": say, "t": int(time.time())}
+    if q is not None:
+        out["q"] = round(q, 3)
+    out["sinif"] = super_sinif(out, sig)
+    return out
+
+
+def super_sinif(den, sig):
+    """Süper Fırsat sınıfı mı (günlük sınır hariç)?"""
+    q = den.get("q")
+    return bool(den.get("karar") == "AL" and q is not None and q >= SUPER["pct"] and sig.get("dir", 1) > 0
+                and all((den.get("mod") or {}).get(k, {}).get("k") == "olumlu" for k in SUPER_MOD))
 
 
 def kisa(den):
@@ -223,7 +241,7 @@ def karne(signals, ctx_fn=None):
     done = [s for s in signals if s.get("r") is not None and s.get("st") in ("hedef", "stop", "süre")
             and not s.get("dis")]
     agg = {k: {"olumlu": [0, 0.0], "olumsuz": [0, 0.0], "nötr": [0, 0.0]} for k, _ in MODULLER}
-    kar = {"AL": [0, 0.0, 0], "BEKLE": [0, 0.0, 0], "PAS": [0, 0.0, 0]}
+    kar = {"AL": [0, 0.0, 0], "BEKLE": [0, 0.0, 0], "PAS": [0, 0.0, 0], "SUPER": [0, 0.0, 0]}
     for s in done:
         den = s.get("den")
         if not den:
@@ -241,6 +259,11 @@ def karne(signals, ctx_fn=None):
         kr[0] += 1
         kr[1] += r
         kr[2] += 1 if r > 0 else 0
+        if den.get("sinif") if "sinif" in den else super_sinif(den, s):
+            ks = kar["SUPER"]
+            ks[0] += 1
+            ks[1] += r
+            ks[2] += 1 if r > 0 else 0
     ort = lambda a: round(a[1] / a[0], 3) if a[0] else None
     rows = []
     for k, ad in MODULLER:

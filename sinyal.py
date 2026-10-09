@@ -132,6 +132,7 @@ class Engine:
         self._tgt_over = {}        # formasyon hedefi: (sembol, mum, kurgu, yön) -> hedef fiyat
         self.runners = {}          # tarayıcının bulduğu koşan hisseler: sembol -> bilgi (yüzde, haber)
         self.learner = None        # öğrenme modülü (güven ayarı + not)
+        self.denetle = None        # app.py: Karar Denetçisi (sinyal -> karar sözlüğü)
 
     # ------------------------------------------------------------ yardımcılar
     def bounds(self, day):
@@ -1334,6 +1335,11 @@ class Engine:
             "fill": None, "ft": None, "x": None, "xt": None, "r": None, "pct": None, "last": T, "lc": x["c"],
             "created": int(time.time()),
         }
+        if self.denetle and not getattr(self, "bt_mode", False):
+            try:
+                sig["den"] = self.denetle(sig)
+            except Exception:
+                pass
         self.signals.append(sig)
         self.by_id[sid] = sig
         self.last_fire[(sym, setup, d)] = T
