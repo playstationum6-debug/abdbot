@@ -3817,7 +3817,7 @@ async def tg_komut(text, chat, thread=None):
         send(f"🧠 <b>Yapay zekâ karnesi</b>\nAL dedikleri: {al_['n']} sinyal, ort. {fr_(al_['avg'])}"
              + (f", %{al_['wr']} kazandı" if al_['wr'] is not None else "") + "\n"
              f"PAS dedikleri: {pas_['n']} sinyal, ort. {fr_(pas_['avg'])}\nAyırt gücü: {fr_(k['guc'])} · {dur_}\n"
-             f"Durum: {_h(YZM.durum)}")
+             f"Durum: {_h(YZM.durum)}\nModeller: kısa işler {_h(YZM.hafif or '—')}, araştırma {_h(YZM.agir or scanner.ai_model)}")
     elif cmd in ("neden", "niye"):
         if not arg:
             send("Kullanım: /neden VIVK — bot bu hisseye neden girmedi / girdi")
@@ -4753,12 +4753,12 @@ bot.yz_kapi = yz_kapi
 
 
 def yz_planla(sig):
-    """Yetki yokken de: uygun sinyalleri gölgede değerlendir (karne birikir). Saatte en fazla 30."""
+    """Yetki yokken de: uygun sinyalleri gölgede değerlendir (karne birikir). Saatte en fazla 15."""
     if not yz_uygun(sig):
         return
     now = time.time()
     _YZ_SAAT[:] = [t for t in _YZ_SAAT if now - t < 3600]
-    if len(_YZ_SAAT) >= 30 and not sig.get("super"):
+    if len(_YZ_SAAT) >= 15 and not sig.get("super"):
         return
     _YZ_SAAT.append(now)
     YZM.bekleyen.add(sig["id"])
@@ -4770,10 +4770,11 @@ async def _yz_calis(sig, tekrar):
     y = None
     try:
         sm = summary(sig["sym"]) or {}
-        try:
-            await asyncio.wait_for(YZM.arastir(sig["sym"], ADLAR_TR.get(sig["sym"], ""), sm.get("p"), sm.get("ch")), 30)
-        except asyncio.TimeoutError:
-            pass
+        if sig["sym"] not in SYMBOLS or sig.get("super"):     # internet araştırması: koşan küçük hisselerde (kota tasarrufu)
+            try:
+                await asyncio.wait_for(YZM.arastir(sig["sym"], ADLAR_TR.get(sig["sym"], ""), sm.get("p"), sm.get("ch")), 30)
+            except asyncio.TimeoutError:
+                pass
         y = await asyncio.wait_for(YZM.karar(sig, yz_baglam(sig)), 25)
     except Exception as e:
         log.debug("Yapay zekâ kararı alınamadı %s: %s", sig.get("sym"), e)

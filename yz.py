@@ -16,7 +16,7 @@ import json
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -60,6 +60,10 @@ class YZ:
         self.son_hata = ""
         self.ders = None                    # son gün sonu dersi {"t", "metin"}
         self._kilit = {}
+        self.hafif = os.getenv("YZ_MODEL_HAFIF", "gemini-2.5-flash-lite")   # kısa işler: daha geniş ücretsiz kota
+        self.agir = os.getenv("YZ_MODEL", "")                               # boş: tarayıcının seçtiği flash modeli
+        self.dur = {}                       # model -> bu zamana kadar kota yüzünden kullanılmaz
+        self.yok = set()                    # hesapta bulunmayan modeller
 
     # ------------------------------------------------------------------ çağrı
     @property
@@ -84,56 +88,98 @@ class YZ:
                 return False
             await asyncio.sleep(2)
 
-    async def cagir(self, prompt, arama=False, sicaklik=0.2, en_fazla_bekle=25, uzun=4096):
+    def _model_sec(self, hafif):
+        """Karar / ders gibi kısa işler hafif modelle (ücretsiz günlük kotası daha geniş), araştırma ve analiz ana modelle.
+        Biri kotaya takıldıysa diğerine geçilir."""
+        agir = self.agir or self.sc.ai_model
+        sira = [self.hafif, agir] if hafif and self.hafif else [agir, self.hafif]
+        now = time.time()
+        for m in sira:
+            if m and m not in self.yok and self.dur.get(m, 0) <= now:
+                return m
+        return None
+
+    def _kota_coz(self, model, r):
+        """429 cevabından: günlük mü dakikalık mı, ne zaman açılır."""
+        now = time.time()
+        bekle, gunluk = 60, False
+        try:
+            err = (r.json() or {}).get("error") or {}
+            for d in err.get("details") or []:
+                for v in d.get("violations") or []:
+                    if "PerDay" in str(v.get("quotaId", "")):
+                        gunluk = True
+                rd = d.get("retryDelay")
+                if rd:
+                    bekle = max(bekle, float(str(rd).rstrip("s") or 60))
+        except Exception:
+            pass
+        if gunluk:
+            yarin = datetime.now(PT).replace(hour=0, minute=0, second=5, microsecond=0) + timedelta(days=1)
+            self.dur[model] = yarin.timestamp()
+            ac = datetime.fromtimestamp(yarin.timestamp(), TR).strftime("%H:%M")
+            self.durum = f"{model}: Google'ın ücretsiz GÜNLÜK kotası doldu, TR {ac}'de açılır"
+        else:
+            self.dur[model] = now + min(bekle, 300)
+            self.durum = f"{model}: dakikalık kota doldu, {int(min(bekle, 300))} sn bekleniyor"
+
+    async def cagir(self, prompt, arama=False, sicaklik=0.2, en_fazla_bekle=25, uzun=4096, hafif=False):
         """Dönüş: (metin, kaynaklar) ya da (None, []) — anahtar yok / kota / hata."""
         if not self.hazir:
             return None, []
         if self.kalan() <= 0:
-            self.durum = f"günlük kota doldu ({GUNLUK})"
+            self.durum = f"günlük sınır doldu (YZ_GUNLUK={GUNLUK})"
             return None, []
-        if not await self._bekle_kota(en_fazla_bekle):
-            self.durum = "dakikalık kota dolu"
-            return None, []
-        self.sayac += 1
-        body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": sicaklik, "maxOutputTokens": uzun}}   # düşünen modellerde düşünme de bu sınırdan yer
-        if arama and self.arama:
-            body["tools"] = [{"google_search": {}}]
-        try:
-            async with httpx.AsyncClient(timeout=60) as c:
-                r = await c.post(URL.format(m=self.sc.ai_model), json=body,
-                                 headers={"x-goog-api-key": self.sc.ai_key, "Content-Type": "application/json"})
-                if r.status_code == 404:
-                    await self.sc.model_bul(c)
-                    self.son_hata = "model bulunamadı, yenisi seçiliyor"
-                    return None, []
-                if r.status_code == 400 and "tools" in body and ("search" in r.text.lower() or "tool" in r.text.lower()):
-                    self.arama = False          # bu anahtar / model arama aracını desteklemiyor
-                    self.son_hata = "Google arama aracı kullanılamıyor: aramasız devam"
-                    body.pop("tools", None)
-                    r = await c.post(URL.format(m=self.sc.ai_model), json=body,
-                                     headers={"x-goog-api-key": self.sc.ai_key, "Content-Type": "application/json"})
-                if r.status_code == 429:
-                    self.durum = "kota (429): biraz sonra"
-                    self.son_hata = r.text[:120]
-                    return None, []
-                if r.status_code != 200:
-                    self.son_hata = f"{r.status_code}: {r.text[:120]}"
-                    return None, []
-                js = r.json()
-            cand = (js.get("candidates") or [{}])[0]
-            parts = (cand.get("content") or {}).get("parts") or []
-            txt = "".join(p.get("text", "") for p in parts).strip()
-            kay = []
-            for ch in ((cand.get("groundingMetadata") or {}).get("groundingChunks") or []):
-                w = ch.get("web") or {}
-                if w.get("uri"):
-                    kay.append({"t": (w.get("title") or "")[:80], "u": w["uri"]})
-            self.durum = f"çalışıyor · bugün {self.sayac}/{GUNLUK} çağrı" + ("" if self.arama else " · aramasız")
-            return txt or None, kay[:6]
-        except Exception as e:
-            self.son_hata = str(e)[:120]
-            return None, []
+        for _deneme in range(2):
+            model = self._model_sec(hafif)
+            if not model:
+                return None, []
+            if not await self._bekle_kota(en_fazla_bekle):
+                self.durum = "dakikalık sınır dolu (8/dk)"
+                return None, []
+            self.sayac += 1
+            body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": sicaklik, "maxOutputTokens": uzun}}   # düşünen modellerde düşünme de bu sınırdan yer
+            if arama and self.arama:
+                body["tools"] = [{"google_search": {}}]
+            hdr = {"x-goog-api-key": self.sc.ai_key, "Content-Type": "application/json"}
+            try:
+                async with httpx.AsyncClient(timeout=60) as c:
+                    r = await c.post(URL.format(m=model), json=body, headers=hdr)
+                    if r.status_code == 404:
+                        if model == self.hafif:
+                            self.yok.add(model)           # bu hesapta yok: ana modelle devam
+                            continue
+                        await self.sc.model_bul(c)
+                        self.son_hata = "model bulunamadı, yenisi seçiliyor"
+                        return None, []
+                    if r.status_code == 400 and "tools" in body and ("search" in r.text.lower() or "tool" in r.text.lower()):
+                        self.arama = False          # bu anahtar / model arama aracını desteklemiyor
+                        self.son_hata = "Google arama aracı kullanılamıyor: aramasız devam"
+                        body.pop("tools", None)
+                        r = await c.post(URL.format(m=model), json=body, headers=hdr)
+                    if r.status_code == 429:
+                        self._kota_coz(model, r)
+                        self.son_hata = self.durum
+                        continue                      # diğer modeli dene
+                    if r.status_code != 200:
+                        self.son_hata = f"{model} {r.status_code}: {r.text[:120]}"
+                        return None, []
+                    js = r.json()
+                cand = (js.get("candidates") or [{}])[0]
+                parts = (cand.get("content") or {}).get("parts") or []
+                txt = "".join(p.get("text", "") for p in parts).strip()
+                kay = []
+                for ch in ((cand.get("groundingMetadata") or {}).get("groundingChunks") or []):
+                    w = ch.get("web") or {}
+                    if w.get("uri"):
+                        kay.append({"t": (w.get("title") or "")[:80], "u": w["uri"]})
+                self.durum = f"çalışıyor · {model} · bugün {self.sayac}/{GUNLUK} çağrı" + ("" if self.arama else " · aramasız")
+                return txt or None, kay[:6]
+            except Exception as e:
+                self.son_hata = str(e)[:120]
+                return None, []
+        return None, []
 
     # ------------------------------------------------------------------ 1) araştırma (internetten)
     def arastirma(self, sym, taze=ARASTIRMA_SN):
@@ -201,7 +247,7 @@ class YZ:
             f"{baglam}\n{ara}\n"
             "Yanıtı SADECE şu JSON ile ver (Türkçe):\n"
             '{"olasilik":0-100,"neden":"en fazla 2 cümle","risk":"en büyük risk, kısa"}')
-        txt, _ = await self.cagir(prompt, arama=False, sicaklik=0.1, en_fazla_bekle=15, uzun=4096)
+        txt, _ = await self.cagir(prompt, arama=False, sicaklik=0.1, en_fazla_bekle=15, uzun=4096, hafif=True)
         j = _json(txt)
         if not j:
             return None
@@ -250,7 +296,7 @@ class YZ:
         prompt = ("Aşağıda bir gün içi botun bugünkü sinyal ve işlem sonuçları var. Türkçe, 4-6 madde halinde ders çıkar: "
                   "ne işe yaradı, ne yaramadı, yarın neye dikkat edilmeli. Rakamlara dayan, genel laf etme. "
                   "Tek günlük sonuçtan kural değiştirme önerme; sadece gözlem ve dikkat noktası yaz.\n" + ozet)
-        txt, _ = await self.cagir(prompt, arama=False, sicaklik=0.3, uzun=4096)
+        txt, _ = await self.cagir(prompt, arama=False, sicaklik=0.3, uzun=4096, hafif=True)
         if txt:
             self.ders = {"t": int(time.time()), "metin": txt[:1500]}
         return txt
