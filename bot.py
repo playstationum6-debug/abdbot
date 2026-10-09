@@ -245,8 +245,19 @@ class Bot:
         conf0 = sig.get("conf0", conf)
         if conf0 < thr:
             return skip(f"güven {conf0} < eşik {thr}")
+        # Öğrenme filtresi: model bu sinyali zayıf dilimde görüyorsa işlem açma.
+        # Sinyal yine gölgede takip edilir ve sonucu öğrenmeye girer. Koşan küçük hisseler hariç
+        # (geçmiş testte onların verisi yok). Ayarlarda ogren_filtre=0 ile kapatılabilir.
+        _veto = getattr(self.learner, "veto", None)
+        if _veto and self.cfg.get("ogren_filtre", 1) and not sig.get("runner"):
+            try:
+                v, vwhy = _veto(sig["setup"], ses, sig.get("f"))
+            except Exception:
+                v, vwhy = False, ""
+            if v:
+                return skip(vwhy)
         n, e = self.learner.group(sig["setup"], ses)
-        # Trader gibi: kurguyu atlama, lotu geçmişe ve güvene göre ayarla
+        # Trader gibi: lotu modele ve geçmişe göre ayarla
         try:
             mult, mwhy = self.learner.size_mult(sig["setup"], ses, conf, sig.get("f"))
         except Exception:
