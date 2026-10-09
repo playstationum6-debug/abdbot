@@ -563,7 +563,13 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
   <div class="card"><div class="hrs" id="hrs"></div><div class="note" style="margin-top:10px">Canlı sinyaller + geçmiş test. Çubuk uzunluğu sinyal sayısı, renk ortalama sonuç.</div></div>
   <h3>Kurgu × seans</h3>
   <div class="tw"><table class="res" id="grp"></table></div>
-  <div class="note">Bot, bir kurgu–seans çiftinde en az 20 sonuç biriktikten sonra beklentisi negatifse o sinyalleri atlar. Az veride sonuçlar sıfıra doğru çekilir.</div>
+  <div class="note">Model her sinyale "beklenen R" verir; bot sadece en iyi dilimdeki sinyallerde işlem açar. Atlanan sinyaller de takip edilir ve öğrenmeye girer. Az veride sonuçlar sıfıra doğru çekilir.</div>
+  <h3>Model sınavı</h3>
+  <div class="card" id="msinav"><div class="note">Model henüz kendini sınamadı.</div></div>
+  <h3>Telegram kanalları</h3>
+  <div class="tw"><table class="res" id="diskan"></table></div>
+  <div class="note">Bir kanaldaki sinyal mesajını Telegram botuna <b>ilet</b>: bot paylaşım saatinden sonraki ilk dakikadan girilmiş gibi gölgede takip eder (kayma dahil). Bot bu sinyallerle işlem açmaz. "Önce" = paylaşımdan önceki 30 dakikada fiyatın zaten koştuğu yüzde.</div>
+  <div class="tw"><table class="res" id="disson"></table></div>
   <h3>Tüm sonuçlar</h3>
   <div class="tw"><table class="res" id="res"></table></div>
   <div class="note">Net sonuçlarda kayma (normal %0,03, uzatılmış %0,10, koşan küçük hisseler %0,5–0,8 her yön) ve masraf payı var. R = planlanan risk birimi.</div>
@@ -1084,13 +1090,18 @@ function renderLearn(){renderBT();renderHours();const T=sigStats.find(r=>r.k==='
   const ins=x=>`<div class="ins"><span>${esc(x.k)}</span><span class="${cls(x.avg)}"><b>${fR(x.avg)}</b> <span class="meta">· ${x.n}</span></span></div>`;
   $('insg').innerHTML=learn.ins.good.length?learn.ins.good.map(ins).join(''):'<div class="note" style="padding:0 12px 10px">Henüz yeterli veri yok (her koşul için en az 15 sonuç).</div>';
   $('insb').innerHTML=learn.ins.bad.length?learn.ins.bad.map(ins).join(''):'<div class="note" style="padding:0 12px 10px">Henüz yeterli veri yok.</div>';
-  tbl('grp',['Kurgu','Adet','Kazanma','Ort. R','Durum'],learn.groups.length?learn.groups.map(r=>`<tr><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr.toFixed(0)}%</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td>${esc(r.durum)}</td></tr>`).join(''):'<tr><td colspan="5">Henüz sonuç yok.</td></tr>')}
+  tbl('grp',['Kurgu','Adet','Kazanma','Ort. R','Durum'],learn.groups.length?learn.groups.map(r=>`<tr><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr.toFixed(0)}%</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td>${esc(r.durum)}</td></tr>`).join(''):'<tr><td colspan="5">Henüz sonuç yok.</td></tr>');
+  const M=learn.ins&&learn.ins.model,S=M&&M.sinav;
+  $('msinav').innerHTML=S&&S.secilen!=null?`<div class="meta">Görmediği son ${S.n} sinyalde</div><div class="ins"><span>Hepsi</span><span class="${cls(S.hepsi)}"><b>${fR(S.hepsi)}</b></span></div><div class="ins"><span>Modelin seçtikleri (${S.secilen_n})</span><span class="${cls(S.secilen)}"><b>${fR(S.secilen)}</b></span></div><div class="ins"><span>Modelin eledikleri (${S.elenen_n})</span><span class="${cls(S.elenen)}"><b>${fR(S.elenen)}</b></span></div><div class="note" style="margin-top:8px">${S.secilen>S.elenen?'Model iyi sinyali kötüsünden ayırabiliyor.':'Model henüz ayırt edemiyor.'}${S.secilen<=0?' Seçilen dilim de eksi: kurallar avantaj üretmiyor, model sadece zararı küçültüyor.':''} Hafıza: ${M.hafiza_gun} gün yarı ömür.</div>`:'<div class="note">Model en az 500 sonuçtan sonra kendini sınar.</div>';
+  const D=learn.dis||{kanallar:[],son:[]};
+  tbl('diskan',['Kanal','Sonuç','Tutma','Ort. R','Önce','Açık'],D.kanallar.length?D.kanallar.map(r=>`<tr><td>${esc(r.kanal)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr+'%'}</td><td class="${cls(r.avg)}">${r.avg==null?'—':fR(r.avg)}</td><td>${r.once==null?'—':'%'+r.once.toFixed(1)}</td><td>${r.acik}</td></tr>`).join(''):'<tr><td colspan="6">Henüz iletilen sinyal yok.</td></tr>');
+  tbl('disson',['Hisse','Kanal','Yön','Durum','R'],D.son.length?D.son.map(r=>`<tr><td>${esc(r.sym)}</td><td>${esc(r.kanal)}</td><td>${r.dir>0?'AL':'SAT'}</td><td>${esc(r.st)}</td><td class="${cls(r.r)}">${r.r==null?'—':fR(r.r)}</td></tr>`).join(''):'')}
 function renderStatus(){const s=status.ses||'closed',b=$('ses');b.textContent=SES_TR[s]||s;b.className='pill '+s;
   const p=status.plan;let t='';
   if(p)t+=`<b>${p.today?'Bugün':p.d}</b> (TR): Öncesi ${p.pre} · Açılış ${p.open} · Kapanış ${p.close}${p.early?' (erken kapanış)':''} · Sonrası biter ${p.post}<br>`;
   t+=`IEX canlı akış: ${esc(status.iex||'—')} (${status.iexN||0} sembol)<br>`;
   t+=`Yahoo son çekim: ${status.yAge==null?'henüz yok':fage(nowS()-status.yAge)+' önce'}${status.yErr?' · '+esc(status.yErr):''}<br>`;
-  t+=`Takvim: ${status.cal==='alpaca'?'Alpaca (tatiller dahil)':'hafta içi kuralı'} · Bot: ${esc(status.bot||'—')} · Tarayıcı: ${esc(status.scan||'—')} · Yapay zeka: ${esc(status.ai||'—')} · SEC: ${esc(status.sec||'—')} · Seans dışı tarama: ${esc(status.tv||'—')} · Bilanço takvimi: ${esc(status.bil||'—')} · Ekonomik takvim: ${esc(status.eko||'—')}<br>`;
+  t+=`Takvim: ${status.cal==='alpaca'?'Alpaca (tatiller dahil)':'hafta içi kuralı'} · Bot: ${esc(status.bot||'—')} · Tarayıcı: ${esc(status.scan||'—')} · Yapay zeka: ${esc(status.ai||'—')} · SEC: ${esc(status.sec||'—')} · Seans dışı tarama: ${esc(status.tv||'—')} · Kanal takibi: ${esc(status.dis||'—')} · Kanal dinleyici: ${esc(status.dinle||'—')} (<a href="/tg-giris">giriş</a>) · Bilanço takvimi: ${esc(status.bil||'—')} · Ekonomik takvim: ${esc(status.eko||'—')}<br>`;
   t+=`Sunucu açık: ${status.up!=null?fage(nowS()-status.up):'—'}${status.rs7!=null?' · 7 günde yeniden başlama: '+status.rs7:''} · GitHub yedeği: ${esc(status.bk||'—')}${status.tg?' · Telegram: '+esc(status.tg.ok?'açık':(status.tg.st||'kapalı')):''}`;
   $('foot').innerHTML=t;nb('nbS',status.sigOpen||0)}
 

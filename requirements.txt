@@ -7,3 +7,4 @@ pandas>=2.0
 tzdata
 pywebpush>=2.0
 pillow>=10.1
+telethon>=1.36

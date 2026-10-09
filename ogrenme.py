@@ -47,7 +47,15 @@ SETUP_AD = {
     "poc": "Hacim profili (POC) dönüşü", "gapgo": "Boşlukla açılış kırılımı",
     "fade": "Koşan hissede dönüş (açığa satış)", "fvg": "FVG dönüşü", "kanal": "Kanal alt bandından dönüş",
     "yapi": "Yapı kırılımı (BOS)", "fib": "Fibonacci geri çekilme dönüşü",
+    "onay": "Kırılım onayı (1 dk)",
 }
+
+
+def setup_ad(k):
+    k = str(k)
+    if k.startswith("kanal:"):
+        return f"Telegram kanalı {k[6:]}"
+    return SETUP_AD.get(k, k)
 SES_AD = {"pre": "Piyasa öncesi", "regular": "Normal seans", "post": "Piyasa sonrası"}
 FEAT_AD = {"volr": "Hacim katı", "vwap": "VWAP", "trend": "Kısa trend", "spy": "SPY yönü", "room": "Hedefe yer",
            "tod": "Zaman", "fiyat": "Fiyat", "tip": "Hisse tipi", "haber": "Haber", "obv": "OBV hacim akışı",
@@ -61,12 +69,12 @@ FEAT_AD = {"volr": "Hacim katı", "vwap": "VWAP", "trend": "Kısa trend", "spy":
 
 def feat_label(k, v):
     if k == "setup":
-        return f"Kurgu: {SETUP_AD.get(v, v)}"
+        return f"Kurgu: {setup_ad(v)}"
     if k == "ses":
         return f"Seans: {SES_AD.get(v, v)}"
     if k == "kxs":
         a, _, b = str(v).partition("|")
-        return f"{SES_AD.get(b, b)} · {SETUP_AD.get(a, a)}"
+        return f"{SES_AD.get(b, b)} · {setup_ad(a)}"
     return f"{FEAT_AD.get(k, k)}: {v}"
 
 
@@ -153,7 +161,7 @@ class Learner:
         self._sig = key
         done = [s for s in signals
                 if s.get("r") is not None and s.get("st") in ("hedef", "stop", "süre") and s.get("setup")
-                and ((s.get("t") or 0) >= LEARN_SINCE or s.get("bt"))]
+                and ((s.get("t") or 0) >= LEARN_SINCE or s.get("bt") or s.get("dis"))]
         done.sort(key=_ts)
         m = len(done)
         if not m:
@@ -178,22 +186,25 @@ class Learner:
 
         # 2) tahmin modeli (pahalı kısım: sık sık değil)
         now = time.time()
-        if m >= 50 and (not self.beta or now - self._fit_t >= REFIT_SEC or abs(m - self._fit_n) >= 300):
-            rows = [(_cols(s["setup"], s.get("ses"), s.get("f")), s["r"]) for s in done]
-            self.mu, self.beta = _fit(rows, wts)
+        if sum(1 for s in done if not s.get("dis")) >= 50 and (not self.beta or now - self._fit_t >= REFIT_SEC or abs(m - self._fit_n) >= 300):
+            own = [(s, w) for s, w in zip(done, wts) if not s.get("dis")]
+            done_m = [s for s, _ in own]
+            wts_m = [w for _, w in own]
+            rows = [(_cols(s["setup"], s.get("ses"), s.get("f")), s["r"]) for s in done_m]
+            self.mu, self.beta = _fit(rows, wts_m)
             preds = sorted(_pred(self.mu, self.beta, c) for c, _ in rows[-3000:])
             self.dist = preds
             self.cut = preds[int(len(preds) * (1 - SECICI))] if len(preds) >= 50 else None
             sel = {}
             if self.cut is not None:
-                for s, (c, _) in zip(done[-3000:], rows[-3000:]):
+                for s, (c, _) in zip(done_m[-3000:], rows[-3000:]):
                     a = sel.setdefault((s["setup"], s.get("ses")), [0, 0])
                     a[0] += 1
                     a[1] += 1 if _pred(self.mu, self.beta, c) >= self.cut else 0
             self.sel = sel
             self._fit_t, self._fit_n = now, m
-            if m >= MIN_MODEL and now - self._sinav_t >= SINAV_SEC:
-                self._sinav(rows, wts)
+            if len(rows) >= MIN_MODEL and now - self._sinav_t >= SINAV_SEC:
+                self._sinav(rows, wts_m)
                 self._sinav_t = now
         self.ver += 1
 
@@ -267,7 +278,7 @@ class Learner:
         n, e = self.group(setup, ses)
         g = self.groups.get((setup, ses))
         if g and n >= MIN_GROUP:
-            notes.append(f"Geçmiş: {SES_AD.get(ses, ses).lower()} {SETUP_AD.get(setup, setup).lower()} "
+            notes.append(f"Geçmiş: {SES_AD.get(ses, ses).lower()} {setup_ad(setup).lower()} "
                          f"{n} sinyalde ort. {g[4] / n:+.2f}R, tutma %{100 * g[2] / g[0]:.0f}")
         if not self.ready():
             return conf, notes
@@ -361,7 +372,7 @@ class Learner:
                 durum = f"zayıf · işleme uygun: %{secilen}"
             else:
                 durum = "zayıf · işlem açılmıyor"
-            out.append({"k": f"{SES_AD.get(ses, ses)} · {SETUP_AD.get(setup, setup)}", "n": n,
+            out.append({"k": f"{SES_AD.get(ses, ses)} · {setup_ad(setup)}", "n": n,
                         "avg": round(g[4] / n, 3), "exp": round(e, 3),
                         "wr": round(100 * g[2] / g[0], 1) if g[0] else 0.0, "durum": durum,
                         "secilen": secilen})

@@ -35,6 +35,8 @@ import websockets
 import yfinance as yf
 
 import analiz
+import dinleyici
+import dissinyal
 import bot as botmod
 import geriye
 import formasyon
@@ -546,6 +548,9 @@ class Store:
 store = Store()
 engine = sinyal.Engine(store, bar_info, cal, ET)
 learner = ogrenme.Learner()
+dis = dissinyal.DisSinyal()          # Telegram'dan iletilen kanal sinyalleri (sadece ölçülür)
+# Kanal dinleyici: bir Telegram hesabıyla herkese açık kanalları otomatik okur (oturum sadece Render Environment'ta)
+dinle = dinleyici.Dinleyici(os.getenv("TG_API_ID", ""), os.getenv("TG_API_HASH", ""), os.getenv("TG_SESSION", ""))
 engine.learner = learner
 scanner = tarayici.Scanner(ALPACA_KEY, ALPACA_SECRET, SYMBOLS, min_price=RUN_MIN_PRICE, min_pct=RUN_MIN_PCT,
                            max_runners=RUN_MAX, log=log,
@@ -821,6 +826,8 @@ def status_payload():
         "push": {"ok": push.ok, "n": len(push.subs), "st": push.status, "pref": PUSH_PREF},
         "sec": scanner.sec_status,
         "tv": scanner.tv_status,
+        "dis": dis.status,
+        "dinle": dinle.status,
         "nRun": len(scanner.runners),
         "sigN": len(engine.signals),
         "sigOpen": engine.open_count(),
@@ -1822,7 +1829,7 @@ async def send_sig(cl):
     await cl.send({"type": "sig", "list": engine.recent(60), "stats": engine.stats(),
                    "mine": engine.for_symbol(cl.sym, time.time() - 4 * 86400) if cl.sym else [],
                    "learn": {"ins": learner.insights(), "groups": learner.group_rows(), "cmp": compare_rows(),
-                             "saat": saat_tablosu(),
+                             "saat": saat_tablosu(), "dis": dis.karne(),
                              "bt": {k: BT[k] for k in ("sum", "t", "running", "bekliyor", "prog", "hata")}}})
 
 
@@ -1909,7 +1916,7 @@ async def signal_loop():
         cu = state.yahoo_t0
         engine.runners = scanner.runners
         try:
-            learner.rebuild(engine.signals + BT["sigs"])
+            learner.rebuild(engine.signals + BT["sigs"] + dis.as_signals())
         except Exception as e:
             log.warning("Öğrenme hatası: %s", e)
         syms = all_syms()
@@ -2299,7 +2306,7 @@ async def bt_run(n_days):
         if sigs and len(set(ara["done"])) >= len(syms) * 0.9:
             BT.update(sigs=sigs, sum=summ, t=int(time.time()))
             learner._sig = None
-            learner.rebuild(engine.signals + BT["sigs"])
+            learner.rebuild(engine.signals + BT["sigs"] + dis.as_signals())
             feed_add("bot", "", f"Geçmiş test bitti: {summ['gun']} günde {summ['tum']['n']} sinyal, ortalama "
                      f"{summ['tum'].get('avg', 0):+.2f}R", sub="Öğren sekmesinde sonuçlar. Bot artık bu verilerle de öğreniyor.",
                      tone="bilgi")
@@ -3245,7 +3252,11 @@ async def tg_analiz(sym):
 YARDIM = ("<b>Komutlar</b>\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
           "/analiz QNME — 15 dk analiz ve plan (grafikli)\n/alarm QNME 0.90 — fiyat alarmı\n/alarmlar — kurulu alarmlar\n"
           "/alarmsil QNME — alarmı sil\n/yorum — yapay zekalı piyasa yorumu\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
-          "/basla — yeni işlem açmaya devam\nSadece paper (sanal) hesap.")
+          "/basla — yeni işlem açmaya devam\n/ogren — bot ne öğrendi (model karnesi)\n"
+          "/kanal — iletilen Telegram kanal sinyallerinin karnesi\n"
+          "/sinyal @kanal metin — iletmesi kapalı kanal için sinyali elle yaz\n"
+          "/kanalekle @kanal — kanalı otomatik izle · /kanalsil @kanal · /kanallar — izlenenler\n"
+          "Bir kanaldaki sinyal mesajını bana İLETİRSEN gölgede takip edip sonucunu ölçerim.\nSadece paper (sanal) hesap.")
 
 
 _TG_ADMINS = {"t": 0, "ids": set()}
@@ -3342,6 +3353,46 @@ async def tg_komut(text, chat, thread=None):
         t_, s_ = gun_sonu_raporu()
         k_t, png = tg_karne(gun=1)
         send(f"📋 <b>{_h(t_)}</b>\n{_h(s_)}", png)
+    elif cmd in ("ogren", "öğren", "ogrenme"):
+        send(learner.ozet())
+    elif cmd == "kanal":
+        send(dis.tg_metin())
+    elif cmd == "kanalekle":
+        if not arg:
+            send("Kullanım: /kanalekle @NasdaqPatronu")
+            return
+        k = dinle.ekle(parts[1])
+        if not k:
+            send("Kanal adı geçersiz. Örnek: /kanalekle @NasdaqPatronu ya da t.me/NasdaqPatronu")
+            return
+        _dinle_kaydet()
+        send(f"👂 @{_h(k)} izleniyor. Son 6 günün mesajları da okunup ölçülecek; yeni sinyaller otomatik kaydedilir.\n"
+             f"Dinleyici: {_h(dinle.status)}")
+    elif cmd == "kanalsil":
+        k = dinle.sil(parts[1]) if len(parts) > 1 else None
+        if k:
+            _dinle_kaydet()
+        send(f"@{_h(k)} artık izlenmiyor (eski ölçümler karnede kalır)." if k else "Kullanım: /kanalsil @kanal")
+    elif cmd == "kanallar":
+        ks = dinle.kanallar
+        satir = [f"• @{_h(k)} · {v.get('n', 0)} sinyal"
+                 + (f" · {v['resim']} resimli mesaj okunamadı" if v.get("resim") else "")
+                 + (f" · hata: {_h(v['hata'])}" if v.get("hata") else "") for k, v in ks.items()]
+        send("👂 <b>İzlenen kanallar</b>\n" + ("\n".join(satir) or "Yok. Ekle: /kanalekle @kanal")
+             + f"\nDinleyici: {_h(dinle.status)}")
+    elif cmd == "sinyal":
+        # İletmesi kapalı kanallar için: /sinyal @KanalAdi $QNME al 0.85 stop 0.78 hedef 1.05
+        rest = text.strip().split(None, 1)[1] if len(text.strip().split(None, 1)) > 1 else ""
+        kanal = "elle"
+        if rest.startswith("@"):
+            kanal, _, rest = rest.partition(" ")
+            kanal = kanal.lstrip("@")[:40] or "elle"
+        if not rest:
+            send("Kullanım: /sinyal @KanalAdi $QNME al 0.85 stop 0.78 hedef 1.05\n(Paylaşım saati olarak şu an alınır.)")
+            return
+        await dis_iletildi({"text": rest, "chat": {"id": chat}, "date": int(time.time()),
+                            "forward_origin": {"type": "channel", "chat": {"username": kanal}, "date": int(time.time())},
+                            "message_thread_id": thread, "is_topic_message": bool(thread)})
     elif cmd in ("dur", "durdur"):
         BOT_CFG["yeni_islem"] = 0
         _ayar_kaydet()
@@ -3357,7 +3408,9 @@ async def tg_komut(text, chat, thread=None):
 KOMUTLAR = (("panel", "Kontrol panelini yeniden kur"), ("durum", "Bot ve para durumu"), ("pozisyon", "Açık pozisyonlar"),
             ("karne", "Sonuçlar + grafik"), ("analiz", "Hisse analizi: /analiz QNME"),
             ("alarm", "Fiyat alarmı: /alarm QNME 0.90"), ("alarmlar", "Kurulu alarmlar"), ("rapor", "Gün sonu raporu"),
-            ("yorum", "Yapay zekalı piyasa yorumu"), ("dur", "Yeni işlemleri durdur"), ("basla", "Yeni işlemlere devam"),
+            ("yorum", "Yapay zekalı piyasa yorumu"), ("ogren", "Bot ne öğrendi"),
+            ("kanal", "Kanal sinyallerinin karnesi"), ("kanalekle", "Kanalı otomatik izle: /kanalekle @kanal"),
+            ("kanallar", "İzlenen kanallar"), ("dur", "Yeni işlemleri durdur"), ("basla", "Yeni işlemlere devam"),
             ("yardim", "Komut listesi"))
 
 
@@ -3427,6 +3480,13 @@ async def tg_komut_loop():
                         continue
                     m = u.get("message") or u.get("channel_post") or {}
                     text = m.get("text") or ""
+                    if m.get("forward_origin") or m.get("forward_date"):
+                        if await _yetkili(m):
+                            try:
+                                await dis_iletildi(m)
+                            except Exception as e:
+                                log.warning("İletilen sinyal hatası: %s", e)
+                        continue
                     if not text.startswith("/"):
                         continue
                     if not await _yetkili(m):
@@ -3438,6 +3498,103 @@ async def tg_komut_loop():
             except Exception as e:
                 tg.cmd_st = f"hata: {str(e)[:60]}"
                 await asyncio.sleep(10)
+
+
+async def dis_iletildi(m):
+    """Telegram'dan iletilen kanal mesajı: sinyali kaydet, hisseyi izlemeye al, yanıt ver."""
+    chat = m["chat"]["id"]
+    thread = m.get("message_thread_id") if m.get("is_topic_message") else None
+    it, why = dis.ekle(m, ses_of=cal.session)
+    if not it:
+        tg.send(_h(why), chat=chat, thread=thread)
+        return
+    backup.data["dis"] = dis.st
+    backup.dirty = True
+    sym = it["sym"]
+    if tarayici.SYM_RE.match(sym):
+        ensure_sym(sym)
+        VIEWED[sym] = time.time()
+        try:
+            scanner.recent_news_syms[sym] = time.time()   # seans dışı taramaya aday
+        except Exception:
+            pass
+    tg.send(_h(dis.kayit_metin(it)), sym=sym, chat=chat, thread=thread)
+    DIS_TETIK.set()
+
+
+DIS_TETIK = asyncio.Event()
+
+
+async def dis_oto(m):
+    """Dinleyicinin okuduğu kanal mesajı. Sinyal değilse sessizce geçer. Döner: kaydedildi mi."""
+    it, _ = dis.ekle(m, ses_of=cal.session)
+    if not it:
+        return False
+    backup.data["dis"] = dis.st
+    backup.dirty = True
+    sym = it["sym"]
+    if tarayici.SYM_RE.match(sym) and time.time() - it["t"] < 6 * 3600:
+        ensure_sym(sym)
+        VIEWED[sym] = time.time()
+        try:
+            scanner.recent_news_syms[sym] = time.time()
+        except Exception:
+            pass
+    if not m.get("_eski"):          # ilk eklemede geçmiş mesajlar için bildirim yağdırma
+        tg.send(_h(dis.kayit_metin(it)), sym=sym, quiet=True)
+    DIS_TETIK.set()
+    return True
+
+
+def _dinle_kaydet():
+    backup.data["dinle"] = dinle.st
+    backup.dirty = True
+
+
+async def dinle_loop():
+    await dinle.loop(_dinle_kaydet)
+
+
+async def dis_loop():
+    """İletilen kanal sinyallerini dakikalık veriyle gölgede takip eder (2 dk'da bir ya da yeni mesajda)."""
+    await asyncio.sleep(40)
+    while True:
+        try:
+            await asyncio.wait_for(DIS_TETIK.wait(), timeout=120)
+        except asyncio.TimeoutError:
+            pass
+        DIS_TETIK.clear()
+        acik = dis.acik()
+        if not acik:
+            dis.status = f"{len(dis.items)} kayıt, açık yok"
+            continue
+        syms = sorted({x["sym"] for x in acik if tarayici.SYM_RE.match(x["sym"])})
+        try:
+            rd = await asyncio.to_thread(yahoo_fetch, syms, "7d") if syms else {}
+        except Exception as e:
+            rd = {}
+            dis.status = f"veri hatası: {str(e)[:60]}"
+        degisti = False
+        now = time.time()
+        for x in acik:
+            b = rd.get(x["sym"])
+            if not b and x["sym"] in store.bars:
+                b = {t: r for t, r in store.bars[x["sym"]].items() if t >= x["t"] - 1800}
+            try:
+                if dis.degerlendir(x, b or {}, now):
+                    degisti = True
+                    if x["st"] in ("hedef", "stop", "süre"):
+                        tg.send(f"📡 #{_h(x['sym'])} ({_h(x['kanal'])}) sonuçlandı: <b>{_h(x['st'])}</b> "
+                                f"{x['r']:+.2f}R · en iyi nokta %{(x.get('mfe') or 0):+.1f}", sym=x["sym"])
+            except Exception as e:
+                log.debug("Dış sinyal değerlendirme hatası %s: %s", x.get("sym"), e)
+        for s_ in syms:
+            if any(x["sym"] == s_ and x["st"] in ("bekliyor", "açık") for x in acik):
+                VIEWED[s_] = now
+        if degisti:
+            backup.data["dis"] = dis.st
+            backup.dirty = True
+        dis.status = f"{len(dis.items)} kayıt, {len(dis.acik())} açık"
 
 
 async def tg_takip_loop():
@@ -3860,7 +4017,10 @@ async def lifespan(app):
     engine.load(sigs)
     bot.load(botdays)
     await bt_load()
-    learner.rebuild(engine.signals + BT["sigs"])
+    dis.st = backup.data.setdefault("dis", {"items": []})
+    dinle.st = backup.data.setdefault("dinle", {"kanallar": {}})
+    dinle.on_msg = dis_oto
+    learner.rebuild(engine.signals + BT["sigs"] + dis.as_signals())
     apply_ayar(backup.data.get("ayar"))
     push.load(backup.data)
     tg.load(backup.data)
@@ -3881,7 +4041,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, font_task, tg_komut_loop, tg_takip_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop)]
+                                                  rapor_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -4073,6 +4233,39 @@ async def apple_icon():
 async def saglik():
     # Şifresiz, veri içermez. Uyanık tutma servisi (UptimeRobot) bunu yoklar.
     return Response("ok", media_type="text/plain")
+
+
+@app.get("/tg-giris")
+async def tg_giris_sayfa(request: Request):
+    if not authorized(request):
+        return login_page()
+    if not SITE_PASSWORD:
+        return HTMLResponse("Önce Render'da SITE_PASSWORD gir; bu sayfa şifresiz sitede açılmaz.", status_code=403)
+    return HTMLResponse(dinleyici.GIRIS_HTML.replace("__DURUM__", _h(dinle.status)),
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/tg-giris")
+async def tg_giris_api(request: Request):
+    if not authorized(request) or not SITE_PASSWORD:
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    try:
+        d = await request.json()
+    except Exception:
+        return JSONResponse({"hata": "geçersiz veri"}, status_code=400)
+    adim = d.get("adim")
+    try:
+        if adim == "kod":
+            r = await dinle.giris_kod(str(d.get("tel") or ""))
+        elif adim == "onay":
+            r = await dinle.giris_onay(kod=str(d.get("kod") or ""))
+        elif adim == "sifre":
+            r = await dinle.giris_onay(sifre=str(d.get("sifre") or ""))
+        else:
+            r = {"hata": "bilinmeyen adım"}
+    except Exception as e:
+        r = {"hata": str(e)[:150]}
+    return JSONResponse(r, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/ayar")
