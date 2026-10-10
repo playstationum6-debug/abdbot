@@ -87,6 +87,9 @@ ALPACA_KEY = os.getenv("ALPACA_KEY", "")
 ALPACA_SECRET = os.getenv("ALPACA_SECRET", "")
 SITE_USER = os.getenv("SITE_USER", "admin")
 SITE_PASSWORD = os.getenv("SITE_PASSWORD", "")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")   # yönetici: ayarlar, testler, yapay zekâ sorguları (ziyaretçi salt okur)
+TG_LINK = os.getenv("TG_LINK", "")                 # sitedeki "Telegram'a katıl" bağlantısı (ör. https://t.me/kanaladi)
+MAX_ZIYARETCI = int(os.getenv("MAX_ZIYARETCI", "80"))   # aynı anda en fazla ziyaretçi bağlantısı (bot yavaşlamasın)
 GH_TOKEN = os.getenv("GH_TOKEN", "")
 GH_REPO = os.getenv("GH_REPO", "")            # ör. kullaniciadi/abdbot-veri
 GH_PATH = os.getenv("GH_PATH", "durum/state.json")
@@ -1574,6 +1577,8 @@ class Telegram:
                             if item.get("key"):
                                 self.msg[item["key"]] = (r.json().get("result") or {}).get("message_id")
                                 self.persist()
+                                if str(item["key"]).startswith("s:") and not item.get("chat"):
+                                    sicil_ekle(item["key"][2:])
                         else:
                             self.status = f"hata {r.status_code}: {r.text[:100]}"
                             log.warning("Telegram gönderilemedi: %s", r.text[:160])
@@ -2185,6 +2190,8 @@ class Client:
         self.sigv = -1
         self.botv = -1
         self.scanv = -1
+        self.admin = True           # ws_endpoint gerçek rolü yazar
+        self.son_istek = {}         # ziyaretçi istek sınırları (analiz / yeni hisse)
         self.lock = asyncio.Lock()
 
     async def send(self, obj):
@@ -2230,15 +2237,63 @@ def learn_yuku():
     return _LEARN["d"]
 
 
+_ZL = {"kaynak": None, "d": None}
+
+
+def ziyaretci_learn(L):
+    """Ziyaretçiye giden öğrenme verisi: kanal adları gizli (önbellekli)."""
+    if _ZL["kaynak"] is L and _ZL["d"] is not None:
+        return _ZL["d"]
+    d = dict(L)
+    try:
+        ds = json.loads(json.dumps(d.get("dis") or {}, default=str))
+        adlar = {}
+        for grup in ("kanallar", "son"):
+            for x in ds.get(grup) or []:
+                if isinstance(x, dict) and isinstance(x.get("kanal"), str):
+                    x["kanal"] = adlar.setdefault(x["kanal"].lstrip("@").lower(), f"Kanal {len(adlar) + 1}")
+        d["dis"] = ds
+        pl = dict(d.get("plan") or {})
+        pl["aktif"] = [dict(a, kanal=("kanal" if a.get("kanal") else None)) for a in pl.get("aktif") or []]
+        pl["son"] = [dict(a, kanal=("kanal" if a.get("kanal") else None)) for a in pl.get("son") or []]
+        d["plan"] = pl
+        y = dict(d.get("yz") or {})
+        y.pop("hata", None)
+        d["yz"] = y
+    except Exception as e:
+        log.debug("Ziyaretçi verisi hazırlanamadı: %s", e)
+    _ZL.update(kaynak=L, d=d)
+    return d
+
+
+_RX_KANAL = re.compile(r"@[\w.]+ kanalından")
+
+
+def ziyaretci_sig(x):
+    """Ziyaretçiye giden sinyal: kanal adı yok."""
+    if not x.get("plan_kanal") and not any("kanalından" in str(w) for w in (x.get("why") or [])):
+        return x
+    y = dict(x)
+    if y.get("plan_kanal"):
+        y["plan_kanal"] = "kanal"
+    y["why"] = [_RX_KANAL.sub("takip edilen bir kanaldan", str(w)) for w in (x.get("why") or [])]
+    return y
+
+
 async def send_sig(cl):
     now = time.time()
-    if now - getattr(cl, "sig_t", 0) < 4 and cl.sigv != -1:
+    ara = 4 if cl.admin else 15                  # ziyaretçiye 15 sn'de bir: sunucu ve bot yorulmasın
+    if now - getattr(cl, "sig_t", 0) < ara and cl.sigv != -1:
         return                                   # çok sık değişiyor: 4 sn'de bir gönder (sürüm farkı kalır, sonra gider)
     cl.sig_t = now
     cl.sigv = engine.ver
-    await cl.send({"type": "sig", "list": engine.recent(60), "stats": engine.stats(),
+    L = learn_yuku()
+    lst = engine.recent(60 if cl.admin else 40)
+    if not cl.admin:
+        lst = [ziyaretci_sig(x) for x in lst]
+    await cl.send({"type": "sig", "list": lst, "stats": engine.stats(),
                    "mine": engine.for_symbol(cl.sym, time.time() - 4 * 86400) if cl.sym else [],
-                   "learn": learn_yuku()})
+                   "learn": L if cl.admin else ziyaretci_learn(L)})
 
 
 async def send_bot(cl):
@@ -2263,6 +2318,9 @@ async def send_bot(cl):
         k["spy"] = spy_karsilastir(k.get("eq") or [], k.get("cap0") or 250)
     except Exception:
         pass
+    if not cl.admin:
+        d = dict(d)
+        d.pop("account", None)                   # Alpaca hesap bilgisi sadece yöneticide
     await cl.send({"type": "bot", "d": d})
 
 
@@ -2318,7 +2376,7 @@ async def broadcaster():
                     await send_bot(cl)
                 if cl.scanv != scanner.ver or getattr(cl, "patv", -1) != _pat_ver[0]:
                     await send_scan(cl)
-                if getattr(cl, "logv", -1) != HATALAR.ver:
+                if cl.admin and getattr(cl, "logv", -1) != HATALAR.ver:
                     cl.logv = HATALAR.ver
                     await cl.send({"type": "log", "items": HATALAR.items[-50:][::-1]})
                 if getattr(cl, "mktv", -1) != _mkt_ver[0]:
@@ -3231,6 +3289,10 @@ def kademe_gonder(sig, iz):
         v = {"sym": sym, "giris": sig["e"], "stop": sig["s"], "ks": iz["ks"], "gel": iz["gel"], "t_sig": sig["t"],
              "son": iz["son"], "zirve": iz["zirve"], "zt": iz["zt"], "stop_t": iz["stop_t"]}
         ch = {"fn": lambda b=b5, v=v: gorsel.kademe_kart(b, v)}
+    try:
+        kademe_arsivle(sig, iz)
+    except Exception as e:
+        log.debug("Kademe arşivi yazılamadı: %s", e)
     rk = f"k:{sig['plan']}" if sig.get("plan") and f"k:{sig['plan']}" in tg.msg else f"s:{sig['id']}"
     tg.send(kademe_html(sig, iz), ch, sym=sym, reply=rk, konu="sinyal", quiet=False)
     feed_add("rapor", sym, f"🏁 Tüm kademeler tamam: {fk(sig['e'])} → K3 {fk(iz['ks'][-1])}",
@@ -3324,10 +3386,216 @@ def girseydin_gonder(zorla=False, chat=None):
         ch = {"fn": lambda v=v: gorsel.girseydin_kart(v)}
     tg.send(kisa, ch, quiet=True, konu="rapor", chat=chat)
     tg.send(uzun, quiet=True, konu="rapor", chat=chat)
+    try:
+        girseydin_arsivle(G)
+    except Exception as e:
+        log.debug("Girseydin arşivi yazılamadı: %s", e)
     if not chat and not zorla:
         GIRSEYDIN["gun"] = G["gun"]
         _kademe_kaydet()
     return True
+
+
+# ----------------------------------------------------------------- 📜 şeffaf sicil · 🗂 arşiv · 💬 geri bildirim
+SICIL = {}                 # sinyal id -> Telegram'a gönderildiği an (kalıcı: yedekte)
+_SICIL_C = {"t": 0.0, "gun": None, "d": None}
+
+
+def sicil_ekle(sid, t=None):
+    if sid in SICIL:
+        return
+    SICIL[sid] = int(t or time.time())
+    if len(SICIL) > 4000:
+        for k_ in sorted(SICIL, key=SICIL.get)[:1000]:
+            SICIL.pop(k_, None)
+    backup.data["sicil"] = SICIL
+    backup.dirty = True
+    _SICIL_C["d"] = None
+
+
+def sicil_ozet(gun=30):
+    """Telegram'a giden her sinyal (gönderim saatiyle) ve sonucu: kazanan da kaybeden de."""
+    if _SICIL_C["d"] is not None and _SICIL_C["gun"] == gun and time.time() - _SICIL_C["t"] < 60:
+        return _SICIL_C["d"]
+    cut = time.time() - gun * 86400
+    L = []
+    for sid, t in SICIL.items():
+        if t < cut:
+            continue
+        x = engine.by_id.get(sid)
+        if not x:
+            continue
+        bitti = x.get("st") in ("hedef", "stop", "süre") and x.get("r") is not None
+        L.append({"id": sid, "sym": x["sym"], "dir": x.get("dir", 1), "setup": x.get("setup"),
+                  "ad": sinyal.SETUP_AD.get(x.get("setup"), x.get("setup")), "t": t, "ts": x.get("t"),
+                  "e": x.get("e"), "s": x.get("s"), "h": x.get("h"), "hedefler": x.get("hedefler"), "conf": x.get("conf"),
+                  "st": x.get("st"), "pct": sig_yuzde(x) if bitti else None, "xt": x.get("xt"), "ses": x.get("ses")})
+    L.sort(key=lambda y: -y["t"])
+    biten = [y for y in L if y["pct"] is not None]
+    ps = [y["pct"] for y in biten]
+    ay, gn = {}, {}
+    for y in biten:
+        d_ = datetime.fromtimestamp(y["t"], TR)
+        ay.setdefault(d_.strftime("%Y-%m"), []).append(y["pct"])
+        gn.setdefault(d_.strftime("%Y-%m-%d"), []).append(y["pct"])
+    oz = lambda a: {"n": len(a), "wr": round(100 * sum(1 for v in a if v > 0) / len(a)) if a else None,
+                    "avg": round(sum(a) / len(a), 2) if a else None, "tot": round(sum(a), 1) if a else None}
+    d = {"gun": gun, "liste": L[:400], "ozet": dict(oz(ps), paylasilan=len(L), acik=len(L) - len(biten),
+                                                     en_iyi=max(ps) if ps else None, en_kotu=min(ps) if ps else None),
+         "aylar": [dict(oz(v), ay=k) for k, v in sorted(ay.items())],
+         "gunler": [dict(oz(v), gun=k) for k, v in sorted(gn.items())][-30:],
+         "ilk": min(SICIL.values()) if SICIL else None}
+    _SICIL_C.update(t=time.time(), gun=gun, d=d)
+    return d
+
+
+def _seri_kucult(seri, n=90):
+    if len(seri) <= n:
+        return [(int(t), round(c, 4)) for t, c in seri]
+    adim = len(seri) / n
+    return [(int(seri[int(i * adim)][0]), round(seri[int(i * adim)][1], 4)) for i in range(n)] + \
+        [(int(seri[-1][0]), round(seri[-1][1], 4))]
+
+
+def girseydin_arsivle(G):
+    A = backup.data.setdefault("girseydin_arsiv", {})
+    A[G["gun"]] = {"gun": G["gun"], "toplam": G["toplam"], "iyi_n": G["iyi_n"], "stop_n": G["stop_n"],
+                   "hisseler": [{"sym": h["sym"], "en": round(h["en"], 2), "seri": _seri_kucult(h.get("seri") or []),
+                                 "girisler": [{k_: (round(v_, 4) if isinstance(v_, float) else v_) for k_, v_ in g.items()
+                                               if k_ in ("t", "e", "zirve", "zt", "pk", "sn", "not")}
+                                              for g in h["girisler"][:5]]} for h in G["hisseler"][:8]]}
+    for k_ in sorted(A)[:-30]:
+        A.pop(k_, None)
+    backup.dirty = True
+    _KART.clear()
+
+
+def kademe_arsivle(sig, iz):
+    A = backup.data.setdefault("kademe_arsiv", [])
+    if any(a.get("sid") == sig["id"] for a in A[-50:]):
+        return
+    A.append({"sid": sig["id"], "gun": sig.get("day"), "sym": sig["sym"], "setup": sig.get("setup"), "t": sig["t"],
+              "e": sig["e"], "s": sig["s"], "ks": [round(k, 4) for k in iz["ks"]], "gel": iz["gel"],
+              "stop_t": iz["stop_t"], "zirve": round(iz["zirve"], 4), "zt": iz["zt"], "son": round(iz["son"], 4)})
+    del A[:-300]
+    backup.dirty = True
+
+
+_KART = {}
+
+
+def arsiv_kart(tur, anahtar):
+    """Arşivdeki bir günün / kademenin paylaşılabilir resmi (önbellekli)."""
+    k = (tur, anahtar)
+    if k in _KART:
+        return _KART[k]
+    png = None
+    if tur == "girseydin":
+        G = (backup.data.get("girseydin_arsiv") or {}).get(anahtar)
+        if G:
+            bugun = anahtar == datetime.now(ET).date().isoformat()
+            png = gorsel.girseydin_kart(dict(G, gun_ad=_gun_ad(anahtar),
+                                             baslik=("Bugün bu" if bugun else "Bu") + " kırılımlardan girseydin"))
+    elif tur == "kademe":
+        a = next((x for x in reversed(backup.data.get("kademe_arsiv") or []) if x.get("sid") == anahtar), None)
+        if a:
+            bit = (a["gel"][-1] or a["t"]) + 20 * 60
+            rows = [r for r in _mumlar_sonra(a["sym"], a["t"] - 3600) if r[0] <= bit]
+            b5 = formasyon.to5m(rows)[-72:] if rows else []
+            png = gorsel.kademe_kart(b5, {"sym": a["sym"], "giris": a["e"], "stop": a["s"], "ks": a["ks"], "gel": a["gel"],
+                                          "t_sig": a["t"], "son": a.get("son"), "zirve": a.get("zirve"), "zt": a.get("zt"),
+                                          "stop_t": a.get("stop_t")})
+    if png:
+        if len(_KART) > 40:
+            _KART.clear()
+        _KART[k] = png
+    return png
+
+
+GERI = {"ip": {}, "gun": None, "n": 0}
+
+
+def geri_bildirim_ekle(metin, iletisim, ip):
+    now = time.time()
+    g = datetime.now(TR).date().isoformat()
+    if GERI["gun"] != g:
+        GERI.update(gun=g, n=0)
+    L = [t for t in GERI["ip"].get(ip, []) if now - t < 3600]
+    if len(L) >= 3 or GERI["n"] >= 60:
+        return "Çok fazla mesaj gönderildi, biraz sonra tekrar dene."
+    L.append(now)
+    GERI["ip"][ip] = L
+    GERI["n"] += 1
+    kayit = {"t": int(now), "metin": metin[:1500], "iletisim": iletisim[:120]}
+    A = backup.data.setdefault("geri", [])
+    A.append(kayit)
+    del A[:-200]
+    backup.dirty = True
+    if tg.ok and TG_ADMIN:
+        tg.send(f"💬 <b>Siteden geri bildirim</b>\n{_h(kayit['metin'])}"
+                + (f"\n<i>İletişim: {_h(kayit['iletisim'])}</i>" if kayit["iletisim"] else ""), chat=TG_ADMIN)
+    return None
+
+
+# ---- herkese açık Telegram komutları (bota özelden): fiyat alarmı
+HALK_YARDIM = ("🤖 <b>$ABDBOT</b> · ABD borsası kırılım takibi (paper trade)\n\n"
+               "⏰ <b>Fiyat alarmı</b>\n/alarm WFF 12,50 — fiyat 12,50'ye gelince sana özelden yazarım\n"
+               "/alarmlar — kurduğun alarmlar\n/alarmsil WFF — o hissedeki alarmlarını sil\n\n"
+               "En fazla 5 alarm kurabilirsin; sadece botun takip ettiği hisselerde çalışır. Yatırım tavsiyesi değildir.")
+_HALK_SAY = {}
+
+
+async def tg_halk_komut(text, chat):
+    """Yönetici olmayan kullanıcılar (özel sohbet): /start, /alarm, /alarmlar, /alarmsil."""
+    now = time.time()
+    L = [t for t in _HALK_SAY.get(chat, []) if now - t < 3600]
+    if len(L) >= 30:
+        return
+    L.append(now)
+    _HALK_SAY[chat] = L
+    parts = text.strip().split()
+    cmd = parts[0].split("@")[0].lower().lstrip("/")
+    arg = [x.upper() for x in parts[1:]]
+    send = lambda html: tg.send(html, chat=chat)
+    if cmd == "start" and arg and arg[0].startswith("ALARM_"):
+        x = arg[0].split("_")
+        if len(x) >= 3:
+            arg = [x[1], x[2].replace("-", ".")]
+            cmd = "alarm"
+    if cmd in ("start", "yardim", "yardım", "help"):
+        send(HALK_YARDIM)
+    elif cmd == "alarm":
+        if len(arg) < 2:
+            send("Kullanım: /alarm WFF 12,50")
+            return
+        sym = re.sub(r"[^A-Z.\-]", "", arg[0])[:8]
+        try:
+            p_ = float(arg[1].replace(",", "."))
+        except ValueError:
+            send("Fiyatı sayı olarak yaz: /alarm WFF 12,50")
+            return
+        if sym not in store.bars:
+            send(f"#{_h(sym)} şu an botun takip listesinde değil; alarm kurulamadı. Sitede o hisseyi açınca bir süre takip edilir.")
+            return
+        benim = [a for a in tg.alarms if str(a.get("chat")) == str(chat)]
+        if len(benim) >= 5 or len(tg.alarms) >= 300:
+            send("En fazla 5 alarm kurabilirsin. Silmek için: /alarmsil HİSSE")
+            return
+        now_p = _px(sym)
+        yon = ("üst" if p_ >= now_p else "alt") if now_p else "üst"
+        tg.alarms.append({"sym": sym, "p": p_, "yon": yon, "t": int(now), "chat": chat})
+        tg.persist()
+        send(f"⏰ Alarm kuruldu: #{_h(sym)} {fk(p_)} {'üstüne çıkınca' if yon == 'üst' else 'altına inince'}"
+             + (f" (şu an {fk(now_p)})" if now_p else ""))
+    elif cmd == "alarmlar":
+        benim = [a for a in tg.alarms if str(a.get("chat")) == str(chat)]
+        send("⏰ <b>Alarmların</b>\n" + ("\n".join(f"#{_h(a['sym'])} {fk(a['p'])} {a['yon']}" for a in benim) or "Kurulu alarm yok."))
+    elif cmd in ("alarmsil", "sil"):
+        sym = re.sub(r"[^A-Z.\-]", "", arg[0])[:8] if arg else ""
+        once = len(tg.alarms)
+        tg.alarms = [a for a in tg.alarms if not (str(a.get("chat")) == str(chat) and (not sym or a["sym"] == sym))]
+        tg.persist()
+        send(f"🗑 {once - len(tg.alarms)} alarm silindi.")
 
 
 def ogrenme_haftalik():
@@ -4840,7 +5108,7 @@ async def tg_komut(text, chat, thread=None):
         VIEWED[sym] = time.time()
         now_p = _px(sym)
         yon = ("üst" if p >= now_p else "alt") if now_p else "üst"
-        tg.alarms = [a for a in tg.alarms if not (a["sym"] == sym and abs(a["p"] - p) < 1e-9)][-29:]
+        tg.alarms = [a for a in tg.alarms if not (a["sym"] == sym and abs(a["p"] - p) < 1e-9)][-299:]
         tg.alarms.append({"sym": sym, "p": p, "yon": yon, "t": int(time.time()), "chat": chat})
         tg.persist()
         send(f"⏰ Alarm kuruldu: #{_h(sym)} {fp_(p)} {'üstüne çıkınca' if yon == 'üst' else 'altına inince'}"
@@ -4996,6 +5264,8 @@ async def tg_komut_loop():
                     if not text.startswith("/"):
                         continue
                     if not await _yetkili(m):
+                        if (m.get("chat") or {}).get("type") == "private":
+                            _gorev(tg_halk_komut(text, m["chat"]["id"]))
                         continue
                     _gorev(_tg_komut_guvenli(text, m["chat"]["id"],
                                              m.get("message_thread_id") if m.get("is_topic_message") else None))
@@ -6542,6 +6812,8 @@ async def lifespan(app):
         if LISTE.get("gun") == datetime.now(ET).date().isoformat():
             for x in LISTE.get("liste") or []:
                 PLAN.liste_ekle(x["sym"], x["giris"], None, x["hedefler"], x.get("kat") or "liste", x.get("t"))
+    if isinstance(backup.data.get("sicil"), dict):
+        SICIL.update({k: v for k, v in backup.data["sicil"].items() if isinstance(v, (int, float))})
     if isinstance(backup.data.get("kosan_tg"), dict):
         KOSAN_TG.update({k: v for k, v in backup.data["kosan_tg"].items() if isinstance(v, (int, float))})
     if isinstance(backup.data.get("plan_gecmis"), list) and not PLAN.gecmis:
@@ -6552,6 +6824,10 @@ async def lifespan(app):
         GIRSEYDIN.update(backup.data["girseydin"])
     push.load(backup.data)
     tg.load(backup.data)
+    for k_ in list(tg.msg):                     # sicil: yedekte olmayan eski Telegram sinyallerini de ekle
+        if k_.startswith("s:") and k_[2:] not in SICIL and k_[2:] in engine.by_id:
+            x_ = engine.by_id[k_[2:]]
+            SICIL[k_[2:]] = int(x_.get("created") or x_.get("t") or time.time())
     feed_seed()
     bot.on_note = feed_bot_note
     bot.extra_mult = extra_mult
@@ -6594,6 +6870,45 @@ def authorized(request: Request) -> bool:
             return False
         return secrets.compare_digest(u, SITE_USER) and secrets.compare_digest(p, SITE_PASSWORD)
     return False
+
+
+ADMIN_TOKEN = hashlib.sha256(f"admin:{ADMIN_PASSWORD}:abdbot".encode()).hexdigest() if ADMIN_PASSWORD else ""
+
+
+def _basic(h):
+    if not h.startswith("Basic "):
+        return None, None
+    try:
+        u, _, p_ = base64.b64decode(h[6:]).decode("utf-8").partition(":")
+        return u, p_
+    except Exception:
+        return None, None
+
+
+def admin_mi(cookies, auth=""):
+    """Yönetici mi? ADMIN_PASSWORD varsa onunla; yoksa (eski kurulum) site şifresini bilen yöneticidir.
+    Hiç şifre yoksa kimse yönetici değildir: site herkese salt okunur açılır."""
+    u, p_ = _basic(auth or "")
+    if ADMIN_PASSWORD:
+        return cookies.get("ak") == ADMIN_TOKEN or (p_ is not None and secrets.compare_digest(p_, ADMIN_PASSWORD))
+    if SITE_PASSWORD:
+        return cookies.get("tk") == TOKEN or (p_ is not None and secrets.compare_digest(p_, SITE_PASSWORD))
+    return False
+
+
+def is_admin(request: Request) -> bool:
+    return admin_mi(request.cookies, request.headers.get("authorization", ""))
+
+
+def sadece_admin():
+    return JSONResponse({"hata": "Bu işlem sadece yönetici içindir"}, status_code=403)
+
+
+def tg_link():
+    if TG_LINK:
+        return TG_LINK
+    c = str(TG_CHAT or "")
+    return f"https://t.me/{c[1:]}" if c.startswith("@") else ""
 
 
 def ask_login():
@@ -6683,28 +6998,51 @@ async def tg_webapp(request: Request):
     if SITE_PASSWORD:
         resp.set_cookie("tk", TOKEN, max_age=30 * 86400, httponly=True, samesite="none", secure=True)
         resp.set_cookie("tgw", "1", max_age=30 * 86400, httponly=True, samesite="none", secure=True)
+    if ADMIN_PASSWORD:
+        resp.set_cookie("ak", ADMIN_TOKEN, max_age=30 * 86400, httponly=True, samesite="none", secure=True)
     return resp
 
 
 @app.post("/giris")
 async def giris(request: Request):
+    """Site şifresi → ziyaretçi; yönetici şifresi (ADMIN_PASSWORD) → yönetici (ayarlar açılır)."""
     from urllib.parse import parse_qs
-    if not SITE_PASSWORD:
+    if not SITE_PASSWORD and not ADMIN_PASSWORD:
         return Response(status_code=303, headers={"Location": "/"})
     # Kaba kuvvet denemelerine karşı: üst üste 5 hatalı denemeden sonra 60 sn bekletir
     if _login_fail["n"] >= 5 and time.time() - _login_fail["t"] < 60:
         return login_page("Çok fazla hatalı deneme. 1 dakika sonra tekrar dene.")
     body = (await request.body()).decode("utf-8", "ignore")
     pw = (parse_qs(body).get("sifre") or [""])[0]
-    if not secrets.compare_digest(pw, SITE_PASSWORD):
+    adm = bool(ADMIN_PASSWORD) and secrets.compare_digest(pw, ADMIN_PASSWORD)
+    ziy = bool(SITE_PASSWORD) and secrets.compare_digest(pw, SITE_PASSWORD)
+    if not adm and not ziy:
         _login_fail["n"] += 1
         _login_fail["t"] = time.time()
         await asyncio.sleep(1)
         return login_page("Şifre yanlış.")
     _login_fail["n"] = 0
     resp = Response(status_code=303, headers={"Location": "/"})
-    resp.set_cookie("tk", TOKEN, max_age=30 * 86400, httponly=True, samesite="lax",
-                    secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https")
+    gv = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    if SITE_PASSWORD:
+        resp.set_cookie("tk", TOKEN, max_age=30 * 86400, httponly=True, samesite="lax", secure=gv)
+    if adm:
+        resp.set_cookie("ak", ADMIN_TOKEN, max_age=30 * 86400, httponly=True, samesite="lax", secure=gv)
+    return resp
+
+
+@app.get("/yonetici")
+async def yonetici_sayfa(request: Request):
+    """Yönetici girişi (site herkese açıkken de)."""
+    if is_admin(request):
+        return Response(status_code=303, headers={"Location": "/"})
+    return login_page("" if ADMIN_PASSWORD or SITE_PASSWORD else "Render'da ADMIN_PASSWORD girilmemiş.")
+
+
+@app.get("/cikis")
+async def cikis_yap(request: Request):
+    resp = Response(status_code=303, headers={"Location": "/"})
+    resp.delete_cookie("ak")
     return resp
 
 
@@ -6767,6 +7105,8 @@ async def saglik():
 async def tg_giris_sayfa(request: Request):
     if not authorized(request):
         return login_page()
+    if not is_admin(request):
+        return HTMLResponse("Bu sayfa sadece yönetici içindir.", status_code=403)
     if not SITE_PASSWORD:
         return HTMLResponse("Önce Render'da SITE_PASSWORD gir; bu sayfa şifresiz sitede açılmaz.", status_code=403)
     return HTMLResponse(dinleyici.GIRIS_HTML.replace("__DURUM__", _h(dinle.status)),
@@ -6777,6 +7117,8 @@ async def tg_giris_sayfa(request: Request):
 async def tg_giris_api(request: Request):
     if not authorized(request) or not SITE_PASSWORD:
         return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    if not is_admin(request):
+        return sadece_admin()
     try:
         d = await request.json()
     except Exception:
@@ -6800,6 +7142,8 @@ async def tg_giris_api(request: Request):
 async def ayar_kaydet(request: Request):
     if not authorized(request):
         return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    if not is_admin(request):
+        return sadece_admin()
     try:
         d = await request.json()
     except Exception:
@@ -6827,6 +7171,8 @@ async def api_kurgular(request: Request):
 async def api_simulasyon(request: Request):
     if not authorized(request):
         return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    if not is_admin(request):
+        return sadece_admin()
     try:
         p = await request.json()
     except Exception:
@@ -6841,6 +7187,8 @@ async def api_simulasyon(request: Request):
 async def api_yz(request: Request):
     if not authorized(request):
         return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    if not is_admin(request):
+        return sadece_admin()
     try:
         d = await request.json()
     except Exception:
@@ -6876,6 +7224,8 @@ async def api_neden(request: Request):
 async def api_kosantest(request: Request):
     if not authorized(request):
         return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    if not is_admin(request):
+        return sadece_admin()
     if not KT["running"]:
         KT["istek"] = 1
     return JSONResponse({"ok": 1, "running": KT["running"]})
@@ -6907,6 +7257,8 @@ async def api_karsilastir(request: Request):
 async def gecmis_baslat(request: Request):
     if not authorized(request):
         return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    if not is_admin(request):
+        return sadece_admin()
     try:
         d = await request.json()
     except Exception:
@@ -6924,6 +7276,8 @@ async def gecmis_baslat(request: Request):
 async def tg_test(request: Request):
     if not authorized(request):
         return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    if not is_admin(request):
+        return sadece_admin()
     if not tg.ok:
         chats = []
         try:
@@ -6952,6 +7306,8 @@ async def push_key(request: Request):
 async def push_sub(request: Request):
     if not authorized(request):
         return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    if not is_admin(request):
+        return sadece_admin()
     try:
         ok = push.add(await request.json())
     except Exception:
@@ -6966,8 +7322,74 @@ async def push_sub(request: Request):
 async def push_test(request: Request):
     if not authorized(request):
         return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    if not is_admin(request):
+        return sadece_admin()
     push.notify("Deneme bildirimi", "Bunu görüyorsan bildirimler çalışıyor.", tag="test")
     return JSONResponse({"ok": push.ok, "n": len(push.subs), "durum": push.status})
+
+
+@app.get("/api/sicil")
+async def api_sicil(request: Request):
+    if not authorized(request):
+        return ask_login()
+    try:
+        gun = max(1, min(120, int(request.query_params.get("gun") or 30)))
+    except ValueError:
+        gun = 30
+    return JSONResponse(sicil_ozet(gun), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/arsiv")
+async def api_arsiv(request: Request):
+    if not authorized(request):
+        return ask_login()
+    G = backup.data.get("girseydin_arsiv") or {}
+    gs = [{k: v for k, v in g.items() if k != "hisseler"} | {"hisseler": [{k: v for k, v in h.items() if k != "seri"}
+                                                                         for h in g.get("hisseler") or []]}
+          for _, g in sorted(G.items(), reverse=True)]
+    return JSONResponse({"girseydin": gs, "kademe": list(reversed(backup.data.get("kademe_arsiv") or []))[:80]},
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/kart/{tur}/{anahtar}.png")
+async def arsiv_kart_png(tur: str, anahtar: str, request: Request):
+    if not authorized(request):
+        return ask_login()
+    if tur not in ("girseydin", "kademe") or not re.fullmatch(r"[\w.\-]{1,80}", anahtar) or not gorsel:
+        return Response(status_code=404)
+    try:
+        png = await asyncio.to_thread(arsiv_kart, tur, anahtar)
+    except Exception as e:
+        log.debug("Arşiv kartı çizilemedi: %s", e)
+        png = None
+    if not png:
+        return Response(status_code=404)
+    return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=600"})
+
+
+@app.post("/api/geri")
+async def api_geri(request: Request):
+    if not authorized(request):
+        return ask_login()
+    try:
+        d = await request.json()
+    except Exception:
+        return JSONResponse({"hata": "geçersiz veri"}, status_code=400)
+    metin = str(d.get("metin") or "").strip()
+    if len(metin) < 3:
+        return JSONResponse({"hata": "Mesaj çok kısa"}, status_code=400)
+    ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "") or "?").split(",")[0].strip()
+    h = geri_bildirim_ekle(metin, str(d.get("iletisim") or "").strip(), ip)
+    if h:
+        return JSONResponse({"hata": h}, status_code=429)
+    return JSONResponse({"ok": 1})
+
+
+@app.get("/api/geri")
+async def api_geri_liste(request: Request):
+    if not is_admin(request):
+        return sadece_admin()
+    return JSONResponse({"liste": list(reversed(backup.data.get("geri") or []))[:100]}, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/durum")
@@ -6983,16 +7405,26 @@ async def ws_endpoint(ws: WebSocket):
     if SITE_PASSWORD and ws.cookies.get("tk") != TOKEN:
         await ws.close(code=4401)
         return
+    adm = admin_mi(ws.cookies)
     await ws.accept()
+    if not adm and sum(1 for c_ in clients if not c_.admin) >= MAX_ZIYARETCI:
+        try:
+            await ws.send_text(json.dumps({"type": "yogun", "n": MAX_ZIYARETCI}))
+            await ws.close(code=4429)
+        except Exception:
+            pass
+        return
     cl = Client(ws)
+    cl.admin = adm
     clients.add(cl)
     try:
-        await cl.send({"type": "hello", "symbols": SYMBOLS, "iex": IEX_SYMBOLS})
+        await cl.send({"type": "hello", "symbols": SYMBOLS, "iex": IEX_SYMBOLS, "rol": "admin" if adm else "ziyaretci",
+                       "tg_link": tg_link(), "bot_ad": tg.username or "", "admin_var": bool(ADMIN_PASSWORD or SITE_PASSWORD)})
         await send_wl(cl, full=True)
         await send_sig(cl)
         await send_bot(cl)
         await send_scan(cl)
-        await cl.send({"type": "feed", "items": list(FEED)[-150:], "full": 1})
+        await cl.send({"type": "feed", "items": list(FEED)[-(150 if adm else 80):], "full": 1})
         cl.mktv = _mkt_ver[0]
         await cl.send({"type": "mkt", **MARKET})
         while True:
@@ -7004,6 +7436,9 @@ async def ws_endpoint(ws: WebSocket):
                 continue
             if msg.get("analiz"):
                 asym = str(msg["analiz"]).upper()[:8]
+                if not cl.admin and time.time() - cl.son_istek.get("analiz", 0) < 15:
+                    continue                      # ziyaretçi: 15 sn'de bir analiz
+                cl.son_istek["analiz"] = time.time()
                 if tarayici.SYM_RE.match(asym):
                     try:
                         await cl.send({"type": "analiz", **(await analiz_payload(asym))})
@@ -7019,6 +7454,13 @@ async def ws_endpoint(ws: WebSocket):
                 await cl.send(rp or {"type": "replay", "hata": "işlem bulunamadı"})
                 continue
             sym = str(msg.get("sub", "")).upper()[:8]
+            if sym and sym not in store.bars and not cl.admin:
+                # ziyaretçi listede olmayan hisse açarsa: 20 sn'de bir ve aynı anda en fazla 25 ek hisse
+                ek_ = sum(1 for s_, t_ in VIEWED.items() if s_ not in SYMBOLS and time.time() - t_ < 1800)
+                if time.time() - cl.son_istek.get("sub", 0) < 20 or ek_ >= 25:
+                    await cl.send({"type": "snap_yok", "sym": sym, "neden": "Şu an yeni hisse eklenemiyor, biraz sonra tekrar dene."})
+                    continue
+                cl.son_istek["sub"] = time.time()
             if sym and sym not in store.bars and tarayici.SYM_RE.match(sym):
                 # listede olmayan hisse: dakikalık veriyi hemen çek, 30 dk izle
                 ensure_sym(sym)
