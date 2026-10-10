@@ -339,7 +339,7 @@ def plan_veri(pl, sym, last, ch=None, durum=None, haber=None, tf="5 dk"):
         st = "yaklasiyor"
     return {"sym": sym, "last": last, "ch": ch, "durum": st, "giris": pl.get("giris"), "stop": pl.get("stop"),
             "hedefler": pl.get("hedefler"), "baslik": f"Kırılım planı · {fp(pl.get('giris'))} üstü kapanış + hacim",
-            "alt": (f"@{pl['kanal']} seviyesi" if pl.get("kanal") else f"puan {pl.get('puan', 0):g}".replace(".", ",")),
+            "alt": ("kanal seviyesi" if pl.get("kanal") else f"puan {pl.get('puan', 0):g}".replace(".", ",")),
             "neden": neden, "haber": haber, "t_sig": pl.get("t_onay"), "tf": tf, "bant": pl.get("bant"),
             "bant_uzat": "taban" in (pl.get("tur") or [])}
 
@@ -396,4 +396,211 @@ def sonuc_kart(d_):
         y = Y(cx_)
         d.polygon([(lx - 30 * S, y), (lx - 46 * S, y - 10 * S), (lx - 46 * S, y + 10 * S)], fill=TXT)
     d.text(((W - 40) * S - d.textlength("ABD·BOT · paper", font=f(15)), (H - 30) * S), "ABD·BOT · paper", fill=DIM, font=f(15))
+    return _png(img.resize((W, H), Image.LANCZOS))
+
+
+# ---------------------------------------------------------------- yardımcılar (kartlar)
+def _parilti(W, H, S, renk, merkez=(-60, -80, 190, 150), a=0.22):
+    gl = Image.new("RGB", (W // 4, H // 4), BG)
+    ImageDraw.Draw(gl).ellipse(list(merkez), fill=_mix(renk, a))
+    return gl.filter(ImageFilter.GaussianBlur(40)).resize((W * S, H * S), Image.BICUBIC)
+
+
+def _tik(d, cx, cy, r, renk, S, dolu=True):
+    """Yuvarlak içinde onay işareti."""
+    if dolu:
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=renk)
+        c2 = (6, 24, 12)
+    else:
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=renk, width=3 * S)
+        c2 = renk
+    d.line([(cx - r * 0.45, cy + r * 0.02), (cx - r * 0.12, cy + r * 0.36), (cx + r * 0.5, cy - r * 0.34)],
+           fill=c2, width=max(2, int(r * 0.24)), joint="curve")
+
+
+def _saat(t):
+    return datetime.fromtimestamp(t, TR).strftime("%H:%M") if t else "—"
+
+
+def fpk(x):
+    """Büyük yüzdeler kısa: +%409 · +%33,8"""
+    if x is None:
+        return "—"
+    return fpct(x, 0 if abs(x) >= 100 else 1)
+
+
+def _mini_mum(d, B, kutu, S, seviyeler=(), isaret=(), t_giris=None):
+    """kutu=(x0,y0,x1,y1) içine 5 dk mumlar + yatay seviyeler. seviyeler: (fiyat, renk, kalın, etiket);
+    isaret: (ts, fiyat, renk) noktaları."""
+    x0, y0, x1, y1 = kutu
+    n = len(B)
+    if n < 2:
+        return
+    hi = max(b[2] for b in B)
+    lo = min(b[3] for b in B)
+    for v, *_ in seviyeler:
+        if v and lo * 0.6 < v < hi * 1.6:
+            hi, lo = max(hi, v), min(lo, v)
+    r = (hi - lo) or hi * 0.02
+    hi += r * 0.07
+    lo -= r * 0.05
+    cw = (x1 - x0) / (n + 1)
+    X = lambda i: x0 + (i + 0.5) * cw
+    Y = lambda v: y1 - (v - lo) / (hi - lo) * (y1 - y0)
+    ts = [b[0] for b in B]
+    if t_giris:
+        gi = min(n - 1, max(0, bisect_left(ts, t_giris)))
+        d.rectangle([X(gi) - cw / 2, y0, x1, y1], fill=(255, 255, 255, 6))
+    for v, col, kal, lab in seviyeler:
+        if not v or not (lo <= v <= hi):
+            continue
+        if kal:
+            d.line([(x0, Y(v)), (x1, Y(v))], fill=col + (230,), width=2 * S)
+        else:
+            _dash(d, x0, Y(v), x1, col + (170,), S + 1, 8 * S, 6 * S)
+        if lab:
+            f_ = F(12 * S, "b")
+            tw = d.textlength(lab, font=f_)
+            d.rounded_rectangle([x1 - tw - 14 * S, Y(v) - 20 * S, x1, Y(v) - 3 * S], radius=5 * S, fill=_mix(col, 0.25, PANEL))
+            d.text((x1 - tw - 7 * S, Y(v) - 19 * S), lab, fill=col, font=f_)
+    for i, b in enumerate(B):
+        o, h_, l_, c = b[1], b[2], b[3], b[4]
+        col = UP if c >= o else DN
+        d.line([(X(i), Y(h_)), (X(i), Y(l_))], fill=col, width=max(2, S))
+        top, bot = Y(max(o, c)), Y(min(o, c))
+        d.rectangle([X(i) - cw * 0.32, top, X(i) + cw * 0.32, max(bot, top + 2 * S)], fill=col)
+    for t_, v, col in isaret:
+        if not t_ or not v:
+            continue
+        i = min(n - 1, max(0, bisect_left(ts, t_ // 300 * 300)))
+        cx, cy = X(i), Y(v)
+        d.ellipse([cx - 13 * S, cy - 13 * S, cx + 13 * S, cy + 13 * S], fill=col + (60,))
+        _tik(d, cx, cy, 9 * S, col, S)
+    if t_giris:
+        gi = min(n - 1, max(0, bisect_left(ts, t_giris // 300 * 300)))
+        ax, ay = X(gi), Y(B[gi][3]) + 12 * S
+        d.polygon([(ax, ay), (ax - 10 * S, ay + 17 * S), (ax + 10 * S, ay + 17 * S)], fill=ACC)
+
+
+# ---------------------------------------------------------------- 🏁 tüm kademeler tamam
+def kademe_kart(bars, d_):
+    """bars: 5 dk [(t,o,h,l,c,v)] · d_: sym, giris, stop, ks[3], gel[3], t_sig, son, zirve, zt, stop_t, ad"""
+    S = 2
+    W, H = 1200, 760
+    stop_once = bool(d_.get("stop_t"))
+    img = Image.blend(Image.new("RGB", (W * S, H * S), BG), _parilti(W, H, S, UP, a=0.26), 0.9)
+    d = ImageDraw.Draw(img, "RGBA")
+    f = lambda sz, w="r": F(sz * S, w)
+    e, ks, gel = d_["giris"], d_["ks"], d_["gel"]
+    nx = _pill(d, 56 * S, 50 * S, T("TÜM KADEMELER TAMAM"), UP, (4, 23, 11), f(20, "xb"), px=16 * S, py=9 * S)
+    if stop_once:
+        _pill(d, nx + 12 * S, 50 * S, T("ÖNCE STOP GELDİ"), _mix(GOLD, 0.22), GOLD, f(18, "b"), px=14 * S, py=10 * S)
+    sym = T(d_.get("sym", ""))
+    d.text((56 * S, 112 * S), sym, fill=TXT, font=f(58, "xb"))
+    sw = d.textlength(sym, font=f(58, "xb"))
+    d.text((56 * S + sw + 20 * S, 134 * S), T(f"giriş {fp(e)} · {_saat(d_.get('t_sig'))}"), fill=MUT, font=f(22, "m"))
+    k3 = (ks[-1] / e - 1) * 100 if e else 0
+    d.text((50 * S, 186 * S), T(fpk(k3)), fill=UP, font=f(132, "xb"))
+    sure = (gel[-1] - d_["t_sig"]) // 60 if gel[-1] and d_.get("t_sig") else None
+    if sure is not None:
+        sy = f"{sure // 60} sa {sure % 60} dk" if sure >= 60 else f"{sure} dk"
+        d.text((58 * S, 354 * S), T(f"Giriş → K3 · {sy} içinde tamamlandı"), fill=MUT, font=f(21, "m"))
+    # kademe satırları
+    y = 410 * S
+    for i, (k, g) in enumerate(zip(ks, gel)):
+        d.rounded_rectangle([50 * S, y, 590 * S, y + 64 * S], radius=16 * S, fill=PANEL + (235,))
+        _tik(d, 86 * S, y + 32 * S, 17 * S, UP, S, dolu=bool(g))
+        d.text((118 * S, y + 17 * S), f"K{i + 1}", fill=UP, font=f(24, "xb"))
+        d.text((178 * S, y + 15 * S), fp(k), fill=TXT, font=f(27, "b"))
+        d.text((330 * S, y + 21 * S), _saat(g), fill=MUT, font=f(20, "m"))
+        pt = T(fpk((k / e - 1) * 100))
+        d.text((574 * S - d.textlength(pt, font=f(24, "b")), y + 18 * S), pt, fill=UP, font=f(24, "b"))
+        y += 76 * S
+    # alt çipler
+    y = 650 * S
+    x = 50 * S
+    son, zr = d_.get("son"), d_.get("zirve")
+    if son:
+        c_ = UP if son >= e else DN
+        x = _pill(d, x, y, T(f"Şimdi {fp(son)} · {fpk((son / e - 1) * 100)}"), _mix(c_, 0.18), c_, f(18, "b"), px=14 * S, py=9 * S) + 12 * S
+    if zr and zr > ks[-1] * 1.01:
+        _pill(d, x, y, T(f"Zirve {fp(zr)} · {fpk((zr / e - 1) * 100)}"), _mix(GOLD, 0.18), GOLD, f(18, "b"), px=14 * S, py=9 * S)
+    # sağ: mini grafik
+    kx0, ky0, kx1, ky1 = 630 * S, 60 * S, (W - 44) * S, (H - 86) * S
+    d.rounded_rectangle([kx0 - 16 * S, ky0 - 16 * S, kx1 + 16 * S, ky1 + 16 * S], radius=26 * S, fill=PANEL + (240,))
+    if bars and len(bars) >= 3:
+        sev = [(d_.get("stop"), DN, False, "STOP"), (e, ACC, True, "GİRİŞ")] + \
+              [(k, UP, i == 2, f"K{i + 1}") for i, k in enumerate(ks)]
+        isr = [(g, k, UP) for k, g in zip(ks, gel) if g]
+        _mini_mum(d, bars[-60:], (kx0, ky0 + 10 * S, kx1, ky1), S, sev, isr, d_.get("t_sig"))
+    br = T("ABD·BOT · paper trade · yatırım tavsiyesi değildir")
+    d.text(((W - 44) * S - d.textlength(br, font=f(14)), (H - 40) * S), br, fill=DIM, font=f(14))
+    return _png(img.resize((W, H), Image.LANCZOS))
+
+
+# ---------------------------------------------------------------- 💡 bugün bu kırılımlardan girseydin
+def girseydin_kart(d_):
+    """d_: gun_ad, toplam, iyi_n, stop_n, hisseler: [{sym, en, seri:[(t,c)], girisler:[{t,e,pk,zt,zirve,not}]}]"""
+    S = 2
+    H_ = d_["hisseler"][:6]
+    W = 1200
+    RH = 168
+    H = 214 + len(H_) * RH + 96
+    img = Image.blend(Image.new("RGB", (W * S, H * S), BG), _parilti(W, H, S, GOLD, (-40, -60, 260, 120), 0.2), 0.9)
+    d = ImageDraw.Draw(img, "RGBA")
+    f = lambda sz, w="r": F(sz * S, w)
+    _pill(d, 56 * S, 44 * S, T("GİRSEYDİN"), GOLD, (40, 26, 0), f(18, "xb"), px=14 * S, py=8 * S)
+    d.text((56 * S, 96 * S), T(d_.get("baslik") or "Bugün bu kırılımlardan girseydin"), fill=TXT, font=f(44, "xb"))
+    alt = f"{d_.get('gun_ad', '')} · {d_['toplam']} kırılım paylaşıldı · {d_['iyi_n']} tanesi en az +%5 · {d_['stop_n']} tanesi stop oldu"
+    d.text((58 * S, 158 * S), T(alt), fill=MUT, font=f(19, "m"))
+    y = 214 * S
+    for h in H_:
+        d.rounded_rectangle([40 * S, y, (W - 40) * S, y + (RH - 16) * S], radius=22 * S, fill=PANEL + (240,))
+        d.text((64 * S, y + 22 * S), T(h["sym"]), fill=TXT, font=f(36, "xb"))
+        d.text((64 * S, y + 72 * S), T(fpk(h["en"])), fill=UP, font=f(40, "xb"))
+        d.text((66 * S, y + 122 * S), T("en iyi giriş"), fill=DIM, font=f(13, "m"))
+        # çizgi grafik
+        sx0, sy0, sx1, sy1 = 270 * S, y + 20 * S, 690 * S, y + (RH - 36) * S
+        sr = h.get("seri") or []
+        if len(sr) >= 3:
+            lo = min(c for _, c in sr)
+            hi = max(c for _, c in sr)
+            for g in h["girisler"]:
+                lo = min(lo, g["e"])
+                hi = max(hi, g.get("zirve") or hi)
+            r = (hi - lo) or hi * 0.02
+            t0, t1 = sr[0][0], sr[-1][0]
+            X = lambda t: sx0 + (t - t0) / ((t1 - t0) or 1) * (sx1 - sx0)
+            Y = lambda v: sy1 - (v - lo) / r * (sy1 - sy0)
+            pts = [(X(t), Y(c)) for t, c in sr]
+            d.polygon(pts + [(pts[-1][0], sy1), (pts[0][0], sy1)], fill=UP + (26,))
+            d.line(pts, fill=UP + (230,), width=2 * S, joint="curve")
+            for j, g in enumerate(h["girisler"][:4]):
+                gx, gy = X(max(t0, g["t"])), Y(g["e"])
+                d.ellipse([gx - 13 * S, gy - 13 * S, gx + 13 * S, gy + 13 * S], fill=ACC, outline=PANEL, width=3 * S)
+                no = str(j + 1)
+                d.text((gx - d.textlength(no, font=f(14, "xb")) / 2, gy - 9 * S), no, fill=(255, 255, 255), font=f(14, "xb"))
+                if g.get("zt") and g.get("zirve"):
+                    zx, zy = X(g["zt"]), Y(g["zirve"])
+                    d.ellipse([zx - 5 * S, zy - 5 * S, zx + 5 * S, zy + 5 * S], fill=GOLD)
+        # girişler listesi
+        ly = y + 20 * S
+        for j, g in enumerate(h["girisler"][:4]):
+            no = str(j + 1)
+            d.ellipse([716 * S, ly + 2 * S, 742 * S, ly + 28 * S], fill=ACC)
+            d.text((729 * S - d.textlength(no, font=f(14, "xb")) / 2, ly + 6 * S), no, fill=(255, 255, 255), font=f(14, "xb"))
+            d.text((754 * S, ly + 3 * S), T(f"{_saat(g['t'])}  {fp(g['e'])}"), fill=TXT, font=f(19, "sb"))
+            pt = T(fpk(g["pk"]))
+            col = UP if g["pk"] >= 5 else MUT
+            d.text(((W - 64) * S - d.textlength(pt, font=f(21, "xb")), ly + 2 * S), pt, fill=col, font=f(21, "xb"))
+            if g.get("not"):
+                nt = T(g["not"])
+                d.text(((W - 64) * S - d.textlength(pt, font=f(21, "xb")) - 14 * S - d.textlength(nt, font=f(13, "b")),
+                        ly + 8 * S), nt, fill=GOLD if "stop" in g["not"] else MUT, font=f(13, "b"))
+            ly += 32 * S
+        y += RH * S
+    nt = T("Zirve = girişten sonra görülen en yüksek fiyat. Geriye dönük hesap; gerçek işlem değil, yatırım tavsiyesi değildir.")
+    d.text((56 * S, (H - 70) * S), nt, fill=DIM, font=f(15, "m"))
+    br = T("ABD·BOT · paper trade")
+    d.text(((W - 44) * S - d.textlength(br, font=f(14)), (H - 40) * S), br, fill=DIM, font=f(14))
     return _png(img.resize((W, H), Image.LANCZOS))
