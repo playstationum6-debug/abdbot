@@ -245,7 +245,7 @@ class Planci:
                f"fiyat seviyenin %{p['uzak']} altındaydı",
                f"Stop {p['stop']} · K1 {p['hedefler'][0]} · K2 {p['hedefler'][1]} · K3 {p['hedefler'][2]}"]
         if p.get("kanal"):
-            why.insert(0, f"Seviye @{p['kanal']} kanalından; onayı bot kendi kuralıyla verdi")
+            why.insert(0, "Seviye takip edilen bir kanaldan; onayı bot kendi kuralıyla verdi")
         base = 52 + min(12, int(p["puan"] * 2)) + (2 if tip == "retest" else 0)
         p["st"], p["ot"], p["tip"] = "onaylı", T, tip
         self.olay.append(("onaylı", p))

@@ -1367,6 +1367,7 @@ class Telegram:
         self.topics = {}       # konu -> message_thread_id
         self.msg_topic = {}    # mesaj anahtarı -> konu
         self.tr_cache = {}     # haber başlığı -> Türkçe çeviri + özet
+        self.tr_t = 0.0        # son toplu çeviri zamanı (dakikada en fazla 1)
 
     @property
     def ok(self):
@@ -1405,81 +1406,58 @@ class Telegram:
             del self.queue[:-40]
 
     async def ceviri(self, c, headline):
-        """Haber başlığını yapay zekayla Türkçeye çevir + 1 cümle özet (GEMINI_API_KEY varsa)."""
-        if not headline or not scanner.ai_key:
+        """Haber başlığını yapay zekayla Türkçeye çevir + 1 cümle özet (önbellekte yoksa, hafif modelle)."""
+        if not headline or not YZM.hazir:
             return None
         if headline in self.tr_cache:
             return self.tr_cache[headline]
-        now = time.time()
-        scanner.ai_calls = [t for t in scanner.ai_calls if now - t < 60]
-        if len(scanner.ai_calls) >= 8:
+        if YZM.kalan() < 120:
             return None
-        scanner.ai_calls.append(now)
         prompt = ("Translate this US stock market news headline into natural, short Turkish. Then add ONE short "
                   "Turkish sentence (max 18 words) explaining in plain words what it means for the stock. "
                   'Answer ONLY JSON: {"tr": "...", "ozet": "..."}\nHeadline: ' + headline[:300])
+        txt, _ = await YZM.cagir(prompt, sicaklik=0.2, en_fazla_bekle=3, uzun=1024, hafif=True, json_=True)
+        if not txt:
+            return None
         try:
-            r = await c.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{scanner.ai_model}:generateContent",
-                headers={"x-goog-api-key": scanner.ai_key, "Content-Type": "application/json"},
-                json={"contents": [{"parts": [{"text": prompt}]}],
-                      "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}})
-            if r.status_code == 404:
-                await scanner.model_bul(c)
-            if r.status_code != 200:
-                return None
-            txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
             js = json.loads(txt[txt.find("{"):txt.rfind("}") + 1])
-            res = {"tr": str(js.get("tr", ""))[:220], "ozet": str(js.get("ozet", ""))[:200]}
-            self.tr_cache[headline] = res
-            if len(self.tr_cache) > 500:
-                self.tr_cache = dict(list(self.tr_cache.items())[-300:])
-            return res
         except Exception:
             return None
+        res = {"tr": str(js.get("tr", ""))[:220], "ozet": str(js.get("ozet", ""))[:200]}
+        if res["tr"]:
+            self.tr_cache[headline] = res
+        return res
 
     async def ceviri_toplu(self, basliklar):
-        """Yeni haber başlıklarını tek yapay zekâ çağrısında Türkçeye çevirir (önbelleğe yazar). Döner: çevrilen sayısı."""
+        """Yeni haber başlıklarını tek yapay zekâ çağrısında Türkçeye çevirir (önbelleğe yazar). Döner: çevrilen sayısı.
+        Hafif (lite) modelle ve dakikada en fazla 1 kez: sinyal kararlarının kotasını yemesin."""
         bs = [b for b in dict.fromkeys(basliklar) if b and b not in self.tr_cache][:12]
-        if not bs or not scanner.ai_key:
+        if not bs or not YZM.hazir or YZM.kalan() < 120 or time.time() - self.tr_t < 60:
             return 0
-        now = time.time()
-        scanner.ai_calls = [t for t in scanner.ai_calls if now - t < 60]
-        if len(scanner.ai_calls) >= 8:
-            return 0
-        scanner.ai_calls.append(now)
+        self.tr_t = time.time()
         prompt = ("Translate each US stock market news headline below into natural, short Turkish (keep tickers, "
                   "company and product names as they are). For each, also write ONE short Turkish sentence (max 18 words) "
                   "explaining in plain words what it means for the stock. Answer ONLY a JSON array like "
                   '[{"i": 0, "tr": "...", "ozet": "..."}]\n' + "\n".join(f"{i}. {b[:300]}" for i, b in enumerate(bs)))
-        try:
-            async with httpx.AsyncClient(timeout=30) as c:     # ayrı istemci: Alpaca başlıkları Google'a gitmesin
-                r = await c.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{scanner.ai_model}:generateContent",
-                    headers={"x-goog-api-key": scanner.ai_key, "Content-Type": "application/json"},
-                    json={"contents": [{"parts": [{"text": prompt}]}],
-                          "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}})
-                if r.status_code == 404:
-                    await scanner.model_bul(c)
-            if r.status_code != 200:
-                return 0
-            txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            js = json.loads(txt[txt.find("["):txt.rfind("]") + 1])
-            n = 0
-            for x in js if isinstance(js, list) else []:
-                try:
-                    i = int(x.get("i"))
-                except Exception:
-                    continue
-                if 0 <= i < len(bs) and x.get("tr"):
-                    self.tr_cache[bs[i]] = {"tr": str(x["tr"])[:220], "ozet": str(x.get("ozet") or "")[:200]}
-                    n += 1
-            if len(self.tr_cache) > 500:
-                self.tr_cache = dict(list(self.tr_cache.items())[-300:])
-            return n
-        except Exception as e:
-            log.debug("Toplu haber çevirisi hatası: %s", e)
+        txt, _ = await YZM.cagir(prompt, sicaklik=0.2, en_fazla_bekle=3, uzun=2048, hafif=True, json_=True)
+        if not txt:
             return 0
+        try:
+            js = json.loads(txt[txt.find("["):txt.rfind("]") + 1])
+        except Exception:
+            return 0
+        n = 0
+        for x in js if isinstance(js, list) else []:
+            try:
+                i = int(x.get("i"))
+            except Exception:
+                continue
+            if 0 <= i < len(bs) and x.get("tr"):
+                self.tr_cache[bs[i]] = {"tr": str(x["tr"])[:220], "ozet": str(x.get("ozet") or "")[:200]}
+                n += 1
+        if len(self.tr_cache) > 500:
+            self.tr_cache = dict(list(self.tr_cache.items())[-300:])
+        return n
 
     def _markup(self, sym):
         if not sym:
@@ -2130,7 +2108,8 @@ async def news_loop():
                     if r.status_code == 200:
                         items = r.json().get("news") or []
                         yeni_ = [n.get("headline") for n in items if n.get("headline") and f"n:{n.get('id')}" not in FEED_KEYS
-                                 and time.time() - _iso_epoch(n.get("created_at", "")) < 6 * 3600]
+                                 and time.time() - _iso_epoch(n.get("created_at", "")) < 6 * 3600
+                                 and any(x in scanner.runners or x in SYMBOLS for x in (n.get("symbols") or []))]
                         if yeni_:
                             try:
                                 await tg.ceviri_toplu(yeni_)
@@ -2241,7 +2220,9 @@ def learn_yuku():
                              "liste": liste_ozet(), "lab": lab_ozet(),
                              "yz": {"durum": YZM.durum, "kalan": YZM.kalan(), "gunluk": yzmod.GUNLUK, "karne": yz_karne(),
                                     "yetki": BOT_CFG.get("yz_yetki", 1), "aktif": yz_yetki(), "hazir": YZM.hazir,
-                                    "ders": YZM.ders, "hata": YZM.son_hata, "arama": YZM.arama},
+                                    "ders": YZM.ders, "hata": YZM.son_hata, "arama": YZM.arama,
+                                    "cevapsiz": dict(sorted(YZM.hata_say.items(), key=lambda kv: -kv[1])[:4]),
+                                    "model": next((m for m, _ in sorted(YZM.basari.items(), key=lambda kv: -kv[1])), None)},
                              "bt": {k: BT[k] for k in ("sum", "t", "running", "bekliyor", "prog", "hata")}}
     _LEARN["t"] = time.time()
     return _LEARN["d"]
@@ -2388,6 +2369,10 @@ async def signal_loop():
             kademe_kontrol()
         except Exception as e:
             log.warning("Kademe kontrolü hatası: %s", e)
+        try:
+            plan_gecmis_yedekle()
+        except Exception as e:
+            log.debug("Plan geçmişi yedeklenemedi: %s", e)
 
 
 def kosan_eklendi(new):
@@ -3149,6 +3134,22 @@ def kademe_izi(sig, M=None):
         if h > zirve:
             zirve, zt = h, t
     return {"ks": ks, "gel": gel, "stop_t": stop_t, "zirve": zirve, "zt": zt, "son": M[-1][4], "son_t": M[-1][0]}
+
+
+_PG = {"son": None}
+_PG_ALAN = ("id", "sym", "lvl", "giris", "stop", "hedefler", "tur", "puan", "st", "t", "gun", "sig", "k1", "k2", "neden",
+            "bitis", "tip", "vr", "ust", "liste", "ot", "t_onay", "ses", "kaynak")
+
+
+def plan_gecmis_yedekle():
+    """Biten planlar (plan / onay / sahte sayıları) yedeğe: Render yeniden başlayınca karne sıfırlanmasın."""
+    son = PLAN.gecmis[-1]["id"] if PLAN.gecmis else None
+    if son == _PG["son"]:
+        return
+    _PG["son"] = son
+    backup.data["plan_gecmis"] = [dict({k: p.get(k) for k in _PG_ALAN if p.get(k) is not None},
+                                       **({"kanal": 1} if p.get("kanal") else {})) for p in PLAN.gecmis[-300:]]
+    backup.dirty = True
 
 
 def _kademe_kaydet():
@@ -5794,13 +5795,17 @@ async def _yz_calis(sig, tekrar):
                 await asyncio.wait_for(YZM.arastir(sig["sym"], ADLAR_TR.get(sig["sym"], ""), sm.get("p"), sm.get("ch")), 30)
             except asyncio.TimeoutError:
                 pass
-        y = await asyncio.wait_for(YZM.karar(sig, yz_baglam(sig)), 25)
+        y = await asyncio.wait_for(YZM.karar(sig, yz_baglam(sig)), 45)
+    except asyncio.TimeoutError:
+        YZM.son_hata = "45 sn içinde cevap gelmedi (zaman aşımı)"
+        YZM._say("zaman aşımı")
     except Exception as e:
         log.debug("Yapay zekâ kararı alınamadı %s: %s", sig.get("sym"), e)
     finally:
         YZM.bekleyen.discard(sig["id"])
     if not y:
-        y = {"karar": "YOK", "neden": "yapay zekâ cevap vermedi (kota / hata): kurallarla devam", "t": int(time.time())}
+        y = {"karar": "YOK", "neden": f"yapay zekâ cevap vermedi ({(YZM.son_hata or 'kota / hata')[:90]}): kurallarla devam",
+             "t": int(time.time())}
     sig["yz"] = y
     f = sig.setdefault("f", {})
     if y.get("ara"):
@@ -6093,8 +6098,9 @@ def plan_olaylari():
     except Exception:
         pass
     # onaylı planlarda kademe bildirimleri
+    gun_ = str(datetime.now(ET).date())
     for p in PLAN.gecmis[-40:]:
-        if p.get("st") != "onaylı" or not p.get("sig") or p.get("k2"):
+        if p.get("st") != "onaylı" or not p.get("sig") or p.get("k2") or p.get("gun") != gun_:
             continue
         sg = engine.by_id.get(p["sig"])
         if not sg or sg.get("st") not in ("açık", "hedef"):
@@ -6492,6 +6498,8 @@ async def lifespan(app):
         if LISTE.get("gun") == datetime.now(ET).date().isoformat():
             for x in LISTE.get("liste") or []:
                 PLAN.liste_ekle(x["sym"], x["giris"], None, x["hedefler"], x.get("kat") or "liste", x.get("t"))
+    if isinstance(backup.data.get("plan_gecmis"), list) and not PLAN.gecmis:
+        PLAN.gecmis[:] = [p for p in backup.data["plan_gecmis"] if isinstance(p, dict) and p.get("sym")][-300:]
     if isinstance(backup.data.get("kademe"), dict):
         KADEME.update({k: v for k, v in backup.data["kademe"].items() if k in ("gun", "ok", "say", "sym")})
     if isinstance(backup.data.get("girseydin"), dict):

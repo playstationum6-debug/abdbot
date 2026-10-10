@@ -2215,8 +2215,10 @@ function renderYZ(){const el=$('yzK');if(!el)return;const Y=(learn&&learn.yz)||n
     <div class="meta" style="margin-top:6px">Her uygun sinyalde internette araştırır (haber, katalizör, seyreltme), botun rakamlarını ve 5 modülü okur, hedefe ulaşma olasılığını tahmin eder. Kararı öğrenme modeline de özellik olarak girer.</div>
     <div class="skb" style="margin-top:12px"><div><small>YZ AL DEDİ</small><b class="${cls(k.al.avg)}">${k.al.avg==null?'—':fR(k.al.avg)}</b><span>${k.al.n||0} sinyal${k.al.wr!=null?' · %'+k.al.wr:''}</span></div>
       <div><small>YZ PAS DEDİ</small><b class="${cls(k.pas.avg)}">${k.pas.avg==null?'—':fR(k.pas.avg)}</b><span>${k.pas.n||0} sinyal</span></div>
-      <div class="${k.kanit?'gold':''}"><small>AYIRT GÜCÜ</small><b class="${cls(k.guc)}">${k.guc==null?'—':fR(k.guc)}</b><span>${k.kanit?'kanıtlandı ✓':'hedef +'+fR(k.esik||.15)}</span></div></div>
+      <div class="${k.kanit?'gold':''}"><small>AYIRT GÜCÜ</small><b class="${cls(k.guc)}">${k.guc==null?'—':fR(k.guc)}</b><span>${k.kanit?'kanıtlandı ✓':'hedef '+fR(k.esik||.15)}</span></div></div>
     ${Y.ders?`<div class="sh" style="margin-top:12px"><b style="font-size:14px">Son gün sonu dersi</b><span>${tTR(Y.ders.t)}</span></div><div class="yzm meta">${esc(Y.ders.metin)}</div>`:''}
+    ${k.yok?`<div class="meta" style="margin-top:10px;color:var(--wa)">⚠️ ${k.yok} sinyalde yapay zekâ cevap veremedi, bu yüzden karne dolmuyor${Y.cevapsiz&&Object.keys(Y.cevapsiz).length?' · en çok: '+Object.entries(Y.cevapsiz).map(([a,b])=>esc(a)+' ×'+b).join(', '):''}.</div>`:''}
+    ${Y.model?`<div class="meta" style="margin-top:4px">Çalışan model: ${esc(Y.model)}</div>`:''}
     ${Y.hata?`<div class="meta" style="margin-top:8px">Son hata: ${esc(Y.hata)}</div>`:''}${Y.hazir&&!Y.arama?'<div class="meta" style="margin-top:4px">Google arama aracı bu anahtarla kullanılamadı: aramasız çalışıyor.</div>':''}</div>`}
 $('yzSeg').addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(!b)return;$('yzYet').value=b.dataset.v;$('yzYet').dataset.dirty=1;for(const x of $('yzSeg').children)x.classList.toggle('on',x===b)});
 
@@ -2225,7 +2227,7 @@ const PLST={bekliyor:'⏳ BEKLİYOR','kaçtı':'🏃 KAÇTI · RETEST',onaylı:'
 const PLTUR={taban:'taban tavanı',kaybedilen:'kaybedilen seviye',pmh:'öncesi seans tepesi',pdh:'dünkü tepe',hod:'gün tepesi',yuvarlak:'yuvarlak sayı',kanal:'kanal seviyesi'};
 function plKart(p){const px=(rows[p.sym]&&rows[p.sym].p)||p.simdi||p.px,dist=px?(p.giris/px-1)*100:null,h=p.hedefler||[];
   const lo=p.stop,hi=h[1]||p.giris*1.1,pos=v=>Math.max(0,Math.min(100,(v-lo)/((hi-lo)||1)*100));
-  return `<div class="plk" data-sym="${esc(p.sym)}"><div class="h">${logo(p.sym)}<div><b>${esc(p.sym)}</b><small>${p.kanal?'@'+esc(p.kanal)+' seviyesi':'bot çizdi'} · şu an ${fp(px)}</small></div>
+  return `<div class="plk" data-sym="${esc(p.sym)}"><div class="h">${logo(p.sym)}<div><b>${esc(p.sym)}</b><small>${p.kanal?'kanal seviyesi':'bot çizdi'} · şu an ${fp(px)}</small></div>
     <div class="lv"><small>kırılırsa giriş</small><b>${fp(p.giris)}</b></div></div>
     <div class="bar"><i style="width:${pos(px).toFixed(0)}%"></i><u style="left:${pos(p.giris).toFixed(0)}%"></u></div>
     <div style="display:flex;justify-content:space-between;align-items:center"><span class="st st-${esc(p.st)}">${PLST[p.st]||esc(p.st)}</span><span class="meta">${dist!=null?(dist>0?'seviyeye %'+trn(dist,1):'seviyenin üstünde'):''}</span></div>
@@ -2242,7 +2244,7 @@ function renderPlanKarne(){const P=(learn&&learn.plan)||null,el=$('plKarne');if(
   $('plK').textContent=P.golge?'gölgede':'işlem açıyor';
   const K=P.karne||[];
   el.innerHTML=`<div class="card" style="padding:4px 14px"><div class="kmr h" style="grid-template-columns:minmax(0,1fr) 44px 50px 50px 60px"><span>Seviye türü</span><span style="text-align:right">Plan</span><span style="text-align:right">Sahte</span><span style="text-align:right">Sonuç</span><span style="text-align:right">İşlem başı ort.</span></div>
-    ${K.length?K.map(r=>`<div class="kmr" style="grid-template-columns:minmax(0,1fr) 44px 50px 50px 60px"><b style="font-weight:600">${esc(r.ad)}</b><span style="text-align:right">${r.plan}</span><span style="text-align:right">${r.sahte}</span><span style="text-align:right">${r.n}</span><span style="text-align:right" class="${cls(r.avg)}">${r.avg==null?'—':fA(r)}</span></div>`).join(''):'<div class="meta" style="padding:10px 0">Plan oldukça hangi seviye türünün tuttuğu burada ölçülür (taban tavanı, kaybedilen seviye, dünkü tepe, kanal seviyesi…).</div>'}</div>
+    ${K.length?K.map(r=>`<div class="kmr" style="grid-template-columns:minmax(0,1fr) 44px 50px 50px 60px"><b style="font-weight:600">${esc(r.ad)}</b><span style="text-align:right">${r.plan||r.n?Math.max(r.plan,r.n):0}</span><span style="text-align:right">${r.plan?r.sahte:'—'}</span><span style="text-align:right">${r.n}</span><span style="text-align:right" class="${cls(r.avg)}">${r.avg==null?'—':fA(r)}</span></div>`).join(''):'<div class="meta" style="padding:10px 0">Plan oldukça hangi seviye türünün tuttuğu burada ölçülür (taban tavanı, kaybedilen seviye, dünkü tepe, kanal seviyesi…).</div>'}</div>
     <div class="meta" style="margin:8px 2px 0">${P.golge?esc(P.golge):'Bot onaylanan kırılımlarda işlem açıyor.'} Kanalların verdiği seviyeler de aynı onayla ölçülür.</div>`}
 $('kirSeg').addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(!b)return;$('kirYet').value=b.dataset.v;$('kirYet').dataset.dirty=1;for(const x of $('kirSeg').children)x.classList.toggle('on',x===b)});
 
