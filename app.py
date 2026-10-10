@@ -1837,7 +1837,8 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
         html = (f"👀 <b>PLAN · {tags}</b>\n🎯 {_h(txt)}" + seviye_satiri(lines) + rr_satiri(lines, 1 if tone != "sat" else -1)
                 + (f"\n<i>{_h(sub)}</i>" if sub and not lines.get("stop") else ""))
         tg.send(html, chart, sym=sym1, quiet=True, konu="plan")
-    elif k == "haber" and tone in ("iyi", "kötü") and ex.get("watched"):
+    elif k == "haber" and tone in ("iyi", "kötü") and ex.get("watched") and not toplu_haber(ex.get("en") or txt) \
+            and (cal.session(time.time()) != "closed" or onemli_haber(ex.get("en") or txt)):
         acik = next((p for p in bot.open_positions() if p["sym"] in it["sym"]), None)
         html = (f"📰 <b>{tags} · {'OLUMLU' if tone == 'iyi' else 'OLUMSUZ'} HABER</b>"
                 + (" · 💼 açık pozisyon var" if acik else "") + f"\n{_h(txt)}"
@@ -1849,7 +1850,8 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
             tg.send(f"🚨 <b>DİKKAT · #{_h(acik['sym'])} açık pozisyonda OLUMSUZ haber</b>\n{_h(txt)}\n"
                     f"🛑 Stop {fp_(acik['stop'])} · bot stopu takip ediyor", sym=acik["sym"], reply=f"p:{acik['id']}",
                     haber=ex.get("en") or txt, konu="bot")
-    elif k == "tara" and PUSH_PREF.get("tg_kosan", 1) and (ex.get("news") or (ex.get("pct") or 0) >= 30):
+    elif k == "tara" and PUSH_PREF.get("tg_kosan", 1) and (ex.get("news") or (ex.get("pct") or 0) >= 30) \
+            and kosan_tg_izin(s0, ex):
         html = (f"🚀 <b>KOŞAN · {tags} {ex.get('pct') or 0:+.0f}%</b>\n{_h(txt.split(': ', 1)[-1] if '(' in txt else '')}"
                 + (f"\n📰 {_h(sub)}" if sub and sub != "Haber bulunamadı" else "")
                 + (f'\n<a href="{_h(ex["url"])}">Habere git →</a>' if ex.get("url") else ""))
@@ -2386,13 +2388,15 @@ def kosan_eklendi(new):
         if not info:
             continue
         n = info.get("news") or {}
+        if toplu_haber(n.get("headline")):
+            n = {}                               # "12 hisse hareket ediyor" listesi: hisseye özel haber değil
         src = {"haber": "Haber düştü, fiyat tepki verdi", "seans dışı": "Seans dışı hareket",
                "öncesi seans": "Açılış öncesi yükselen", "sonrası seans": "Kapanış sonrası yükselen"}.get(info.get("src"), "")
         feed_add("tara", r, f"Koşan hisseler listesine girdi: {info.get('pct') or 0:+.0f}%" + (f" ({src})" if src else ""),
                  sub=n.get("headline", "Haber bulunamadı")[:140], tone="iyi" if n else "nötr",
                  key=f"r:{r}:{datetime.now(ET).date()}",
                  extra={"news": bool(n) and info.get("news_kind") != "kötü", "pct": info.get("pct") or 0,
-                        "url": n.get("url", "")})
+                        "url": n.get("url", ""), "onemli": 1 if onemli_haber(n.get("headline"), n.get("t")) else 0})
     engine.runners = scanner.runners
     for r in scanner.runners:
         ensure_sym(r)
@@ -5026,6 +5030,46 @@ def denetci_tg():
     return "\n".join(out)
 
 
+# ---- piyasa kapalıyken (hafta sonu, tatil, gece) Telegram'a sadece gerçekten önemli haber / koşan gider
+_TOPLU_HABER = re.compile(r"\b\d+\s+[\w\s&,.-]{0,40}stocks?\s+(are\s+)?moving|stocks moving in|mid-?day movers|"
+                          r"market movers|top (gainers|losers)|biggest (gainers|losers|movers)|stocks to watch|"
+                          r"movers (in|for|of)\b|(pre-?market|after-?hours|after-market) movers", re.I)
+_ONEMLI_HABER = ("fda approv", "fda clear", "to be acquired", "acquisition", "acquire", "merger", "buyout", "tender offer",
+                 "take private", "bankruptcy", "chapter 11", "delist", "reverse split", "reverse stock split", "offering",
+                 "topline", "phase 3", "trading halt", "sec charges", "fraud")
+KOSAN_TG = {}                # sym -> son Telegram duyurusu (yedekte; yeniden başlamada tekrar gitmesin)
+KOSAN_TG_ARA = 18 * 3600     # aynı hisse 18 saatte bir kez "koşan" olarak duyurulur
+
+
+def toplu_haber(h):
+    """'12 Industrials Stocks Moving In Friday's Session' gibi liste haberleri: hisseye özel katalizör değil."""
+    return bool(h and _TOPLU_HABER.search(h))
+
+
+def onemli_haber(h, t_iso=None, saat=12):
+    """Piyasa kapalıyken de duyurulacak kadar önemli mi: FDA, satın alma, iflas, ihraç… ve son 12 saatte."""
+    if not h or toplu_haber(h):
+        return False
+    hl = h.lower()
+    if not any(w in hl for w in _ONEMLI_HABER):
+        return False
+    return not t_iso or time.time() - _iso_epoch(t_iso) <= saat * 3600
+
+
+def kosan_tg_izin(sym, ex):
+    now = time.time()
+    if now - KOSAN_TG.get(sym, 0) < KOSAN_TG_ARA:
+        return False
+    if cal.session(now) == "closed" and not ex.get("onemli"):
+        return False                             # hafta sonu / gece: önemli haber yoksa duyurma
+    KOSAN_TG[sym] = now
+    for k_ in [k_ for k_, v_ in KOSAN_TG.items() if now - v_ > 3 * 86400]:
+        KOSAN_TG.pop(k_, None)
+    backup.data["kosan_tg"] = dict(KOSAN_TG)
+    backup.dirty = True
+    return True
+
+
 def tr_or(h):
     """Haber başlığının Türkçesi (çevrildiyse), yoksa kendisi."""
     if not h:
@@ -6498,6 +6542,8 @@ async def lifespan(app):
         if LISTE.get("gun") == datetime.now(ET).date().isoformat():
             for x in LISTE.get("liste") or []:
                 PLAN.liste_ekle(x["sym"], x["giris"], None, x["hedefler"], x.get("kat") or "liste", x.get("t"))
+    if isinstance(backup.data.get("kosan_tg"), dict):
+        KOSAN_TG.update({k: v for k, v in backup.data["kosan_tg"].items() if isinstance(v, (int, float))})
     if isinstance(backup.data.get("plan_gecmis"), list) and not PLAN.gecmis:
         PLAN.gecmis[:] = [p for p in backup.data["plan_gecmis"] if isinstance(p, dict) and p.get("sym")][-300:]
     if isinstance(backup.data.get("kademe"), dict):
