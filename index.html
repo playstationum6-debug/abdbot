@@ -9,6 +9,12 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ABD·BOT">
 <title>ABD·BOT</title>
+<meta property="og:type" content="website"><meta property="og:site_name" content="$ABDBOT">
+<meta property="og:title" content="$ABDBOT · Kırılımı bot yakalasın">
+<meta property="og:description" content="ABD borsasında kırılım seviyelerini önceden çizen, hacimle onaylayan ve sonuçlarını açıkça paylaşan yapay zekâ destekli bot. Paper trade · yatırım tavsiyesi değildir.">
+<meta property="og:image" content="__SITE__/og.jpg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:url" content="__SITE__/"><meta name="twitter:card" content="summary_large_image">
+<meta name="description" content="ABD borsasında kırılım seviyelerini önceden çizen, hacimle onaylayan ve sonuçlarını açıkça paylaşan yapay zekâ destekli bot. Paper trade · yatırım tavsiyesi değildir.">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="icon" href="/ikon-192.png">
@@ -686,6 +692,24 @@ body:not(.ziy) .ziyy{display:none!important}
 .adm-not{background:rgba(245,192,78,.1);border:1px solid rgba(245,192,78,.35);color:var(--wa,#F5C04E);border-radius:12px;padding:10px 12px;font-size:12.5px;margin:0 0 12px}
 .dip{margin:18px 2px 6px;color:var(--mut);font-size:11px;text-align:center;line-height:1.5}
 .dip a{color:var(--mut);text-decoration:underline;cursor:pointer}
+/* ---------- v6: durum · kurs · istatistik ---------- */
+.durum{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut);margin:8px 2px 12px;font-weight:600}
+.durum i{width:8px;height:8px;border-radius:50%;background:var(--mut);flex:none}.durum i.on{background:var(--up);box-shadow:0 0 8px var(--up)}
+.tgk2{display:flex;gap:8px;margin:-4px 0 12px}.tgk2 a{flex:1;text-align:center;font:700 12.5px Inter;padding:9px 0;border-radius:12px;background:var(--card);border:1px solid var(--line);color:var(--tx);text-decoration:none}
+.ders{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
+.ders h3{margin:0 0 10px;font-size:19px}.ders p{color:var(--mut);font-size:14px;line-height:1.6;margin:0 0 10px}.ders p b{color:var(--tx)}
+.ders .sor{background:var(--bg2);border-radius:12px;padding:12px;margin-top:6px;font-size:13.5px}
+.ders .sor button{margin-top:8px;height:34px;padding:0 12px;border-radius:9px;font:700 12.5px Inter;background:var(--card);border:1px solid var(--line);color:var(--tx)}
+.ders .cev{display:none;margin-top:8px;color:var(--up);font-weight:700}.ders .cev.on{display:block}
+.ders .nv{display:flex;gap:8px;margin-top:14px}.ders .nv button{flex:1;height:42px;border-radius:12px;font:700 13.5px Inter;background:var(--bg2);border:1px solid var(--line);color:var(--tx)}
+.ders .nv button.p{background:var(--up);border-color:var(--up);color:#03140D}
+#krsSeg button.ok{color:var(--up)}
+.is-t{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:6px 12px;margin-bottom:12px}
+.is-t .r{display:grid;grid-template-columns:62px 1fr 44px 44px 44px;gap:8px;align-items:center;padding:7px 0;font-size:12.5px;font-weight:700;border-top:1px solid var(--line)}
+.is-t .r:first-child{border-top:0;color:var(--mut);font-weight:600;font-size:11px}
+.is-t .b{height:8px;border-radius:9px;background:var(--ac,#5B97FF)}
+.g2x{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.g2x .card b{display:block;margin-bottom:6px}.g2x .card div{display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0;color:var(--mut)}.g2x .card div span:last-child{color:var(--tx);font-weight:700}
 </style>
 </head>
 <body>
@@ -744,6 +768,7 @@ body:not(.ziy) .ziyy{display:none!important}
 <section class="tab on" id="t-ana">
   <div class="pv" data-go="portfoy" style="cursor:pointer"><div class="pvl">Portföy</div><div class="pvv" id="aVal">—</div>
     <div class="pvc"><span class="hapG" id="aCh">—</span><span class="meta" style="font-size:13px">bugün</span></div></div>
+  <div class="durum" id="aDur"></div>
   <div class="v4ser" id="aSer"></div>
   <div id="aTg"></div>
   <div id="aSup"></div>
@@ -974,6 +999,10 @@ body:not(.ziy) .ziyy{display:none!important}
     <div class="fld"><label>Yer açmak için en düşük güven<small>85 = sadece A+ sinyaller</small></label><input type="number" inputmode="numeric" data-k="yer_min_guven"></div>
     <div class="fld"><label>Ekonomik veri saatinde dur<small>Fed, enflasyon, istihdam gibi yüksek etkili veride −5/+15 dk yeni işlem açılmaz</small></label><button class="tg" data-k="eko_dur"></button></div>
     <div class="fld"><label>Telegram'a gidecek en düşük güven<small>85 = sadece A+, 75 = A ve üstü, 65 = B ve üstü</small></label><input type="number" inputmode="numeric" data-k="tg_min_guven"></div>
+    <div class="fld"><label>Telegram kalite süzgeci<small>Hedefi çok yakın sinyaller, büyük hisselerin scalp sinyalleri ve son 30 günü eksi kurgular kanala gitmez (sitede kalır)</small></label><button class="tg" data-k="tg_kalite"></button></div>
+    <div class="fld"><label>Kanala gidecek en küçük hedef (%)<small>Hedef girişe bundan yakınsa sinyal sadece sitede kalır. Örn. 2</small></label><input type="number" inputmode="decimal" step="0.5" data-k="tg_min_hedef"></div>
+    <div class="fld"><label>En dar stop (%)<small>Stop girişe bundan yakınsa bot girmez: masraf ve kayma stopu yer. Örn. 0,6</small></label><input type="number" inputmode="decimal" step="0.1" data-k="min_stop_pct"></div>
+    <div class="fld"><label>Eksi beklentili işleme girme<small>Öğrenme modeli bu koşullarda kurguyu zararda görüyorsa bot girmez</small></label><button class="tg" data-k="eksi_atla"></button></div>
     <div class="fld"><label>Aynı sektörde en fazla işlem<small>Örn. 2: üç yarı iletken hissesine birden girmez. 0 = sınır yok</small></label><input type="number" inputmode="numeric" data-k="sektor_max"></div>
     <div class="fld"><label>Günlük zarar limiti ($)<small>Dolunca bot o gün yeni işlem açmaz</small></label><input type="number" inputmode="decimal" data-k="daily_loss"></div>
     <div class="fld"><label>Güven eşiği, normal seans</label><input type="number" inputmode="numeric" data-k="min_conf"></div>
@@ -1140,6 +1169,23 @@ body:not(.ziy) .ziyy{display:none!important}
   <div id="tkL"></div>
 </section>
 
+<!-- MİNİ KURS -->
+<section class="tab" id="t-kurs">
+  <div class="lt">Mini kurs</div>
+  <div class="meta" style="margin:-4px 2px 12px">Kırılım okumayı 5 kısa derste öğren. Telegram'da bota <b style="color:var(--tx)">/ders 1</b> yazarak da okuyabilirsin.</div>
+  <div class="v4seg" id="krsSeg"></div>
+  <div id="krsD"></div>
+</section>
+
+<!-- İSTATİSTİK (yönetici) -->
+<section class="tab" id="t-istatistik">
+  <div class="v4h"><div class="lt" style="margin:0">Ziyaretçiler</div><span class="meta" id="isCanli"></span></div>
+  <div class="meta" style="margin:-4px 2px 12px">Sadece yönetici görür. Tekil = o gün siteye ya da tanıtım sayfasına giren farklı kişi (yaklaşık).</div>
+  <div id="isOz"></div>
+  <div id="isGun"></div>
+  <div class="g2x" id="isTop"></div>
+</section>
+
 <!-- ŞEFFAF SİCİL -->
 <section class="tab" id="t-sicil">
   <div class="v4h"><div class="lt" style="margin:0">Şeffaf sicil</div><span class="meta" id="scIlk"></span></div>
@@ -1270,6 +1316,7 @@ body:not(.ziy) .ziyy{display:none!important}
   <button class="mitem" data-go="sicil"><svg><use href="#i-trophy"/></svg><span>Şeffaf sicil<small>Telegram'a giden her sinyal ve sonucu, gönderildiği saatle</small></span></button>
   <button class="mitem" data-go="arsiv"><svg><use href="#i-feed"/></svg><span>Arşiv ve paylaş<small>Günlük "girseydin" özetleri ve tamamlanan kademeler</small></span></button>
   <button class="mitem" data-go="araclar"><svg><use href="#i-grid"/></svg><span>Araçlar<small>Lot hesaplayıcı, takip listem, Telegram fiyat alarmı</small></span></button>
+  <button class="mitem" data-go="kurs"><svg><use href="#i-learn"/></svg><span>Mini kurs<small>Kırılım okumayı 5 kısa derste öğren</small></span></button>
   <button class="mitem" data-go="tara"><svg><use href="#i-compass"/></svg><span>Keşfet<small>Koşan hisseler, tarayıcı, sinyal listesi</small></span></button>
   <button class="mitem" data-go="portfoy"><svg><use href="#i-grid"/></svg><span>Portföy<small>Toplam değer, nakit, varlık dağılımı, günlük performans</small></span></button>
   <button class="mitem" data-go="haber"><svg><use href="#i-news"/></svg><span>Haberler<small>Hisse, ekonomi ve teknoloji haberleri, olumlu/olumsuz etiketli</small></span></button>
@@ -1283,6 +1330,7 @@ body:not(.ziy) .ziyy{display:none!important}
   <button class="mitem" data-go="takvim"><svg><use href="#i-gear"/></svg><span>Ekonomik takvim<small>Fed, enflasyon, istihdam verileri ve saatleri</small></span></button>
   <button class="mitem" data-go="ogren"><svg><use href="#i-learn"/></svg><span>Öğrenme<small>Hangi kurgu ve koşul işe yarıyor</small></span></button>
   <button class="mitem" data-go="rehber"><svg><use href="#i-learn"/></svg><span>Nasıl çalışır<small>R, VWAP, RSI, formasyonlar ve botun kuralları, sade Türkçe</small></span></button>
+  <button class="mitem adm" data-go="istatistik"><svg><use href="#i-trend"/></svg><span>Ziyaretçiler<small>Kaç kişi girdi, nereden geldi, neye baktı (sadece yönetici)</small></span></button>
   <button class="mitem" data-go="ayar"><svg><use href="#i-gear"/></svg><span>Ayarlar ve bildirimler<small>Sermaye, risk, eşikler, telefon bildirimleri</small></span></button>
   <button class="mitem" data-go="yasal"><svg><use href="#i-empty"/></svg><span>Yasal uyarı ve koşullar<small>Paper trade · yatırım tavsiyesi değildir</small></span></button>
   <button class="mitem" data-go="iletisim"><svg><use href="#i-news"/></svg><span>Geri bildirim<small>Hata, öneri, istek: doğrudan yöneticiye</small></span></button>
@@ -2804,6 +2852,66 @@ async function loadGeri(){try{const r=await fetch('/api/geri',{credentials:'same
   if(ios){$('pwaT').innerHTML='Safari\'de <b>Paylaş ⬆</b> → <b>Ana Ekrana Ekle</b>';$('pwaGo').style.display='none';goster()}
   $('pwaGo').onclick=async()=>{if(ev){ev.prompt();try{await ev.userChoice}catch(e){}ev=null}$('pwa').classList.remove('on')};
   $('pwaX').onclick=()=>{ls('pwaX','1');$('pwa').classList.remove('on')}})();
+</script>
+<script>
+// ================= v6: durum satırı · kurs · istatistik · sayaç · haftalık arşiv =================
+let GRUPL='',DURUM=null,DERS=[];
+const _rol=rolAyarla;
+rolAyarla=function(m){GRUPL=m.grup_link||'';DURUM=m.durum||null;DERS=m.dersler||DERS;_rol(m);durumYaz();kursMenu();
+  try{if(ROL!=='admin'&&!sessionStorage.getItem('kay')&&ws&&ws.readyState===1){const q=new URLSearchParams(location.search).get('k');
+    let r='doğrudan';try{if(document.referrer)r=new URL(document.referrer).hostname.replace(/^www\./,'')}catch(e){}
+    ws.send(JSON.stringify({gor:'ana',kaynak:q||r}));sessionStorage.setItem('kay','1')}}catch(e){}};
+const _tgk=tgKart;
+tgKart=function(){_tgk();const el=$('aTg');if(el&&GRUPL)el.insertAdjacentHTML('beforeend',`<div class="tgk2"><a href="${esc(GRUPL)}" target="_blank" rel="noopener">💬 Sohbet grubu</a><a data-go="kurs">🎓 Mini kurs</a><a data-go="sicil">📜 Şeffaf sicil</a></div>`)};
+function durumYaz(){const el=$('aDur');if(!el)return;const D=DURUM||{};
+  const son=Math.max(D.son_sinyal||0,...(sigList||[]).slice(0,5).map(s=>s.created||s.t||0));
+  const ses={pre:'öncesi seans',regular:'piyasa açık',post:'sonrası seans',closed:'piyasa kapalı'}[(status&&status.ses)||'']||D.seans||'';
+  const ne=t=>{const d=Math.max(0,Math.round(nowS()-t));return d<90?'az önce':d<3600?Math.round(d/60)+' dk önce':d<86400?Math.round(d/3600)+' sa önce':Math.round(d/86400)+' gün önce'};
+  const on=D.calisiyor!==false&&botD?!!botD.active:D.calisiyor!==false;
+  el.innerHTML=`<i class="${on?'on':''}"></i><span>${on?'Bot çalışıyor':'Bot duraklatıldı'}${son?' · son sinyal '+ne(son):''}${ses?' · '+esc(ses):''}</span>`}
+setInterval(durumYaz,10000);
+// sekmeler + sayaç
+TABS.push('kurs','istatistik');Object.assign(NAVOF,{kurs:'ana',istatistik:'ana'});
+const _st2=showTab;
+showTab=function(t){if(t==='istatistik'&&ROL!=='admin')t='ana';_st2(t);
+  try{if(ROL!=='admin'&&ws&&ws.readyState===1&&t!=='daha')ws.send(JSON.stringify({gor:t}))}catch(e){}
+  if(t==='kurs')renderKurs();if(t==='istatistik')loadIst();if(t==='ana')durumYaz()};
+for(const id of ['t-kurs','t-istatistik'])$(id).addEventListener('click',e=>{const g=e.target.closest('[data-go]');if(g)showTab(g.dataset.go)});
+$('aTg').addEventListener('click',e=>{const g=e.target.closest('[data-go]');if(g){e.preventDefault();showTab(g.dataset.go)}});
+// 🎓 kurs
+let krs=+(ls('krs')||0);
+function kursMenu(){const s=$('krsSeg');if(!s||!DERS.length)return;const ok=JSON.parse(ls('krsOk')||'[]');
+  s.innerHTML=DERS.map((d,i)=>`<button data-i="${i}" class="${i===krs?'on':''} ${ok.includes(i)?'ok':''}">${ok.includes(i)?'✓':i+1}</button>`).join('')}
+function renderKurs(){kursMenu();const d=DERS[krs];if(!d){$('krsD').innerHTML=empty('Dersler yükleniyor…');return}
+  $('krsD').innerHTML=`<div class="ders"><div class="meta">Ders ${krs+1} / ${DERS.length}</div><h3>${esc(d.b)}</h3>${d.m.map(x=>`<p>${x}</p>`).join('')}
+    <div class="sor"><b>❓ Kendini dene:</b> ${esc(d.s)}<br><button id="krsC">Cevabı göster</button><div class="cev" id="krsCv">${esc(d.c)}</div></div>
+    <div class="nv"><button id="krsG" ${krs===0?'disabled style="opacity:.4"':''}>‹ Önceki</button><button class="p" id="krsI">${krs+1<DERS.length?'Sonraki ders ›':'Kursu bitir ✓'}</button></div></div>`}
+$('krsSeg').addEventListener('click',e=>{const b=e.target.closest('[data-i]');if(!b)return;krs=+b.dataset.i;ls('krs',krs);renderKurs();window.scrollTo({top:0})});
+$('krsD').addEventListener('click',e=>{if(e.target.id==='krsC'){$('krsCv').classList.add('on');return}
+  if(e.target.id==='krsG'&&krs>0){krs--;ls('krs',krs);renderKurs();window.scrollTo({top:0});return}
+  if(e.target.id==='krsI'){const ok=JSON.parse(ls('krsOk')||'[]');if(!ok.includes(krs))ok.push(krs);ls('krsOk',JSON.stringify(ok));
+    if(krs+1<DERS.length){krs++;ls('krs',krs);renderKurs();window.scrollTo({top:0})}else{renderKurs();toast('<b>Kurs bitti 🎉</b><br><span class="meta">Şimdi Planlar sayfasında gerçek seviyeleri izleyebilirsin.</span>','info')}}});
+// 📊 istatistik (yönetici)
+async function loadIst(){let J=null;try{const r=await fetch('/api/sayac',{credentials:'same-origin'});J=await r.json()}catch(e){}
+  if(!J||!J.gunler){$('isOz').innerHTML=empty('Alınamadı.');return}
+  const G=J.gunler,son7=G.slice(-7),top=k=>son7.reduce((a,g)=>a+(g[k]||0),0);
+  $('isCanli').textContent=`şu an ${J.canli} ziyaretçi bağlı`;
+  $('isOz').innerHTML=`<div class="sc-oz"><div><small>Bugün tekil</small><b>${(G[G.length-1]||{}).tekil||0}</b></div><div><small>7 gün tekil</small><b>${top('tekil')}</b></div><div><small>7 gün tanıtım</small><b>${top('tanitim')}</b></div></div>`;
+  const mx=Math.max(1,...G.slice(-14).map(g=>g.tekil||0));
+  $('isGun').innerHTML=`<div class="is-t"><div class="r"><span>Gün</span><span></span><span>Tekil</span><span>Site</span><span>Tanıtım</span></div>${G.slice(-14).reverse().map(g=>`<div class="r"><span>${new Date(g.gun+'T12:00:00').toLocaleDateString('tr-TR',{day:'numeric',month:'short'})}</span><div><div class="b" style="width:${Math.max(4,(g.tekil||0)/mx*100)}%"></div></div><span>${g.tekil||0}</span><span>${g.acilis||0}</span><span>${g.tanitim||0}</span></div>`).join('')}</div>`;
+  const topla=k=>{const o={};for(const g of son7)for(const [a,b] of Object.entries(g[k]||{}))o[a]=(o[a]||0)+b;return Object.entries(o).sort((a,b)=>b[1]-a[1]).slice(0,8)};
+  const AD={ana:'Bugün',plan:'Planlar',piyasa:'Grafik',bot:'Bot',ogren:'Karne',sicil:'Sicil',arsiv:'Arşiv',araclar:'Araçlar',kurs:'Kurs',yasal:'Yasal',rehber:'Nasıl çalışır'};
+  $('isTop').innerHTML=`<div class="card"><b>En çok bakılan</b>${topla('sayfa').map(([a,b])=>`<div><span>${esc(AD[a]||a)}</span><span>${b}</span></div>`).join('')||'<div>—</div>'}</div>
+    <div class="card"><b>Nereden geldiler</b>${topla('kaynak').map(([a,b])=>`<div><span>${esc(a)}</span><span>${b}</span></div>`).join('')||'<div>—</div>'}</div>`}
+// 📅 arşiv: haftalık
+(function(){const s=$('arSeg');s.insertAdjacentHTML('beforeend','<button data-k="h">📅 Haftalık</button>');
+  const _ra=renderArsiv;renderArsiv=function(){if(arK!=='h'||!AR)return _ra();const H=AR.hafta||[];
+    $('arL').innerHTML=H.length?H.map(h=>`<div class="ark"><div class="h"><b>${esc(h.aralik)}</b><span class="meta">${h.paylasilan} sinyal · ${h.n} sonuç</span></div>
+      <div class="meta">Kazanan ${h.wr==null?'—':'%'+h.wr} · işlem başı ${h.avg==null?'—':fPc(h.avg)}</div>
+      <div class="bt" style="margin-top:10px"><button data-img="/kart/hafta/${esc(h.anahtar)}.png" data-ad="hafta-${esc(h.anahtar)}.png" data-t="Haftalık rapor · ${esc(h.aralik)}">Resmi gör</button><button class="p" data-pay="/kart/hafta/${esc(h.anahtar)}.png" data-ad="hafta-${esc(h.anahtar)}.png">Paylaş</button></div></div>`).join('')
+      :empty('Haftalık raporlar her cuma kapanıştan sonra buraya eklenir.')}})();
+// adres çubuğundan sekme: /#sicil, /#kurs …
+setTimeout(()=>{const h=(location.hash||'').slice(1);if(h&&$('t-'+h))showTab(h)},300);
 </script>
 </body>
 </html>

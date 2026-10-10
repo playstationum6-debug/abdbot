@@ -296,6 +296,18 @@ class Bot:
                 v, vwhy = False, ""
             if v:
                 return skip(vwhy)
+        # Düşük kazanç düzeltmeleri: çok dar stop (masraf + kayma stopu yer) ve modelin eksi gördüğü işlem
+        stop_pct = abs(sig["e"] - sig["s"]) / sig["e"] * 100 if sig.get("e") else 0
+        min_stop = float(self.cfg.get("min_stop_pct", 0.6) or 0)
+        if min_stop and stop_pct < min_stop and not sig.get("super"):
+            return skip(f"stop çok dar (%{stop_pct:.2f} < %{min_stop:g}): masraf ve kayma bu işlemi yer")
+        if self.cfg.get("eksi_atla", 1) and not sig.get("super") and sig.get("setup") != "kirilim" and not onayli:
+            try:
+                ev_ = self.learner.predict(sig["setup"], ses, sig.get("f"))[0]
+            except Exception:
+                ev_ = None
+            if ev_ is not None and ev_ < -0.05:
+                return skip(f"model beklentisi eksi ({ev_:+.2f}R): bu koşullarda bu kurgu zarar ettiriyor")
         n, e = self.learner.group(sig["setup"], ses)
         # Trader gibi: lotu modele ve geçmişe göre ayarla
         try:

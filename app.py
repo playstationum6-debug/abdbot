@@ -61,6 +61,7 @@ import ogrenme
 import sinyal
 import yz as yzmod
 import plan as planmod
+import tanitim
 import tarayici
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -89,6 +90,7 @@ SITE_USER = os.getenv("SITE_USER", "admin")
 SITE_PASSWORD = os.getenv("SITE_PASSWORD", "")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")   # yönetici: ayarlar, testler, yapay zekâ sorguları (ziyaretçi salt okur)
 TG_LINK = os.getenv("TG_LINK", "")                 # sitedeki "Telegram'a katıl" bağlantısı (ör. https://t.me/kanaladi)
+TG_GRUP_LINK = os.getenv("TG_GRUP_LINK", "")       # kanala bağlı sohbet grubu (isteğe bağlı)
 MAX_ZIYARETCI = int(os.getenv("MAX_ZIYARETCI", "80"))   # aynı anda en fazla ziyaretçi bağlantısı (bot yavaşlamasın)
 GH_TOKEN = os.getenv("GH_TOKEN", "")
 GH_REPO = os.getenv("GH_REPO", "")            # ör. kullaniciadi/abdbot-veri
@@ -122,6 +124,10 @@ BOT_CFG = {
     "kesici": 1,                                              # kurgu kesici: 1 zayıf kurguları kendiliğinden gölgeye alır
     "cikis_kural": 0,                                         # çıkış: 0 otomatik (laboratuvarın en iyisi) · 1 A · 2 B · 3 C · 4 D
     "liste_oncelik": 1,                                       # sabah listesi: 1 plan motoru önce listedeki hisselere bakar
+    "min_stop_pct": 0.6,                                      # bot: stop girişe bundan yakınsa girmez (masraf + kayma stopu yer)
+    "eksi_atla": 1,                                           # bot: öğrenme modeli işlemi eksi görüyorsa girmez
+    "tg_kalite": 1,                                           # Telegram'a sadece iş gören sinyaller (küçük hedef / büyük hisse scalp / eksi kurgu gitmez)
+    "tg_min_hedef": 2.0,                                      # Telegram'a gidecek sinyalde hedef en az % kaç uzakta olmalı
 }
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
@@ -1329,7 +1335,8 @@ AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd"
             "yarim_kapat": (int, 0, 1), "yarim_r": (float, 0.5, 3), "kalan_r": (float, 1, 8),
             "tg_min_guven": (int, 0, 100), "yer_ac": (int, 0, 1), "yer_min_guven": (int, 50, 100),
             "eko_dur": (int, 0, 1), "yz_yetki": (int, 0, 2), "kirilim_yetki": (int, 0, 2),
-            "kesici": (int, 0, 1), "cikis_kural": (int, 0, 4), "liste_oncelik": (int, 0, 1)}
+            "kesici": (int, 0, 1), "cikis_kural": (int, 0, 4), "liste_oncelik": (int, 0, 1),
+            "min_stop_pct": (float, 0, 5), "eksi_atla": (int, 0, 1), "tg_kalite": (int, 0, 1), "tg_min_hedef": (float, 0, 20)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1,
              "tg_kosan": 1, "tg_tablo": 1, "tg_uyari": 1,
@@ -1811,8 +1818,8 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
     if s0 and k in ("sinyal", "plan"):
         kk = (k, s0)
         tekrar = time.time() - _TG_SON.get(kk, 0) < (600 if k == "sinyal" else 900)
-    if k == "sinyal" and (ex.get("golge") or sustur_mu(s0)):
-        pass                                     # kurgu gölgede / kapalı: sinyal sadece sitede, Telegram'a gitmez
+    if k == "sinyal" and (ex.get("golge") or sustur_mu(s0) or ex.get("tg_kalite")):
+        pass                                     # kurgu gölgede / kapalı / kalite süzgeci: sinyal sadece sitede, Telegram'a gitmez
     elif k == "sinyal" and ex.get("super") and PUSH_PREF.get("tg_super", 1) and tg.ok:
         _TG_SON[("sinyal", s0)] = time.time()
         sig_ = engine.by_id.get(ex.get("sid")) or {}
@@ -1900,6 +1907,56 @@ def rr_satiri(lines, d=1):
     return (f"\n⚖️ R/Ö <b>1:{rr:.1f}</b> · 📈 {d * (h / e - 1) * 100:+.1f}% · 📉 {-abs(e / s_ - 1) * 100:.1f}%")
 
 
+# ---- Telegram kalite süzgeci: kanala sadece iş gören sinyaller (kalanlar sitede ve gölgede ölçülür)
+TG_SCALP = {"itki", "vwap_sek", "fib", "fvg", "poc", "uz_seviye", "uz_kirilim", "uz_vwap"}
+TG_SICIL_N = 20
+_KSP = {"t": 0.0, "d": {}}
+
+
+def kurgu_sicil_pct(gun=30):
+    """Kurgu → (sonuç sayısı, işlem başı ortalama %) son 30 gün, canlı sinyaller (5 dk önbellek)."""
+    if time.time() - _KSP["t"] < 300 and _KSP["d"]:
+        return _KSP["d"]
+    cut = (datetime.now(ET).date() - timedelta(days=gun)).isoformat()
+    by = {}
+    for x in engine.signals:
+        if (x.get("day") or "") >= cut and x.get("st") in ("hedef", "stop", "süre") and x.get("r") is not None:
+            v = sig_yuzde(x)
+            if v is not None:
+                by.setdefault(x["setup"], []).append(v)
+    _KSP.update(t=time.time(), d={k: (len(v), sum(v) / len(v)) for k, v in by.items()})
+    return _KSP["d"]
+
+
+def tg_kalite(sig):
+    """None: Telegram'a gidebilir. Değilse nedeni (sinyal sitede kalır, sicile girmez)."""
+    if not BOT_CFG.get("tg_kalite", 1) or sig.get("super"):
+        return None
+    e, h = sig.get("e"), sig.get("h")
+    mh = float(BOT_CFG.get("tg_min_hedef", 2.0) or 0)
+    if e and h and mh and abs(h / e - 1) * 100 < mh:
+        return f"hedef çok yakın (%{abs(h / e - 1) * 100:.1f} < %{mh:g})"
+    buyuk = sig["sym"] not in scanner.runners and not sig.get("runner")
+    if buyuk and sig["setup"] in TG_SCALP:
+        return "büyük hissede scalp sinyali"
+    if sig["setup"] in (BOT_CFG.get("zorla") or []):
+        return None
+    n, avg = kurgu_sicil_pct().get(sig["setup"], (0, None))
+    if n >= TG_SICIL_N and avg is not None and avg < 0:
+        return f"kurgunun son 30 gün sonucu eksi ({avg:+.2f}%, {n} sinyal)"
+    return None
+
+
+def tg_kalite_kaydet(sig):
+    try:
+        n_ = tg_kalite(sig)
+    except Exception:
+        n_ = None
+    if n_:
+        sig["tg_yok"] = n_
+    return n_
+
+
 def feed_signal(sig):
     d = "AL" if sig["dir"] > 0 else "SAT"
     ad = sinyal.SETUP_AD.get(sig["setup"], sig["setup"])
@@ -1910,6 +1967,7 @@ def feed_signal(sig):
                     "tg_html": sinyal_tg(sig, d, ad), "tg_durum": "⏳ Takipte", "kart": kart_bilgi(sig, ad),
                     "setup": sig["setup"], "sig_t": sig["t"], "super": 1 if sig.get("super") else 0, "sid": sig["id"],
                     "golge": 1 if (kesici_golge(sig["setup"]) or sig["setup"] in (BOT_CFG.get("kapali") or [])) else 0,
+                    "tg_kalite": tg_kalite_kaydet(sig),
                     **({"tgr": f"k:{sig['plan']}"} if sig.get("plan") else {}),
                     "tg_haber": ((scanner.runners.get(sig["sym"]) or {}).get("news") or {}).get("headline")})
 
@@ -2946,6 +3004,19 @@ def sabah_listesi():
 FIRSAT_GUN = [None]
 
 
+async def uyanik_loop():
+    """Ücretsiz Render 15 dk istek gelmezse uyur: 10 dk'da bir kendi /saglik adresini çağır (UYANIK=0 kapatır)."""
+    if os.getenv("UYANIK", "1") == "0" or not SITE_URL:
+        return
+    async with httpx.AsyncClient(timeout=20) as c:
+        while True:
+            await asyncio.sleep(600)
+            try:
+                await c.get(SITE_URL + "/saglik")
+            except Exception:
+                pass
+
+
 async def rapor_loop():
     """Seans geçişlerinde: öncesi seans açılışı → sabah listesi (15 dk sonra), normal seans kapanışı → gün sonu raporu."""
     last = cal.session(time.time())
@@ -2954,6 +3025,15 @@ async def rapor_loop():
         await asyncio.sleep(30)
         now = time.time()
         ses = cal.session(now)
+        try:
+            tn = datetime.now(TR)
+            if tg.ok and PUSH_PREF.get("tg_anket", 1) and tn.weekday() == 6 and tn.hour == 20 \
+                    and backup.data.get("anket_hafta") != hafta_anahtar():
+                backup.data["anket_hafta"] = hafta_anahtar()
+                backup.dirty = True
+                await anket_gonder()
+        except Exception as e:
+            log.warning("Anket gönderilemedi: %s", e)
         if last == "closed" and ses == "pre":
             pre_at = now + 15 * 60          # tarayıcı dolsun
         pl = cal.plan() or {}
@@ -3025,6 +3105,10 @@ async def rapor_loop():
             except Exception as e:
                 log.warning("Yapay zekâ dersi hatası: %s", e)
             if datetime.now(ET).weekday() == 4 and tg.ok and PUSH_PREF["tg_rapor"]:   # cuma: haftalık rapor
+                try:
+                    haftalik_gonder()
+                except Exception as e:
+                    log.warning("Haftalık kart hatası: %s", e)
                 try:
                     w_txt, w_png = tg_karne(gun=7)
                     tg.send(w_txt, {"png": w_png} if w_png else None, konu="rapor")
@@ -3496,6 +3580,10 @@ def arsiv_kart(tur, anahtar):
             bugun = anahtar == datetime.now(ET).date().isoformat()
             png = gorsel.girseydin_kart(dict(G, gun_ad=_gun_ad(anahtar),
                                              baslik=("Bugün bu" if bugun else "Bu") + " kırılımlardan girseydin"))
+    elif tur == "hafta":
+        H = (backup.data.get("hafta_arsiv") or {}).get(anahtar)
+        if H:
+            png = gorsel.haftalik_kart(H)
     elif tur == "kademe":
         a = next((x for x in reversed(backup.data.get("kademe_arsiv") or []) if x.get("sid") == anahtar), None)
         if a:
@@ -3541,6 +3629,7 @@ def geri_bildirim_ekle(metin, iletisim, ip):
 HALK_YARDIM = ("🤖 <b>$ABDBOT</b> · ABD borsası kırılım takibi (paper trade)\n\n"
                "⏰ <b>Fiyat alarmı</b>\n/alarm WFF 12,50 — fiyat 12,50'ye gelince sana özelden yazarım\n"
                "/alarmlar — kurduğun alarmlar\n/alarmsil WFF — o hissedeki alarmlarını sil\n\n"
+               "🎓 <b>Mini kurs</b>\n/ders 1 — kırılım okumayı 5 kısa derste öğren\n\n"
                "En fazla 5 alarm kurabilirsin; sadece botun takip ettiği hisselerde çalışır. Yatırım tavsiyesi değildir.")
 _HALK_SAY = {}
 
@@ -3564,6 +3653,11 @@ async def tg_halk_komut(text, chat):
             cmd = "alarm"
     if cmd in ("start", "yardim", "yardım", "help"):
         send(HALK_YARDIM)
+    elif cmd in ("ders", "kurs"):
+        try:
+            send(ders_tg(int(arg[0]) - 1 if arg else 0))
+        except ValueError:
+            send(ders_tg(-1))
     elif cmd == "alarm":
         if len(arg) < 2:
             send("Kullanım: /alarm WFF 12,50")
@@ -3596,6 +3690,163 @@ async def tg_halk_komut(text, chat):
         tg.alarms = [a for a in tg.alarms if not (str(a.get("chat")) == str(chat) and (not sym or a["sym"] == sym))]
         tg.persist()
         send(f"🗑 {once - len(tg.alarms)} alarm silindi.")
+
+
+# ----------------------------------------------------------------- 📅 haftalık rapor kartı · 🗳 anket · 🎓 mini kurs
+def hafta_anahtar(t=None):
+    iso = datetime.fromtimestamp(t or time.time(), TR).isocalendar()
+    return f"{iso[0]}-H{iso[1]:02d}"
+
+
+def haftalik_hesap():
+    """Son 7 gün: Telegram'a giden sinyallerin gerçek sonucu (kazanan da kaybeden de)."""
+    now = time.time()
+    cut = now - 7 * 86400
+    pay, biten = 0, []
+    for sid, t in SICIL.items():
+        if t < cut:
+            continue
+        x = engine.by_id.get(sid)
+        if not x:
+            continue
+        pay += 1
+        if x.get("st") in ("hedef", "stop", "süre") and x.get("r") is not None:
+            v = sig_yuzde(x)
+            if v is not None:
+                biten.append({"sym": x["sym"], "pct": round(v, 2), "ad": sinyal.SETUP_AD.get(x.get("setup"), x.get("setup")), "t": t})
+    ps = [b["pct"] for b in biten]
+    kad = [a for a in (backup.data.get("kademe_arsiv") or []) if (a.get("t") or 0) >= cut]
+    gy = None
+    for g, G in (backup.data.get("girseydin_arsiv") or {}).items():
+        try:
+            if datetime.fromisoformat(g).replace(tzinfo=TR).timestamp() < cut - 86400:
+                continue
+        except Exception:
+            continue
+        for h in G.get("hisseler") or []:
+            if gy is None or h["en"] > gy["en"]:
+                gy = {"sym": h["sym"], "en": h["en"], "gun": g}
+    bas = datetime.fromtimestamp(cut + 3600, TR)
+    bit = datetime.fromtimestamp(now, TR)
+    return {"anahtar": hafta_anahtar(), "aralik": f"{bas.day} {_AY[bas.month - 1]} – {bit.day} {_AY[bit.month - 1]}",
+            "paylasilan": pay, "n": len(ps), "wr": round(100 * sum(1 for v in ps if v > 0) / len(ps)) if ps else None,
+            "avg": round(sum(ps) / len(ps), 2) if ps else None, "tot": round(sum(ps), 1) if ps else None,
+            "en_iyi": _hisse_tekil(sorted(biten, key=lambda b: -b["pct"]))[:3], "kademe": len(kad), "girseydin": gy}
+
+
+def _hisse_tekil(L):
+    gor, out = set(), []
+    for b in L:
+        if b["sym"] not in gor:
+            gor.add(b["sym"])
+            out.append(b)
+    return out
+
+
+def haftalik_tg(H):
+    out = [f"📅 <b>HAFTALIK RAPOR</b> · {H['aralik']}",
+           f"Telegram'da <b>{H['paylasilan']}</b> sinyal paylaşıldı · {H['n']} tanesi sonuçlandı"]
+    if H["n"]:
+        out.append(f"✅ Kazanan <b>%{H['wr']}</b> · işlem başı ortalama <b>{_p_(H['avg'], 2)}</b>")
+    if H["en_iyi"]:
+        out.append("🏆 Haftanın en iyileri: " + " · ".join(f"#{_h(b['sym'])} {_p_(b['pct'], 1)}" for b in H["en_iyi"]))
+    if H["kademe"]:
+        out.append(f"🏁 {H['kademe']} kez tüm kademeler tamamlandı")
+    if H["girseydin"]:
+        out.append(f"💡 En iyi girseydin: #{_h(H['girseydin']['sym'])} {fyk(H['girseydin']['en'])} (zirveye göre)")
+    out.append("<i>Kazanan da kaybeden de sayıldı · paper trade · yatırım tavsiyesi değildir</i>")
+    return "\n".join(out)
+
+
+def haftalik_gonder(chat=None):
+    H = haftalik_hesap()
+    if not H["paylasilan"] and not chat:
+        return False
+    A = backup.data.setdefault("hafta_arsiv", {})
+    A[H["anahtar"]] = H
+    for k_ in sorted(A)[:-26]:
+        A.pop(k_, None)
+    backup.dirty = True
+    _KART.pop(("hafta", H["anahtar"]), None)
+    ch = {"fn": lambda h=H: gorsel.haftalik_kart(h)} if gorsel else None
+    tg.send(haftalik_tg(H), ch, konu="rapor", chat=chat, quiet=True)
+    return True
+
+
+def anket_secenek():
+    """Geçen hafta Telegram'da en çok konuşulan hisseler (yoksa günün en çok yükselenleri)."""
+    cut = time.time() - 7 * 86400
+    say = {}
+    for sid, t in SICIL.items():
+        x = engine.by_id.get(sid)
+        if x and t >= cut:
+            say[x["sym"]] = say.get(x["sym"], 0) + 1
+    syms = [s_ for s_, _ in sorted(say.items(), key=lambda kv: -kv[1])][:4]
+    for g in (MARKET.get("gain") or []):
+        if len(syms) >= 4:
+            break
+        s_ = g.get("s") if isinstance(g, dict) else None
+        if s_ and s_ not in syms:
+            syms.append(s_)
+    for s_ in ("NVDA", "TSLA", "PLTR", "SOFI"):
+        if len(syms) >= 4:
+            break
+        if s_ not in syms:
+            syms.append(s_)
+    return syms[:4]
+
+
+async def anket_gonder(chat=None):
+    q = "Bu hafta hangi hisseyi birlikte izleyelim? 👀"
+    opts = [f"#{s_}" for s_ in anket_secenek()] + ["Başka (yorumlara yaz)"]
+    hedef = chat or TG_CHAT
+    js = await tg.api("sendPoll", chat_id=hedef, question=q, options=[{"text": o} for o in opts], is_anonymous=True)
+    if not js.get("ok"):
+        js = await tg.api("sendPoll", chat_id=hedef, question=q, options=opts, is_anonymous=True)
+    return bool(js.get("ok"))
+
+
+DERSLER = [
+    {"b": "Destek, direnç ve kırılım", "m": [
+        "Fiyat bir seviyeye birkaç kez gelip geri dönüyorsa orada satıcı bekliyor demektir: buna <b>direnç</b> denir. Alttan dönülen seviye ise <b>destek</b>.",
+        "<b>Kırılım</b>, fiyatın direncin üstünde mum kapatmasıdır. Mumun içinde iğne atıp geri düşmesi kırılım sayılmaz; kapanış önemlidir.",
+        "En güçlü seviyeler: günün tepesi, öncesi seansın tepesi, dünün tepesi ve 2,00 · 5,00 · 10,00 gibi tam sayılar. Bot planlarını bu seviyelere çizer.",
+        "Kırılan direnç çoğu zaman yeni destek olur. Fiyat bu seviyeye geri gelip tutunursa buna <b>retest</b> denir; ikinci giriş fırsatıdır."],
+     "s": "Fiyat 4,00'ü iğneyle geçip 3,95'te kapattı. Kırılım oldu mu?", "c": "Hayır. Kırılım için mumun seviyenin üstünde kapanması gerekir."},
+    {"b": "Hacim onayı ve sahte kırılım", "m": [
+        "Hacim, o dakikada el değiştiren hisse sayısıdır. Gerçek kırılımda alıcılar gelir: hacim son mumların ortalamasının en az 1,5 katı olur.",
+        "Mumun kapanışı da önemli: kırılım mumu tepesine yakın kapanmalı (üst %40). Uzun üst iğne satıcıların hâlâ orada olduğunu gösterir.",
+        "<b>Sahte kırılım</b>: fiyat seviyeyi geçer ama hemen sonraki mum tekrar altına kapanır. Bot bunu görünce planı kapatır ve Telegram'a '⚠️ sahte kırılım' yazar.",
+        "Küçük hisselerde haber yoksa kırılımlar daha sık sahte çıkar. Bu yüzden bot haberi ve hacmi birlikte arar."],
+     "s": "Seviye kırıldı ama hacim ortalamanın yarısı. Ne düşünmeli?", "c": "Onay zayıf; sahte kırılım riski yüksek. Bot bu durumda girmez."},
+    {"b": "Stop, risk ve lot: 1R kuralı", "m": [
+        "<b>Stop</b>, fikrinin yanlış çıktığı fiyattır. Girişten önce belli olmalı; sonradan aşağı çekilmez.",
+        "Giriş ile stop arasındaki mesafeye <b>1R</b> (bir birim risk) denir. Hedefler de bu birimle ölçülür: 2R hedef, riskin iki katı kâr demek.",
+        "Lot hesabı: Sermaye × risk yüzdesi ÷ stop mesafesi = adet. 1.000 $ sermaye, %1 risk, 1 $ stop mesafesi → 10 adet. Stop olursa kayıp 10 $ olur.",
+        "Sitede Araçlar → Risk / lot hesaplayıcı bunu senin için yapar."],
+     "s": "Giriş 5,00, stop 4,50, risk 20 $. Kaç adet?", "c": "Stop mesafesi 0,50 $ → 20 ÷ 0,50 = 40 adet."},
+    {"b": "Kademeli kâr: K1, K2, K3", "m": [
+        "Bot hedefi tek nokta yerine üç kademeye böler: <b>K1</b> = giriş + 1R, <b>K2</b> = + 2R, <b>K3</b> = + 3R.",
+        "K1 gelince pozisyonun yarısı satılır ve stop girişe çekilir: artık işlem zarar yazmaz. Kalan kısım için <b>iz süren stop</b> fiyatı arkadan takip eder.",
+        "Böylece küçük hareketlerde kâr cebe girer, büyük koşularda (WFF gibi) kalan kısım K3'e ve ötesine taşınır.",
+        "Üç kademe de gelince Telegram'a 🏁 'tüm kademeler tamam' kartı düşer. Stop önce geldiyse bu da kartta açıkça yazar."],
+     "s": "Giriş 10, stop 9. K2 kaç?", "c": "1R = 1 $ → K2 = 10 + 2 = 12."},
+    {"b": "Formasyonlar: kama, flama, çift dip", "m": [
+        "<b>Düşen kama</b>: fiyat düşüyor ama dipler gittikçe daha az düşüyor, çizgiler daralıyor. Üst çizgi hacimle kırılınca yükseliş beklenir; hedef kamanın başladığı tepe.",
+        "<b>Boğa flaması</b>: sert yükselişten (direk) sonra dar, hafif aşağı eğimli bir mola. Kanal yukarı kırılınca direk boyu kadar yükseliş beklenir.",
+        "<b>Çift dip</b>: fiyat aynı seviyeden iki kez döner; aradaki tepe (boyun) kırılınca yükseliş beklenir.",
+        "Formasyonlar rastgele hareketlerde de oluşur. Bot hangisinin gerçekten işe yaradığını Karne'de ölçer; tutmayanı kendisi susturur."],
+     "s": "Flamanın hedefi nasıl hesaplanır?", "c": "Kırılım noktasına direğin boyu eklenir."},
+]
+
+
+def ders_tg(i):
+    if not (0 <= i < len(DERSLER)):
+        return "Kullanım: /ders 1 … /ders " + str(len(DERSLER))
+    d = DERSLER[i]
+    return (f"🎓 <b>Ders {i + 1}/{len(DERSLER)} · {d['b']}</b>\n\n" + "\n\n".join("• " + m for m in d["m"])
+            + f"\n\n❓ <b>Kendini dene:</b> {d['s']}\n<tg-spoiler>{d['c']}</tg-spoiler>"
+            + (f"\n\nSonraki: /ders {i + 2}" if i + 1 < len(DERSLER) else "\n\nKurs bitti 🎉 · paper trade · yatırım tavsiyesi değildir"))
 
 
 def ogrenme_haftalik():
@@ -4935,7 +5186,7 @@ async def tg_analiz(sym):
     return "\n".join(out), png
 
 
-YARDIM = ("<b>Komutlar</b>\n/liste — ☀️ günün listesi ve durumu\n/girseydin — 💡 bugünkü kırılımlardan girseydin kaç % olurdu\n/kurgular — 🧭 kurgu kesici: hangi kurgu açık, hangisi gölgede\n/cikis — 🧪 çıkış laboratuvarı (4 çıkış kuralı karşılaştırması)\n/planlar — 📐 aktif kırılım planları (\"X kırılırsa giriş\")\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
+YARDIM = ("<b>Komutlar</b>\n/liste — ☀️ günün listesi ve durumu\n/girseydin — 💡 bugünkü kırılımlardan girseydin kaç % olurdu\n/hafta — 📅 haftalık rapor kartı\n/anket — 🗳 kanala \"bu hafta hangi hisse\" anketi\n/ders 1 — 🎓 mini kurs (5 ders)\n/kurgular — 🧭 kurgu kesici: hangi kurgu açık, hangisi gölgede\n/cikis — 🧪 çıkış laboratuvarı (4 çıkış kuralı karşılaştırması)\n/planlar — 📐 aktif kırılım planları (\"X kırılırsa giriş\")\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
           "/analiz QNME — 15 dk analiz ve plan (grafikli)\n/alarm QNME 0.90 — fiyat alarmı\n/alarmlar — kurulu alarmlar\n"
           "/alarmsil QNME — alarmı sil\n/yorum — yapay zekalı piyasa yorumu\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
           "/basla — yeni işlem açmaya devam\n/ogren — bot ne öğrendi (model karnesi)\n"
@@ -5058,6 +5309,16 @@ async def tg_komut(text, chat, thread=None):
         send(lab_tg())
     elif cmd in ("girseydin", "girsaydin", "girseydim"):
         girseydin_gonder(zorla=True, chat=chat)
+    elif cmd in ("hafta", "haftalik", "haftalık"):
+        haftalik_gonder(chat=chat)
+    elif cmd == "anket":
+        ok_ = await anket_gonder(None if not arg else chat)
+        send("🗳 Anket kanala gönderildi." if ok_ else "Anket gönderilemedi (botun kanalda anket yetkisi olmalı).")
+    elif cmd in ("ders", "kurs"):
+        try:
+            send(ders_tg(int(arg[0]) - 1 if arg else 0))
+        except ValueError:
+            send(ders_tg(-1))
     elif cmd in ("neden", "niye"):
         if not arg:
             send("Kullanım: /neden VIVK — bot bu hisseye neden girmedi / girdi")
@@ -6845,7 +7106,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop)]
+                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -6911,6 +7172,46 @@ def tg_link():
     return f"https://t.me/{c[1:]}" if c.startswith("@") else ""
 
 
+_SAYAC_T = {"gun": None, "set": set()}
+SES_TR = {"pre": "öncesi seans", "regular": "piyasa açık", "post": "sonrası seans", "closed": "piyasa kapalı"}
+
+
+def _anahtar(request):
+    ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "") or "?").split(",")[0].strip()
+    return hashlib.sha1(f"{ip}|{request.headers.get('user-agent', '')}|{date.today()}".encode()).hexdigest()[:12]
+
+
+def sayac(tur=None, anahtar=None, sayfa=None, kaynak=None):
+    """Ziyaretçi sayacı (sadece yönetici görür): günlük tekil kişi, açılış, tanıtım, sayfa ve kaynak."""
+    g = datetime.now(TR).date().isoformat()
+    S = backup.data.setdefault("sayac", {})
+    d = S.setdefault(g, {"tekil": 0, "acilis": 0, "tanitim": 0, "sayfa": {}, "kaynak": {}})
+    if _SAYAC_T["gun"] != g:
+        _SAYAC_T.update(gun=g, set=set())
+    if anahtar and anahtar not in _SAYAC_T["set"]:
+        _SAYAC_T["set"].add(anahtar)
+        d["tekil"] += 1
+    if tur in ("acilis", "tanitim"):
+        d[tur] += 1
+    for alan, v in (("sayfa", sayfa), ("kaynak", kaynak)):
+        if v:
+            v = re.sub(r"[^\w.\-]", "", str(v))[:30] or "?"
+            if v in d[alan] or len(d[alan]) < 40:
+                d[alan][v] = d[alan].get(v, 0) + 1
+    for k_ in sorted(S)[:-60]:
+        S.pop(k_, None)
+    backup.dirty = True
+
+
+def site_kok():
+    return SITE_URL
+
+
+def bot_durum_kisa():
+    son = max((x.get("created") or x.get("t") or 0 for x in engine.signals[-200:]), default=0)
+    return {"calisiyor": bool(bot.active), "seans": SES_TR.get(cal.session(time.time()), ""), "son_sinyal": son or None}
+
+
 def ask_login():
     return Response("Giriş gerekli", status_code=401)
 
@@ -6944,14 +7245,20 @@ fetch('/tg/webapp',{method:'POST',credentials:'same-origin',headers:{'Content-Ty
 
 def login_page(err=""):
     msg = f'<div class="err">{err}</div>' if err else ""
-    return HTMLResponse(LOGIN_HTML.replace("__ERR__", msg), headers={"Cache-Control": "no-store"})
+    return HTMLResponse(LOGIN_HTML.replace("__ERR__", msg).replace("</title>", "</title>" + tanitim.OG.replace("__SITE__", site_kok()), 1),
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/")
 async def index(request: Request):
     if not authorized(request):
         return login_page()
-    resp = HTMLResponse((BASE / "index.html").read_text(encoding="utf-8"),
+    if not is_admin(request):
+        try:
+            sayac("acilis", _anahtar(request))
+        except Exception:
+            pass
+    resp = HTMLResponse((BASE / "index.html").read_text(encoding="utf-8").replace("__SITE__", site_kok()),
                         headers={"Cache-Control": "no-store"})
     if SITE_PASSWORD:
         tgw = bool(request.cookies.get("tgw"))      # Telegram Web (iframe) içinde: çerez üçüncü taraf bağlamında da gitsin
@@ -7328,6 +7635,57 @@ async def push_test(request: Request):
     return JSONResponse({"ok": push.ok, "n": len(push.subs), "durum": push.status})
 
 
+@app.get("/og.jpg")
+async def og_resim():
+    f = BASE / "og.jpg"
+    if f.exists():
+        return Response(f.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+    return Response(ikon.ICON512 if isinstance(getattr(ikon, "ICON512", None), bytes) else b"", media_type="image/png")
+
+
+@app.get("/saglik")
+async def saglik():
+    return JSONResponse({"ok": 1, "t": int(time.time()), "bot": bool(bot.active)}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/tanitim")
+async def tanitim_sayfa(request: Request):
+    try:
+        ref = request.headers.get("referer", "")
+        kaynak = request.query_params.get("k") or (re.sub(r"^https?://(www\.)?", "", ref).split("/")[0] if ref else "doğrudan")
+        sayac("tanitim", _anahtar(request), kaynak=kaynak)
+    except Exception:
+        pass
+    return HTMLResponse(tanitim.sayfa(site_kok()), headers={"Cache-Control": "no-store"})
+
+
+_TAN = {"t": 0.0, "d": None}
+
+
+@app.get("/api/tanitim")
+async def api_tanitim():
+    """Tanıtım sayfasının herkese açık özeti (60 sn önbellek)."""
+    if _TAN["d"] is None or time.time() - _TAN["t"] > 60:
+        S = sicil_ozet(30)
+        son = [{k: x.get(k) for k in ("sym", "ad", "pct", "t")} for x in S["liste"] if x.get("pct") is not None][:8]
+        ka = list(reversed(backup.data.get("kademe_arsiv") or []))[:2]
+        ga = sorted((backup.data.get("girseydin_arsiv") or {}).keys())
+        _TAN.update(t=time.time(), d={"sicil": {"ozet": S["ozet"]}, "son": son,
+                                       "kademe": [{"sid": a["sid"], "sym": a["sym"]} for a in ka],
+                                       "girseydin": ga[-1] if ga else None, "durum": bot_durum_kisa(),
+                                       "tg_link": tg_link(), "grup_link": TG_GRUP_LINK})
+    return JSONResponse(_TAN["d"], headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/sayac")
+async def api_sayac(request: Request):
+    if not is_admin(request):
+        return sadece_admin()
+    S = backup.data.get("sayac") or {}
+    return JSONResponse({"gunler": [dict(v, gun=k) for k, v in sorted(S.items())][-30:],
+                         "canli": sum(1 for c_ in clients if not c_.admin)}, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/sicil")
 async def api_sicil(request: Request):
     if not authorized(request):
@@ -7347,15 +7705,14 @@ async def api_arsiv(request: Request):
     gs = [{k: v for k, v in g.items() if k != "hisseler"} | {"hisseler": [{k: v for k, v in h.items() if k != "seri"}
                                                                          for h in g.get("hisseler") or []]}
           for _, g in sorted(G.items(), reverse=True)]
-    return JSONResponse({"girseydin": gs, "kademe": list(reversed(backup.data.get("kademe_arsiv") or []))[:80]},
+    return JSONResponse({"girseydin": gs, "kademe": list(reversed(backup.data.get("kademe_arsiv") or []))[:80],
+                         "hafta": [v for _, v in sorted((backup.data.get("hafta_arsiv") or {}).items(), reverse=True)]},
                         headers={"Cache-Control": "no-store"})
 
 
 @app.get("/kart/{tur}/{anahtar}.png")
 async def arsiv_kart_png(tur: str, anahtar: str, request: Request):
-    if not authorized(request):
-        return ask_login()
-    if tur not in ("girseydin", "kademe") or not re.fullmatch(r"[\w.\-]{1,80}", anahtar) or not gorsel:
+    if tur not in ("girseydin", "kademe", "hafta") or not re.fullmatch(r"[\w.\-]{1,80}", anahtar) or not gorsel:
         return Response(status_code=404)
     try:
         png = await asyncio.to_thread(arsiv_kart, tur, anahtar)
@@ -7419,7 +7776,8 @@ async def ws_endpoint(ws: WebSocket):
     clients.add(cl)
     try:
         await cl.send({"type": "hello", "symbols": SYMBOLS, "iex": IEX_SYMBOLS, "rol": "admin" if adm else "ziyaretci",
-                       "tg_link": tg_link(), "bot_ad": tg.username or "", "admin_var": bool(ADMIN_PASSWORD or SITE_PASSWORD)})
+                       "tg_link": tg_link(), "bot_ad": tg.username or "", "admin_var": bool(ADMIN_PASSWORD or SITE_PASSWORD),
+                       "grup_link": TG_GRUP_LINK, "durum": bot_durum_kisa(), "dersler": DERSLER})
         await send_wl(cl, full=True)
         await send_sig(cl)
         await send_bot(cl)
@@ -7429,6 +7787,15 @@ async def ws_endpoint(ws: WebSocket):
         await cl.send({"type": "mkt", **MARKET})
         while True:
             msg = json.loads(await ws.receive_text())
+            if msg.get("gor") or msg.get("kaynak"):
+                if not cl.admin:
+                    k_ = ("gor", msg.get("gor"))
+                    if time.time() - cl.son_istek.get(k_, 0) > 30:
+                        cl.son_istek[k_] = time.time()
+                        sayac(None, sayfa=msg.get("gor"), kaynak=msg.get("kaynak") if not cl.son_istek.get("kay") else None)
+                        if msg.get("kaynak"):
+                            cl.son_istek["kay"] = 1
+                continue
             if msg.get("daily"):
                 dsym = str(msg["daily"]).upper()[:8]
                 if dsym in store.bars:

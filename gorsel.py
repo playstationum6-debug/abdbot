@@ -604,3 +604,61 @@ def girseydin_kart(d_):
     br = T("ABD·BOT · paper trade")
     d.text(((W - 44) * S - d.textlength(br, font=f(14)), (H - 40) * S), br, fill=DIM, font=f(14))
     return _png(img.resize((W, H), Image.LANCZOS))
+
+
+# ---------------------------------------------------------------- 📅 haftalık rapor kartı (kare: Telegram / Instagram / TikTok)
+def haftalik_kart(H):
+    """H: aralik, paylasilan, n, wr, avg, tot, en_iyi:[{sym,pct,ad}], kademe, girseydin{sym,en}"""
+    S = 2
+    W = Hh = 1080
+    img = Image.blend(Image.new("RGB", (W * S, Hh * S), BG), _parilti(W, Hh, S, ACC, (-80, -100, 300, 160), 0.3), 0.9)
+    d = ImageDraw.Draw(img, "RGBA")
+    f = lambda sz, w="r": F(sz * S, w)
+    x0 = 64 * S
+    d.text((x0, 58 * S), "$ABDBOT", fill=TXT, font=f(34, "xb"))
+    _pill(d, x0 + d.textlength("$ABDBOT", font=f(34, "xb")) + 18 * S, 62 * S, T("HAFTALIK RAPOR"), _mix(ACC, 0.25), ACC, f(16, "xb"),
+          px=12 * S, py=7 * S)
+    ar = T(H.get("aralik", ""))
+    d.text(((W - 64) * S - d.textlength(ar, font=f(20, "sb")), 66 * S), ar, fill=MUT, font=f(20, "sb"))
+    d.text((x0, 140 * S), T("Bu hafta"), fill=TXT, font=f(78, "xb"))
+    d.text((x0 + 4 * S, 238 * S), T("Telegram'a giden her sinyalin gerçek sonucu"), fill=MUT, font=f(22, "m"))
+    # 2x2 kutular
+    avg = H.get("avg")
+    kut = [("Paylaşılan sinyal", str(H.get("paylasilan") or 0), TXT), ("Sonuçlanan", str(H.get("n") or 0), TXT),
+           ("Kazanan", "—" if H.get("wr") is None else f"%{H['wr']}", TXT),
+           ("İşlem başı ort.", fpct(avg, 2) if avg is not None else "—", UP if (avg or 0) > 0 else DN if (avg or 0) < 0 else TXT)]
+    bw, bh, gap, y = (W - 128 - 20) / 2, 150, 20, 296
+    for i, (lab, val, col) in enumerate(kut):
+        bx = (64 + (i % 2) * (bw + gap)) * S
+        by = (y + (i // 2) * (bh + gap)) * S
+        d.rounded_rectangle([bx, by, bx + bw * S, by + bh * S], radius=26 * S, fill=PANEL + (235,), outline=GRID, width=S)
+        d.text((bx + 26 * S, by + 24 * S), T(lab), fill=MUT, font=f(20, "sb"))
+        d.text((bx + 24 * S, by + 58 * S), T(val), fill=col, font=f(58, "xb"))
+    # en iyiler
+    y = (y + 2 * bh + gap + 40) * S
+    d.text((x0, y), T("Haftanın en iyileri"), fill=TXT, font=f(26, "b"))
+    y += 46 * S
+    ei = H.get("en_iyi") or []
+    if not ei:
+        d.text((x0, y), T("Bu hafta sonuçlanan sinyal yok."), fill=MUT, font=f(22, "m"))
+        y += 44 * S
+    for b in ei[:3]:
+        d.rounded_rectangle([x0, y, (W - 64) * S, y + 62 * S], radius=18 * S, fill=PANEL + (220,))
+        d.text((x0 + 22 * S, y + 14 * S), T("#" + b["sym"]), fill=TXT, font=f(26, "xb"))
+        sw = d.textlength(T("#" + b["sym"]), font=f(26, "xb"))
+        d.text((x0 + 36 * S + sw, y + 20 * S), T((b.get("ad") or "")[:34]), fill=MUT, font=f(18, "m"))
+        pt = T(fpct(b["pct"], 1))
+        c_ = UP if b["pct"] > 0 else DN
+        d.text(((W - 86) * S - d.textlength(pt, font=f(28, "xb")), y + 13 * S), pt, fill=c_, font=f(28, "xb"))
+        y += 74 * S
+    # çipler
+    y += 6 * S
+    x = x0
+    if H.get("kademe"):
+        x = _pill(d, x, y, T(f"{H['kademe']} kez tüm kademeler tamam"), _mix(UP, 0.18), UP, f(19, "b"), px=16 * S, py=10 * S) + 12 * S
+    g = H.get("girseydin")
+    if g:
+        _pill(d, x, y, T(f"En iyi girseydin #{g['sym']} {fpk(g['en'])}"), _mix(GOLD, 0.18), GOLD, f(19, "b"), px=16 * S, py=10 * S)
+    nt = T("Kazanan da kaybeden de sayıldı · paper trade · yatırım tavsiyesi değildir")
+    d.text(((W * S - d.textlength(nt, font=f(17, "m"))) / 2, (Hh - 54) * S), nt, fill=DIM, font=f(17, "m"))
+    return _png(img.resize((W, Hh), Image.LANCZOS))
