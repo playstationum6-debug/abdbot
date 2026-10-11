@@ -62,6 +62,7 @@ import sinyal
 import yz as yzmod
 import plan as planmod
 import tanitim
+import otoayar
 import tarayici
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -132,6 +133,7 @@ BOT_CFG = {
     "ana_liste": 0,                                           # seçici açıkken büyük hisseler de gitsin mi (0: sitede izleme olarak kalır)
     "pencere_bas": 30,                                        # seçici pencere: açılıştan kaç dk sonra başlar (30 → 10:00 ET · 17:00 TR)
     "pencere_son": 240,                                       # seçici pencere: açılıştan kaç dk sonra biter (240 → 13:30 ET · 20:30 TR)
+    "oto_ayar": 1,                                            # 1: bot her seans sonunda pencereyi / kurguları / dilimleri verilere göre kendisi ayarlar
 }
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
@@ -1341,7 +1343,8 @@ AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd"
             "eko_dur": (int, 0, 1), "yz_yetki": (int, 0, 2), "kirilim_yetki": (int, 0, 2),
             "kesici": (int, 0, 1), "cikis_kural": (int, 0, 4), "liste_oncelik": (int, 0, 1),
             "min_stop_pct": (float, 0, 5), "eksi_atla": (int, 0, 1), "tg_kalite": (int, 0, 1), "tg_min_hedef": (float, 0, 20),
-            "secici": (int, 0, 1), "ana_liste": (int, 0, 1), "pencere_bas": (int, 0, 390), "pencere_son": (int, 0, 390)}
+            "secici": (int, 0, 1), "ana_liste": (int, 0, 1), "pencere_bas": (int, 0, 390), "pencere_son": (int, 0, 390),
+            "oto_ayar": (int, 0, 1)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1,
              "tg_kosan": 1, "tg_tablo": 1, "tg_uyari": 1,
@@ -1962,16 +1965,19 @@ def secici_neden(sig):
     """None: sinyal seçici süzgeçten geçer (Telegram + bot). Değilse nedeni; sinyal sitede izleme olarak ölçülür."""
     if not BOT_CFG.get("secici", 1):
         return None
+    c0 = sig.get("conf0") if sig.get("conf0") is not None else sig.get("conf")
+    c0, esik = c0 or 0, int(BOT_CFG.get("min_conf", 55) or 0)
     if not sig.get("runner") and not BOT_CFG.get("ana_liste", 0):
-        return "büyük hisse: geçmiş testte bu listenin hiçbir diliminde kâr çıkmadı (sitede izleme)"
+        if OTO.get("ana") and BOT_CFG.get("oto_ayar", 1) and sig.get("ses") == "regular" and ana_dilim(sig) in OTO["ana"]:
+            return None if c0 >= esik else f"güven {c0} < eşik {esik}"      # bot verilerle bu dilimi açtı
+        return "büyük hisse: bu listede kârlı dilim yok (sitede izleme)"
     b, s = int(BOT_CFG.get("pencere_bas", 30)), int(BOT_CFG.get("pencere_son", 240))
     dk = acilis_dk(sig.get("t") or time.time())
     if sig.get("ses") != "regular" or not (b <= dk < s):
         t1, t2 = pencere_tr()
         return f"saat penceresi dışında: en iyi dilim {t1}–{t2} TR (normal seans)"
-    if sig.get("setup") in SECICI_KOTU and sig.get("setup") not in (BOT_CFG.get("zorla") or []):
+    if sig.get("setup") in secici_kotu() and sig.get("setup") not in (BOT_CFG.get("zorla") or []):
         return f"{sinyal.SETUP_AD.get(sig['setup'], sig['setup'])}: koşan hisselerde zarar ettiren kurgu"
-    c0, esik = sig.get("conf0", sig.get("conf")) or 0, int(BOT_CFG.get("min_conf", 55) or 0)
     if c0 < esik:
         return f"güven {c0} < eşik {esik}"
     return None
@@ -1982,6 +1988,148 @@ def secili_mi(sig):
         return secici_neden(sig) is None
     except Exception:
         return True
+
+
+# ---- Kendini ayarlayan seçici (otoayar.py): her seans sonunda son 20 günün sonuçlarıyla saat penceresi,
+#      zararlı kurgular ve (varsa) büyük hisselerin kârlı dilimleri yeniden belirlenir. Öğrendikleri günlüğe yazılır.
+OTO = {"pencere": None, "kotu": sorted(SECICI_KOTU), "ana": [], "t": 0, "gun": None, "rapor": None}
+OGREN_GUNLUK = []                                  # [{"t", "tur", "b": başlık, "a": açıklama}] son 40
+
+
+def secici_kotu():
+    return set(OTO.get("kotu") or SECICI_KOTU) if BOT_CFG.get("oto_ayar", 1) else SECICI_KOTU
+
+
+def ana_dilim(sig):
+    return f"{sig.get('setup')}@{otoayar.kova(acilis_dk(sig.get('t') or time.time()))}"
+
+
+def dk_tr(dk):
+    """Açılıştan dakika → TR saati 'HH:MM' (yaz/kış saati farkı otomatik)."""
+    a = datetime.now(ET).replace(hour=9, minute=30, second=0, microsecond=0)
+    return (a + timedelta(minutes=int(dk))).astimezone(TR).strftime("%H:%M")
+
+
+def _oto_kayit(s_):
+    c_ = s_.get("conf0") if s_.get("conf0") is not None else s_.get("conf")
+    return {"dk": acilis_dk(s_["t"]), "setup": s_["setup"], "conf": c_ or 0,
+            "r": s_["r"], "day": s_.get("day") or datetime.fromtimestamp(s_["t"], ET).date().isoformat()}
+
+
+def oto_veri(gun=30):
+    """Son ~20 iş günü: koşan hisse (canlı + koşan testi) ve büyük hisse (canlı + geçmiş test) sonuçları, normal seans."""
+    cut = time.time() - gun * 86400
+    kosan, ana = [], []
+
+    def ok(s_):
+        return s_.get("r") is not None and s_.get("st") in ("hedef", "stop", "süre") and s_.get("ses") == "regular" \
+            and (s_.get("t") or 0) >= cut and s_.get("setup")
+    for s_ in engine.signals:
+        if ok(s_) and (s_.get("t") or 0) >= ogrenme.LEARN_SINCE:
+            (kosan if s_.get("runner") else ana).append(_oto_kayit(s_))
+    for s_ in KT.get("sigs") or []:
+        if ok(s_):
+            kosan.append(_oto_kayit(s_))
+    for s_ in BT.get("sigs") or []:
+        if ok(s_) and not s_.get("runner"):
+            ana.append(_oto_kayit(s_))
+    return kosan, ana
+
+
+def _dilim_ad(a):
+    k_, kv = a.split("@")
+    kv = int(kv)
+    return f"{sinyal.SETUP_AD.get(k_, k_)} {dk_tr(kv * otoayar.KOVA)}–{dk_tr(kv * otoayar.KOVA + otoayar.KOVA)}"
+
+
+def oto_calistir(duyur=True):
+    """Bir öğrenme turu: hesapla → uygula → günlüğe yaz → değiştiyse Telegram'a duyur."""
+    if not BOT_CFG.get("oto_ayar", 1) or not BOT_CFG.get("secici", 1):
+        return []
+    kosan, ana = oto_veri()
+    durum = {"pencere": [int(BOT_CFG.get("pencere_bas", 30)), int(BOT_CFG.get("pencere_son", 240))],
+             "kotu": sorted(secici_kotu()), "ana": list(OTO.get("ana") or [])}
+    yeni, olaylar, rapor = otoayar.ogren(kosan, ana, durum, int(BOT_CFG.get("min_conf", 55) or 0))
+    satir = []
+    for tur, d in olaylar:
+        if tur == "pencere":
+            h_ = d.get("hedef") or d["yeni"]
+            satir.append((tur, f"Sinyal saatini {dk_tr(d['eski'][0])}–{dk_tr(d['eski'][1])} yerine "
+                               f"{dk_tr(d['yeni'][0])}–{dk_tr(d['yeni'][1])} yaptı",
+                          f"Son 20 günün en iyi dilimi {dk_tr(h_[0])}–{dk_tr(h_[1])}"
+                          + ("; kenarlar günde en fazla 30 dk kayar" if tuple(h_) != tuple(d["yeni"]) else "")))
+        elif tur == "kurgu":
+            ad = sinyal.SETUP_AD.get(d["k"], d["k"])
+            satir.append((tur, f"{ad} kurgusunu {'kapattı' if d['tur'] == 'kapat' else 'yeniden açtı'}",
+                          f"Seçili saatte {d['n']} sonuç, işlem başı {_r_(d['avg'])}"))
+        else:
+            satir.append((tur, f"Büyük hisselerde {_dilim_ad(d['a'])} dilimini {'açtı' if d['tur'] == 'ac' else 'kapattı'}",
+                          f"{d['n']} sonuç, işlem başı {_r_(d['avg'])}, günlerin %{round(d['arti_gun'] * 100)}'inde artı"))
+    if not satir:
+        t1, t2 = pencere_tr()
+        satir.append(("kontrol", "Ayarları gözden geçirdi, değişiklik gerekmedi",
+                      f"Sinyal saati {t1}–{t2} hâlâ en iyisi; {len(kosan)} koşan, {len(ana)} büyük hisse sonucu tarandı"))
+    now = int(time.time())
+    BOT_CFG["pencere_bas"], BOT_CFG["pencere_son"] = int(yeni["pencere"][0]), int(yeni["pencere"][1])
+    OTO.update(pencere=yeni["pencere"], kotu=yeni["kotu"], ana=yeni["ana"], t=now,
+               gun=datetime.now(ET).date().isoformat(), rapor=rapor)
+    for tur, b_, a_ in satir:
+        OGREN_GUNLUK.append({"t": now, "tur": tur, "b": b_, "a": a_})
+    del OGREN_GUNLUK[:-40]
+    backup.data["oto"] = {k: OTO[k] for k in ("pencere", "kotu", "ana", "t", "gun")}
+    backup.data["ogren_gunluk"] = OGREN_GUNLUK[-40:]
+    _ayar_kaydet()
+    _SST["t"] = 0
+    _SEK["v"] = None
+    _KSP["t"] = 0
+    KESICI["t"] = 0
+    try:
+        engine.ver += 1
+    except Exception:
+        pass
+    degisti = [x for x in satir if x[0] != "kontrol"]
+    if degisti:
+        feed_add("bot", "", "🧠 Bot kendini ayarladı", sub=" · ".join(b_ for _, b_, _ in degisti)[:300], tone="bilgi",
+                 extra={"tg_skip": 1})
+        if duyur and tg.ok and PUSH_PREF.get("tg_rapor", 1):
+            t1, t2 = pencere_tr()
+            tg.send("🧠 <b>Bot kendini ayarladı</b>\n" + "\n".join(f"• <b>{_h(b_)}</b>\n   <i>{_h(a_)}</i>" for _, b_, a_ in degisti)
+                    + f"\n\n🎯 Sinyal saatleri: <b>{t1}–{t2}</b>\n<i>Son 20 günün sonuçlarına bakar; az örnekle karar vermez.</i>",
+                    quiet=True, konu="rapor")
+    log.info("Öğrenme turu: %s", "; ".join(b_ for _, b_, _ in satir))
+    return satir
+
+
+def ogren_tg():
+    t1, t2 = pencere_tr()
+    out = [f"🧠 <b>Bot ne öğrendi</b>", f"🎯 Sinyal saatleri: <b>{t1}–{t2}</b>"
+           + ("" if BOT_CFG.get("oto_ayar", 1) else " <i>(kendini ayarlama kapalı)</i>")]
+    kt_ = sorted(secici_kotu())
+    if kt_:
+        out.append("⛔ Kapalı kurgular: " + _h(", ".join(sinyal.SETUP_AD.get(k, k) for k in kt_)))
+    out.append("🏦 Büyük hisseler: " + (_h(", ".join(_dilim_ad(a) for a in OTO.get("ana") or [])) if OTO.get("ana")
+                                        else "kârlı dilim yok, sadece izleniyor"))
+    if OGREN_GUNLUK:
+        out.append("")
+        for x in OGREN_GUNLUK[-6:][::-1]:
+            out.append(f"• <b>{_h(x['b'])}</b> <i>({datetime.fromtimestamp(x['t'], TR).strftime('%d.%m')})</i>\n   {_h(x['a'])}")
+    else:
+        out.append("\n<i>İlk öğrenme turu bugün seans kapanınca (23:15 civarı) yapılacak.</i>")
+    return "\n".join(out)
+
+
+async def oto_loop():
+    """Hafta içi, normal seans kapandıktan sonra (16:15 ET) günde bir öğrenme turu."""
+    await asyncio.sleep(300)
+    while True:
+        try:
+            n_ = datetime.now(ET)
+            if BOT_CFG.get("oto_ayar", 1) and n_.weekday() < 5 and n_.hour * 60 + n_.minute >= 16 * 60 + 15 \
+                    and OTO.get("gun") != n_.date().isoformat() and not BT.get("running") and not KT.get("running"):
+                oto_calistir()
+        except Exception as e:
+            log.warning("Öğrenme turu hatası: %s", e)
+        await asyncio.sleep(300)
 
 
 def tg_kalite(sig):
@@ -2459,7 +2607,13 @@ def secili_stat():
 
 def secici_bilgi():
     t1, t2 = pencere_tr()
-    return {"acik": BOT_CFG.get("secici", 1), "t1": t1, "t2": t2, "ana": BOT_CFG.get("ana_liste", 0)}
+    rp_ = OTO.get("rapor") or {}
+    return {"acik": BOT_CFG.get("secici", 1), "t1": t1, "t2": t2, "ana": BOT_CFG.get("ana_liste", 0),
+            "oto": BOT_CFG.get("oto_ayar", 1), "ot": OTO.get("t") or 0,
+            "kotu": [sinyal.SETUP_AD.get(k, k) for k in sorted(secici_kotu())],
+            "dilim": [_dilim_ad(a) for a in OTO.get("ana") or []],
+            "kova": [{"t": dk_tr(x["bas"]), "n": x["n"], "avg": x["avg"]} for x in (rp_.get("kova") or [])],
+            "gunluk": OGREN_GUNLUK[-8:][::-1]}
 
 
 async def send_sig(cl):
@@ -3754,6 +3908,7 @@ HALK_YARDIM = ("🤖 <b>$ABDBOT</b> · ABD borsası kırılım takibi (paper tra
                "⏰ <b>Fiyat alarmı</b>\n/alarm WFF 12,50 — fiyat 12,50'ye gelince sana özelden yazarım\n"
                "/alarmlar — kurduğun alarmlar\n/alarmsil WFF — o hissedeki alarmlarını sil\n\n"
                "🎓 <b>Mini kurs</b>\n/ders 1 — kırılım okumayı 5 kısa derste öğren\n\n"
+               "🧠 <b>Bot ne öğrendi</b>\n/ogren — sinyal saatleri ve botun kendini nasıl ayarladığı\n\n"
                "En fazla 5 alarm kurabilirsin; sadece botun takip ettiği hisselerde çalışır. Yatırım tavsiyesi değildir.")
 _HALK_SAY = {}
 
@@ -3782,6 +3937,8 @@ async def tg_halk_komut(text, chat):
             send(ders_tg(int(arg[0]) - 1 if arg else 0))
         except ValueError:
             send(ders_tg(-1))
+    elif cmd in ("ogren", "öğren"):
+        send(ogren_tg())
     elif cmd == "alarm":
         if len(arg) < 2:
             send("Kullanım: /alarm WFF 12,50")
@@ -4425,9 +4582,15 @@ async def kt_load():
         async with httpx.AsyncClient(timeout=60) as c:
             d = await backup._get(c, KT_PATH)
         if isinstance(d, dict):
-            KT.update(sum=d.get("sum"), t=d.get("t") or 0)
+            KT.update(sum=d.get("sum"), t=d.get("t") or 0, sigs=kt_ince(d.get("sigs")))
     except Exception as e:
         log.info("Koşan testi yüklenemedi: %s", e)
+
+
+def kt_ince(sigs):
+    """Koşan testi sinyallerinin öğrenme için gereken kısmı (bellek az yer kaplasın)."""
+    return [{k: x[k] for k in ("t", "ses", "setup", "conf", "conf0", "r", "st", "day", "sym") if x.get(k) is not None}
+            for x in (sigs or []) if isinstance(x, dict)][-4000:]
 
 
 def kt_kurgu(k):
@@ -4726,7 +4889,7 @@ async def kt_run(n_days=20):
         if summ.get("hata"):
             KT["hata"] = summ["hata"]
         else:
-            KT.update(sum=summ, t=int(time.time()))
+            KT.update(sum=summ, t=int(time.time()), sigs=kt_ince(sigs))
             sic = kt_kurgu("sicrama") or {}
             feed_add("bot", "", f"Koşan hisse testi bitti: {summ.get('aday', 0)} hisse-gün, {summ['tum'].get('n', 0)} sinyal, "
                      f"işlem başı ort. {_p_((summ['tum'].get('avg') or 0) * rp_ozet()['test'])}",
@@ -5321,7 +5484,7 @@ async def tg_analiz(sym):
 YARDIM = ("<b>Komutlar</b>\n/liste — ☀️ günün listesi ve durumu\n/girseydin — 💡 bugünkü kırılımlardan girseydin kaç % olurdu\n/hafta — 📅 haftalık rapor kartı\n/anket — 🗳 kanala \"bu hafta hangi hisse\" anketi\n/ders 1 — 🎓 mini kurs (5 ders)\n/kurgular — 🧭 kurgu kesici: hangi kurgu açık, hangisi gölgede\n/cikis — 🧪 çıkış laboratuvarı (4 çıkış kuralı karşılaştırması)\n/planlar — 📐 aktif kırılım planları (\"X kırılırsa giriş\")\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
           "/analiz QNME — 15 dk analiz ve plan (grafikli)\n/alarm QNME 0.90 — fiyat alarmı\n/alarmlar — kurulu alarmlar\n"
           "/alarmsil QNME — alarmı sil\n/yorum — yapay zekalı piyasa yorumu\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
-          "/basla — yeni işlem açmaya devam\n/ogren — bot ne öğrendi (model karnesi)\n"
+          "/basla — yeni işlem açmaya devam\n/ogren — bot ne öğrendi (saat, kurgular, model) · /ogren simdi — öğrenme turunu şimdi çalıştır\n"
           "/kanal — iletilen Telegram kanal sinyallerinin karnesi\n"
           "/sinyal @kanal metin — iletmesi kapalı kanal için sinyali elle yaz\n"
           "/kanalekle @kanal — kanalı otomatik izle · /kanalsil @kanal · /kanallar — izlenenler\n"
@@ -5520,6 +5683,13 @@ async def tg_komut(text, chat, thread=None):
         t_, s_ = gun_sonu_raporu()
         send(html + f"\n<i>{_h(s_)}</i>", png)
     elif cmd in ("ogren", "öğren", "ogrenme"):
+        if arg and arg[0] in ("SIMDI", "ŞIMDI", "ŞİMDİ", "CALISTIR", "ÇALIŞTIR"):
+            st_ = oto_calistir(duyur=False)
+            send("🧠 Öğrenme turu çalıştı:\n" + "\n".join(f"• {_h(b_)}" for _, b_, _ in st_) if st_ else
+                 "Kendini ayarlama kapalı (Ayarlar → Kendini ayarlasın).")
+        else:
+            send(ogren_tg() + "\n\n" + learner.ozet())
+    elif cmd in ("modelkarne", "model"):
         send(learner.ozet())
     elif cmd == "kanal":
         send(dis.tg_metin())
@@ -7222,6 +7392,10 @@ async def lifespan(app):
         KADEME.update({k: v for k, v in backup.data["kademe"].items() if k in ("gun", "ok", "say", "sym")})
     if isinstance(backup.data.get("girseydin"), dict):
         GIRSEYDIN.update(backup.data["girseydin"])
+    if isinstance(backup.data.get("oto"), dict):
+        OTO.update({k: v for k, v in backup.data["oto"].items() if k in ("pencere", "kotu", "ana", "t", "gun")})
+    if isinstance(backup.data.get("ogren_gunluk"), list):
+        OGREN_GUNLUK[:] = [x for x in backup.data["ogren_gunluk"] if isinstance(x, dict) and x.get("b")][-40:]
     push.load(backup.data)
     tg.load(backup.data)
     for k_ in list(tg.msg):                     # sicil: yedekte olmayan eski Telegram sinyallerini de ekle
@@ -7245,7 +7419,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop)]
+                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, oto_loop)]
     yield
     for t in tasks:
         t.cancel()

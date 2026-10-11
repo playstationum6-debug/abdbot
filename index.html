@@ -524,6 +524,13 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .izt{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;color:var(--mu,#8A97AD)}
 .secn{margin:0 2px 10px;padding:9px 12px;border-radius:12px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.28);font-size:12.5px;line-height:1.45}
 .secn b{color:#22C55E}
+.ogr{margin:12px 0 4px;padding:12px 14px;border-radius:14px;background:var(--card);border:1px solid var(--line)}
+.ogr h4{margin:0 0 6px;font-size:14.5px;font-weight:700;display:flex;align-items:center;gap:8px}
+.ogr h4 span{margin-left:auto;font-size:12px;font-weight:600;color:var(--mut)}
+.ogr li{list-style:none;padding:7px 0;border-top:1px solid var(--line);font-size:13px}
+.ogr li:first-child{border-top:0}
+.ogr li b{display:block;font-weight:650}.ogr li small{color:var(--mut)}
+.ogr ul{margin:0;padding:0}
 .sec-why{margin-top:8px;font-size:12px;color:var(--mu,#8A97AD)}
 .sig.sup{border-color:rgba(245,192,78,.5)!important;box-shadow:0 0 22px rgba(245,192,78,.12)}
 .skb{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.skb div{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 11px}
@@ -775,6 +782,7 @@ body:not(.ziy) .ziyy{display:none!important}
   <div class="pv" data-go="portfoy" style="cursor:pointer"><div class="pvl">Portföy</div><div class="pvv" id="aVal">—</div>
     <div class="pvc"><span class="hapG" id="aCh">—</span><span class="meta" style="font-size:13px">bugün</span></div></div>
   <div class="durum" id="aDur"></div>
+  <div id="aOgr"></div>
   <div class="v4ser" id="aSer"></div>
   <div id="aTg"></div>
   <div id="aSup"></div>
@@ -1012,6 +1020,7 @@ body:not(.ziy) .ziyy{display:none!important}
     <div class="fld"><label>Eksi beklentili işleme girme<small>Öğrenme modeli bu koşullarda kurguyu zararda görüyorsa bot girmez</small></label><button class="tg" data-k="eksi_atla"></button></div>
     <div class="fld"><label>🎯 Seçici süzgeç<small>Telegram'a ve bota sadece verinin kazandırdığı dilim gider: saat penceresi içinde, koşan hisseler, zararlı kurgular hariç. Kalanlar sitede izleme olarak ölçülür</small></label><button class="tg" data-k="secici"></button></div>
     <div class="fld"><label>Büyük hisseler de gitsin<small>Kapalıyken ana listedeki büyük hisselerin sinyalleri sadece sitede kalır (geçmiş testte hiçbir dilimi kârlı çıkmadı)</small></label><button class="tg" data-k="ana_liste"></button></div>
+    <div class="fld"><label>🧠 Kendini ayarlasın<small>Her seans kapanınca son 20 günün sonuçlarına bakar: sinyal saatini kaydırır (günde en fazla 30 dk), zarar ettiren kurguyu kapatır, toparlananı açar. Az örnekle karar vermez; öğrendiklerini Telegram'a yazar</small></label><button class="tg" data-k="oto_ayar"></button></div>
     <div class="fld"><label>Pencere başı (açılıştan dk)<small>30 = 10:00 ET · 17:00 TR</small></label><input type="number" inputmode="numeric" data-k="pencere_bas"></div>
     <div class="fld"><label>Pencere sonu (açılıştan dk)<small>240 = 13:30 ET · 20:30 TR</small></label><input type="number" inputmode="numeric" data-k="pencere_son"></div>
     <div class="fld"><label>Aynı sektörde en fazla işlem<small>Örn. 2: üç yarı iletken hissesine birden girmez. 0 = sınır yok</small></label><input type="number" inputmode="numeric" data-k="sektor_max"></div>
@@ -1881,7 +1890,10 @@ function renderDenetci(){const L=learn||{},k=L.den,p=L.perf||{};
     $('perfS').innerHTML=p.strateji&&p.strateji.length?`<div class="sh"><b>Strateji bazında</b><span>kâr faktörü</span></div><div class="card" style="padding:4px 14px">${p.strateji.map(x=>`<div class="kmr" style="grid-template-columns:minmax(0,1fr) 46px 64px 52px"><b style="font-weight:600">${esc(SETUP[x.k]||x.k)}</b><span style="text-align:right">${x.n}</span><span style="text-align:right" class="${cls(x.pnl)}">${fusd(x.pnl)}</span><span style="text-align:right">${x.pf==null?'—':x.pf.toFixed(2)}</span></div>`).join('')}</div>`:''}
   else{$('perfK').innerHTML='<div style="grid-column:span 2"><small>Henüz kapanan işlem yok</small><i>Bot işlem kapattıkça kâr faktörü, düşüş ve maliyet burada hesaplanır.</i></div>';$('perfS').innerHTML=''}}
 function secNot(){const e=$('secN');if(!e)return;if(!SECI.acik){e.style.display='none';return}e.style.display='block';
-  e.innerHTML=`🎯 <b>Seçili sinyaller</b> ${esc(SECI.t1||'17:00')}–${esc(SECI.t2||'20:30')} (TR) arasında, ${SECI.ana?'tüm listede':'koşan küçük hisselerde'} gelir. Telegram'a ve bota sadece bunlar gider. Geçmiş testte bu dilim işlem başı <b>+0,22R</b> (%45 kazanma) getirdi; dışındaki saatler −0,32R. Soluk görünenler izleme amaçlıdır, sonuçları yine ölçülür.`}
+  e.innerHTML=`🎯 <b>Seçili sinyaller</b> ${esc(SECI.t1||'17:00')}–${esc(SECI.t2||'20:30')} (TR) arasında, ${SECI.ana?'tüm listede':'koşan küçük hisselerde'} gelir. Telegram'a ve bota sadece bunlar gider. Geçmiş testte bu dilim işlem başı <b>+0,22R</b> (%45 kazanma) getirdi; dışındaki saatler −0,32R. ${SECI.oto?'Bot bu saati her seans sonunda verilere bakıp kendisi ayarlar. ':''}Soluk görünenler izleme amaçlıdır, sonuçları yine ölçülür.`;try{ogrYaz()}catch(e){}}
+function ogrYaz(){const e=$('aOgr');if(!e)return;const G=(SECI&&SECI.gunluk)||[];if(!SECI.acik||!SECI.oto){e.innerHTML='';return}
+  const gun=t=>new Date(t*1000).toLocaleDateString('tr-TR',{day:'numeric',month:'short',timeZone:'Europe/Istanbul'});
+  e.innerHTML=`<div class="ogr"><h4>🧠 Bot ne öğrendi<span>sinyal saati ${esc(SECI.t1||'')}–${esc(SECI.t2||'')}</span></h4><ul>${G.length?G.slice(0,3).map(x=>`<li><b>${esc(x.b)}</b><small>${gun(x.t)} · ${esc(x.a)}</small></li>`).join(''):'<li><small>İlk öğrenme turu bugün seans kapanınca yapılacak. Bot her gün son 20 günün sonuçlarına bakıp sinyal saatini ve kurguları kendisi ayarlar.</small></li>'}</ul></div>`}
 function renderSigs(){try{renderSigSup()}catch(e){}let L=sigFilter==='bu'?mine.slice().sort((a,b)=>b.t-a.t):sigList.filter(s=>sigFilter==='secili'?s.sec===1:sigFilter==='super'?s.super:sigFilter==='acik'?(s.st==='bekliyor'||s.st==='açık'):sigFilter==='yuksek'?s.conf>=75:sigFilter==='orta'?(s.conf>=60&&s.conf<75):sigFilter==='dusuk'?s.conf<60:true);
   if(!L.length){$('sigs').innerHTML=empty(sigFilter==='secili'?`Şu an seçili sinyal yok. Seçili sinyaller ${SECI.t1||'17:00'}–${SECI.t2||'20:30'} (TR) arasında, koşan hisselerde gelir. Diğerlerini görmek için “Tümü”.`:sigFilter==='super'?'Son sinyallerde süper fırsat yok. Çok sıkı bir süzgeç: günde en fazla 3 tane, bazı günler hiç çıkmaz.':sigFilter==='acik'?'Şu an açık sinyal yok.':sigFilter==='bu'?'Bu hissede son günlerde sinyal yok.':'Henüz sinyal yok. Sinyaller seans içinde, kapanan ve hacmi teyitli 1 dk mumlarda üretilir.');$('more').style.display='none';return}
   $('sigs').innerHTML=L.slice(0,sigShow).map(sigCard).join('');$('more').style.display=L.length>sigShow?'flex':'none'}
