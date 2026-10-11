@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0A0D13">
+<meta name="theme-color" content="#0B2A22">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -19,7 +19,7 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="icon" href="/ikon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Instrument+Sans:wdth,wght@75..100,400..700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
@@ -28,7 +28,7 @@
   --cond:Inter,-apple-system,"SF Pro Display",sans-serif;
   --r:14px;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg);color:var(--tx);font:500 15px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+html,body{margin:0;background:var(--bg);color:var(--tx);font:500 15px/1.45 var(--fnt),-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
 body{min-height:100vh;overscroll-behavior-y:none}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
 a{color:var(--ac);text-decoration:none}
@@ -284,7 +284,7 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
 .hava{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:16px;padding:11px 14px;margin:0 0 12px;font-size:13.5px;color:var(--mut)}
 .hava b{color:var(--tx);font-size:15px;white-space:nowrap}.hava i{width:10px;height:10px;border-radius:50%;flex:none;background:var(--dim)}
 .hava.g i{background:var(--up);box-shadow:0 0 10px var(--up)}.hava.n i{background:var(--wa)}.hava.r i{background:var(--dn);box-shadow:0 0 10px var(--dn)}
-.tile .bl{float:right;font:700 10px Inter;background:#000;color:var(--wa);border-radius:5px;padding:1px 4px}
+.tile .bl{float:right;font:700 10px var(--fnt);background:#000;color:var(--wa);border-radius:5px;padding:1px 4px}
 .hrs{display:grid;grid-template-columns:44px 1fr 64px;gap:6px 10px;align-items:center;font-size:13px}
 .hrs .bar2{height:18px;border-radius:6px;background:var(--card2);overflow:hidden}.hrs .bar2 i{display:block;height:100%;border-radius:6px}
 .rh h4{font-size:17px;margin:18px 0 4px}.rh p{color:var(--mut);margin:0 0 6px;font-size:14px;line-height:1.5}.rh svg{display:block;width:100%;max-width:320px;height:90px;margin:6px 0}
@@ -298,7 +298,7 @@ nav button.on .ib{background:transparent;color:#fff}nav button .ib{width:40px}
 .fi.k-rapor{--rail:var(--ac2)}.fi.k-rapor .bd{background:linear-gradient(90deg,color-mix(in srgb,var(--ac2) 10%,transparent),transparent 70%);padding-top:6px;padding-bottom:7px;border-radius:2px 10px 10px 2px}
 .leg{display:flex;gap:14px;font-size:11.5px;color:var(--mut);margin-top:6px}.leg i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
 .kd.dr{font-weight:800;letter-spacing:.3px}.dr-ap{background:#26a69a;color:#fff}.dr-a{background:rgba(38,166,154,.25);color:#5eead4}.dr-b{background:rgba(255,184,77,.18);color:#ffb547}.dr-c{background:rgba(142,142,153,.18);color:#a1a1aa}
-.gsel,.gin{font:600 14px Inter,sans-serif;background:var(--bg2);color:var(--txt,#e6ebf5);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+.gsel,.gin{font:600 14px var(--fnt),sans-serif;background:var(--bg2);color:var(--txt,#e6ebf5);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
 .gin{flex:1;min-width:0}.gsel{margin-left:auto}
 .gn{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 14px;margin-bottom:10px}
 .gn .h{display:flex;align-items:center;gap:8px}.gn .h b{font-size:16px}.gn .h .r{margin-left:auto;font-weight:800}
@@ -399,7 +399,7 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .ac .pb u{position:absolute;top:-4px;width:3px;height:14px;border-radius:2px;background:#fff;margin-left:-1px}
 .lg2{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex:none}
 .wl{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:2px 12px}
-.wr{display:grid;grid-template-columns:36px minmax(0,1fr) 62px auto 70px;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #142024;cursor:pointer}
+.wr{display:grid;grid-template-columns:36px minmax(0,1fr) 62px auto 70px;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}
 .wr:last-child{border-bottom:0}
 .wr .n b{display:block;font-weight:700;font-size:15px}.wr .n small{display:block;color:var(--mut);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wr .p{font-weight:700;font-variant-numeric:tabular-nums;text-align:right;font-size:14.5px}
@@ -420,7 +420,7 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .hp{font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:6px}.hp.al{background:rgba(34,197,94,.14);color:var(--up)}.hp.sat{background:rgba(244,63,94,.14);color:var(--dn)}
 .sg2 .hr{text-align:right}.sg2 .hr small{display:block;color:var(--mut);font-size:11.5px;font-variant-numeric:tabular-nums}.sg2 .sr{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
 .g3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px;font-size:11.5px;color:var(--mut)}.g3 b{display:block;color:var(--tx);font-size:14.5px;font-variant-numeric:tabular-nums}
-.gn2{padding:11px 0;border-bottom:1px solid #142024;cursor:pointer}.gn2:last-child{border-bottom:0}
+.gn2{padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer}.gn2:last-child{border-bottom:0}
 .gn2 .ih{display:flex;align-items:center;gap:10px}.gn2 .n{flex:1;min-width:0}.gn2 .n b{font-size:15px}.gn2 .n i{font-style:normal;font-size:13px;margin-left:6px}.gn2 .n small{display:block;color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
 .gn2 .rt{text-align:right}.gn2 .rt small{display:block;color:var(--mut);font-size:11.5px}.gn2 .rt b{font-weight:800;font-variant-numeric:tabular-nums}
 .gn2 .dt{display:none;margin-top:8px}.gn2.open .dt{display:block}.gn2 .m{font-size:12.5px;color:var(--mut)}.gn2 ul{margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--mut)}.gn2 .ls{margin-top:8px;font-size:12.5px;padding:7px 9px;border-radius:9px;background:var(--bg2)}
@@ -432,7 +432,7 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .bars i{flex:1;border-radius:3px 3px 0 0;min-width:4px}
 .ayh{display:flex;align-items:center;gap:12px}.ayh b{display:block;font-size:16px}.ayh small{display:block;color:var(--mut);font-size:12.5px}
 .ayl{margin-top:10px;padding:2px 14px}
-.ayr{display:flex;align-items:center;gap:12px;width:100%;padding:13px 0;border-bottom:1px solid #142024;font-size:15px;text-align:left;color:var(--tx)}
+.ayr{display:flex;align-items:center;gap:12px;width:100%;padding:13px 0;border-bottom:1px solid var(--line);font-size:15px;text-align:left;color:var(--tx)}
 .ayr:last-child{border-bottom:0}.ayr svg{width:20px;height:20px;color:#B9C6CA;flex:none}.ayr span{margin-left:auto;color:var(--mut);font-size:14px}.ayr i{margin-left:auto;font-style:normal;color:var(--mut);font-size:20px}
 /* ---- karar denetçisi ---- */
 .dk{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.3px}
@@ -449,7 +449,7 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .dkk div{border-radius:16px;padding:11px 12px;border:1px solid var(--line);background:var(--card)}
 .dkk small{display:block;font-size:11.5px;font-weight:800;letter-spacing:.4px}.dkk b{display:block;font-size:20px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}
 .dkk span{display:block;color:var(--mut);font-size:11.5px}
-.kmr{display:grid;grid-template-columns:minmax(0,1fr) 62px 62px 56px;gap:6px;align-items:center;padding:10px 0;border-bottom:1px solid #142024;font-size:13px;font-variant-numeric:tabular-nums}
+.kmr{display:grid;grid-template-columns:minmax(0,1fr) 62px 62px 56px;gap:6px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);font-size:13px;font-variant-numeric:tabular-nums}
 .kmr:last-child{border-bottom:0}.kmr.h{color:var(--mut);font-size:10.5px;font-weight:700;padding:8px 0}
 .kmr .g{text-align:center;border-radius:999px;padding:3px 0;font-weight:800;font-size:12px}
 .met2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -469,7 +469,7 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .stat b{color:var(--mut)}
 .nedb{display:flex;align-items:center;gap:10px;width:100%;margin:6px 0 10px;padding:11px 14px;border-radius:14px;border:1px solid var(--line);background:var(--card);color:var(--tx);font-weight:600;font-size:14px;text-align:left}
 .nedb svg{width:20px;height:20px;color:var(--up)}.nedb i{margin-left:auto;font-style:normal;color:var(--mut);font-size:18px}
-.nedr{padding:10px 0;border-bottom:1px solid #142024;font-size:14px;line-height:1.45}.nedr:last-child{border-bottom:0}
+.nedr{padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;line-height:1.45}.nedr:last-child{border-bottom:0}
 .nedg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0 10px}.nedg .nedb{margin:0;font-size:13px;padding:11px 12px}
 .yzb svg{color:#B9A0FF!important}.yzb{border-color:rgba(185,160,255,.35)!important;background:linear-gradient(180deg,rgba(185,160,255,.10),rgba(185,160,255,.03))!important}
 .yzq{display:flex;gap:8px;margin-top:12px}.yzq .btnw{width:auto;margin:0;padding:0 18px}
@@ -482,14 +482,14 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .plk{border-radius:18px;padding:13px 14px;background:var(--card);border:1px solid var(--line);margin-bottom:10px;cursor:pointer}
 .plk .h{display:flex;align-items:center;gap:10px}.plk .h b{font-size:16px}.plk .h small{display:block;color:var(--mut);font-size:12px}
 .plk .lv{margin-left:auto;text-align:right}.plk .lv b{font-size:18px;color:#7FB8FF;font-variant-numeric:tabular-nums}.plk .lv small{display:block;color:var(--mut);font-size:11.5px}
-.plk .bar{position:relative;height:8px;border-radius:9px;background:#142024;margin:12px 0 6px;overflow:visible}
+.plk .bar{position:relative;height:8px;border-radius:9px;background:var(--line);margin:12px 0 6px;overflow:visible}
 .plk .bar i{position:absolute;top:0;bottom:0;left:0;border-radius:9px;background:linear-gradient(90deg,#123A2C,#22C55E)}
 .plk .bar u{position:absolute;top:-4px;width:3px;height:16px;border-radius:2px;background:#7FB8FF}
 .plk .g4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-size:11px;color:var(--mut);margin-top:8px}.plk .g4 b{display:block;color:var(--tx);font-size:13.5px;font-variant-numeric:tabular-nums}
 .plk .tr{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}.plk .tr span{font-size:11px;padding:3px 8px;border-radius:99px;background:rgba(127,184,255,.1);color:#9FC3FF;border:1px solid rgba(127,184,255,.3)}
 .plk .st{font-size:11px;font-weight:800;padding:3px 9px;border-radius:99px}
 .st-bekliyor{background:rgba(127,184,255,.12);color:#9FC3FF}.st-kaçtı{background:rgba(245,192,78,.14);color:var(--wa)}.st-onaylı{background:rgba(34,197,94,.14);color:var(--up)}.st-sahte{background:rgba(244,63,94,.14);color:var(--dn)}.st-iptal,.st-süre{background:var(--card2);color:var(--mut)}
-.pls{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #142024;font-size:13px}.pls:last-child{border:0}.pls small{color:var(--mut);display:block;font-size:11.5px}
+.pls{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}.pls:last-child{border:0}.pls small{color:var(--mut);display:block;font-size:11.5px}
 /* ---- ana ekran v2 ---- */
 .achart{height:200px}
 .achart .ahd{position:absolute;left:2px;top:0;display:flex;gap:8px;align-items:baseline;font-size:12.5px;color:var(--mut);z-index:2}.achart .ahd b{font-size:13px;font-variant-numeric:tabular-nums}
@@ -504,7 +504,7 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .bosk{display:flex;gap:12px;align-items:center;padding:13px 14px;border-radius:18px;border:1px dashed var(--line2);background:var(--card)}
 .bosk .ik{width:40px;height:40px;border-radius:12px;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--mut);flex:none}.bosk .ik svg{width:20px;height:20px}
 .bosk b{display:block;font-size:14.5px}.bosk small{display:block;color:var(--mut);font-size:12.5px;margin-top:1px}
-.sonr{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #142024;cursor:pointer}.sonr:last-child{border-bottom:0}
+.sonr{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}.sonr:last-child{border-bottom:0}
 .sonr .n b{display:block;font-size:14.5px}.sonr .n small{display:block;color:var(--mut);font-size:11.5px}.sonr>b{font-size:13.5px;font-variant-numeric:tabular-nums;min-width:62px;text-align:right}
 .sonr .po{font-weight:800;font-size:12px;padding:3px 9px;border-radius:99px;border:1px solid var(--line2)}.sonr .po.up{color:var(--up);border-color:rgba(34,197,94,.45);background:rgba(34,197,94,.08)}.sonr .po.dn{color:var(--dn);border-color:rgba(244,63,94,.45);background:rgba(244,63,94,.08)}
 /* ---- 💎 süper fırsat ---- */
@@ -552,12 +552,12 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .sth .k3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:14px;text-align:center}.sth .k3 small{display:block;color:var(--mut);font-size:11.5px}.sth .k3 b{display:block;font-size:21px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}
 .sth svg.eq{width:100%;height:92px;display:block;margin-top:8px}
 .btng{display:block;width:100%;height:44px;margin-top:10px;border-radius:13px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.55);color:var(--up);font-weight:800;font-size:14.5px}
-.str{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #142024;cursor:pointer}.str:last-child{border-bottom:0}
+.str{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer}.str:last-child{border-bottom:0}
 .str .ik{width:36px;height:36px;border-radius:50%;border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:#B9C6CA;flex:none}.str .ik svg{width:18px;height:18px}
 .str .n{flex:1;min-width:0}.str .n b{display:block;font-size:14.5px;font-weight:600}.str .n small{display:block;color:var(--mut);font-size:11.5px;margin-top:1px}
 .str .v{text-align:right;font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}.str .v small{display:block;color:var(--mut);font-weight:500;font-size:11px}
 .str .dt{display:none}.str.open+.dt{display:block}
-.bdr{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #142024;cursor:pointer;position:relative}.bdr:last-child{border-bottom:0}
+.bdr{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer;position:relative}.bdr:last-child{border-bottom:0}
 .bdr .ik{width:40px;height:40px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center}.bdr .ik svg{width:20px;height:20px}
 .bdr .bd{flex:1;min-width:0}.bdr b{display:block;font-size:14.5px}.bdr p{margin:2px 0 0;color:var(--mut);font-size:12.5px;line-height:1.35}.bdr small{display:block;color:#6F8287;font-size:11.5px;margin-top:3px}
 .bdr.yeni::after{content:'';position:absolute;right:2px;top:18px;width:8px;height:8px;border-radius:50%;background:var(--up)}
@@ -570,7 +570,7 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .lvc .n{flex:1;min-width:0}.lvc small{color:var(--mut);font-size:12px}.lvc b{display:block;font-size:18px;font-weight:800;margin:1px 0 8px}
 .xp{height:7px;border-radius:9px;background:#1E2431;overflow:hidden}.xp i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,#0FB57E,#22C55E);box-shadow:0 0 12px rgba(34,197,94,.6)}
 .xpt{display:flex;justify-content:space-between;color:var(--mut);font-size:11px;margin-top:5px}
-.bsr{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid #142024}.bsr:last-child{border-bottom:0}
+.bsr{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}.bsr:last-child{border-bottom:0}
 .bsr .n{flex:1;min-width:0}.bsr .n b{display:block;font-size:14.5px}.bsr .n small{display:block;color:var(--mut);font-size:12px;margin-top:1px}
 .bsr .st{font-size:11.5px;font-weight:800;text-align:right;white-space:nowrap}.bsr .st.ok{color:var(--up)}.bsr .st i{display:block;width:62px;height:5px;border-radius:9px;background:#1E2431;margin-top:5px;overflow:hidden}.bsr .st i u{display:block;height:100%;background:var(--wa)}
 .bsr.kil{opacity:.62}
@@ -591,9 +591,9 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
   --up:#22C55E;--upb:rgba(34,197,94,.13);--dn:#F43F5E;--dnb:rgba(244,63,94,.13);--ac:#4F8CFF;--ac2:#7C9DFF;--acb:rgba(79,140,255,.14);--wa:#F5C04E;--wab:rgba(245,192,78,.14);--vi:#A78BFA;--vib:rgba(167,139,250,.14);--gl:rgba(79,140,255,.28)}
 body{background:var(--bg);font-feature-settings:"tnum" 1,"cv11" 1}
 .v4h{display:flex;align-items:center;justify-content:space-between;margin:2px 2px 10px}
-.v4lnk{background:var(--card);border:1px solid var(--line);color:var(--mut);font:700 12.5px Inter;border-radius:99px;padding:7px 12px}
+.v4lnk{background:var(--card);border:1px solid var(--line);color:var(--mut);font:700 12.5px var(--fnt);border-radius:99px;padding:7px 12px}
 .v4seg{display:flex;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:3px;margin:0 0 12px;gap:2px}
-.v4seg button{flex:1;background:none;border:0;color:var(--mut);font:700 12.5px Inter;padding:8px 0;border-radius:9px}
+.v4seg button{flex:1;background:none;border:0;color:var(--mut);font:700 12.5px var(--fnt);padding:8px 0;border-radius:9px}
 .v4seg button.on{background:var(--card2);color:var(--tx)}
 .v4ser{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:2px 0 14px}
 .v4ser div{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:9px 11px;cursor:pointer}
@@ -630,7 +630,7 @@ body{background:var(--bg);font-feature-settings:"tnum" 1,"cv11" 1}
 .v4kutu p{font-size:13px;line-height:1.45;margin:0}
 .v4kutu.vi{border-color:rgba(167,139,250,.35)}.v4kutu.vi h4{color:var(--vi)}
 .v4btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
-.v4bt{border-radius:13px;padding:12px;text-align:center;font:800 14px Inter;border:1px solid var(--line);background:var(--card);color:var(--tx)}
+.v4bt{border-radius:13px;padding:12px;text-align:center;font:800 14px var(--fnt);border:1px solid var(--line);background:var(--card);color:var(--tx)}
 .v4bt.a{background:var(--ac);border-color:var(--ac);color:#fff}
 .v4lad{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:6px 4px;margin-bottom:8px}
 .v4lad svg{display:block;width:100%}
@@ -638,7 +638,7 @@ body{background:var(--bg);font-feature-settings:"tnum" 1,"cv11" 1}
 .v4kg:last-child{border:0}
 .v4kg .ad{font-size:14px;font-weight:700}.v4kg small{display:block;font-size:11.5px;color:var(--mut);margin-top:1px}
 .v4kg .rr{margin-left:auto;text-align:right;font-weight:800;font-size:14px;white-space:nowrap}
-.v4mod{flex:none;border:1px solid var(--line2);background:var(--card2);color:var(--mut);font:800 11px Inter;border-radius:99px;padding:6px 10px;min-width:62px}
+.v4mod{flex:none;border:1px solid var(--line2);background:var(--card2);color:var(--mut);font:800 11px var(--fnt);border-radius:99px;padding:6px 10px;min-width:62px}
 .v4mod.oto{color:var(--ac);border-color:rgba(79,140,255,.4)}.v4mod.acik{color:#04170B;background:var(--up);border-color:var(--up)}.v4mod.kapali{color:var(--dn);border-color:rgba(244,63,94,.4)}
 .v4bar{display:flex;align-items:center;gap:10px;margin:9px 0}
 .v4bar .l{width:122px;font-size:12px;font-weight:600;line-height:1.2}
@@ -669,14 +669,14 @@ body:not(.ziy) .ziyy{display:none!important}
 .sc-ay .r span:last-child{width:62px;text-align:right}
 .sc-g{margin:12px 2px 6px;font-size:12px;font-weight:800;color:var(--mut);letter-spacing:.4px;text-transform:uppercase;display:flex;justify-content:space-between}
 .scr{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 12px;margin-bottom:6px;cursor:pointer}
-.scr .tm{font:700 12px Inter;color:var(--mut);width:38px;flex:none}
+.scr .tm{font:700 12px var(--fnt);color:var(--mut);width:38px;flex:none}
 .scr .nm{min-width:0;flex:1}.scr .nm b{font-size:14.5px}.scr .nm small{display:block;color:var(--mut);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .scr .rs{font-weight:800;font-size:13.5px;white-space:nowrap}
 .ark{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 14px;margin-bottom:8px}
 .ark .h{display:flex;justify-content:space-between;align-items:baseline;gap:8px}.ark .h b{font-size:15px}
 .ark .ch{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 .ark .ch span{font-size:12px;font-weight:800;padding:5px 9px;border-radius:99px;background:rgba(34,197,94,.1);color:var(--up);border:1px solid rgba(34,197,94,.25)}
-.ark .bt{display:flex;gap:8px}.ark .bt button{flex:1;height:38px;border-radius:11px;font:700 13px Inter;background:var(--bg2);color:var(--tx);border:1px solid var(--line)}
+.ark .bt{display:flex;gap:8px}.ark .bt button{flex:1;height:38px;border-radius:11px;font:700 13px var(--fnt);background:var(--bg2);color:var(--tx);border:1px solid var(--line)}
 .ark .bt button.p{background:#2AABEE;border-color:#2AABEE;color:#fff}
 .arac{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
 .arac h3{margin:0 0 4px}.arac .g2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
@@ -686,7 +686,7 @@ body:not(.ziy) .ziyy{display:none!important}
 .ltr div{background:var(--bg2);border-radius:12px;padding:9px 10px}.ltr small{display:block;font-size:11px;color:var(--mut);font-weight:600}.ltr b{font-size:16px}
 .tkr{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)}
 .tkr:first-child{border-top:0}.tkr .nm{flex:1;min-width:0}.tkr .nm b{font-size:14.5px}.tkr .nm small{display:block;color:var(--mut);font-size:11.5px}
-.tkr button{height:32px;padding:0 10px;border-radius:9px;font:700 12px Inter;background:var(--bg2);color:var(--tx);border:1px solid var(--line)}
+.tkr button{height:32px;padding:0 10px;border-radius:9px;font:700 12px var(--fnt);background:var(--bg2);color:var(--tx);border:1px solid var(--line)}
 .yasal h4{margin:16px 0 6px}.yasal p,.yasal li{color:var(--mut);font-size:13.5px;line-height:1.55}.yasal ul{padding-left:18px;margin:6px 0}
 .uy{position:fixed;inset:0;z-index:120;background:rgba(5,8,14,.92);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;padding:16px}
 .uy.on{display:flex}
@@ -708,13 +708,13 @@ body:not(.ziy) .ziyy{display:none!important}
 /* ---------- v6: durum · kurs · istatistik ---------- */
 .durum{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut);margin:8px 2px 12px;font-weight:600}
 .durum i{width:8px;height:8px;border-radius:50%;background:var(--mut);flex:none}.durum i.on{background:var(--up);box-shadow:0 0 8px var(--up)}
-.tgk2{display:flex;gap:8px;margin:-4px 0 12px}.tgk2 a{flex:1;text-align:center;font:700 12.5px Inter;padding:9px 0;border-radius:12px;background:var(--card);border:1px solid var(--line);color:var(--tx);text-decoration:none}
+.tgk2{display:flex;gap:8px;margin:-4px 0 12px}.tgk2 a{flex:1;text-align:center;font:700 12.5px var(--fnt);padding:9px 0;border-radius:12px;background:var(--card);border:1px solid var(--line);color:var(--tx);text-decoration:none}
 .ders{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
 .ders h3{margin:0 0 10px;font-size:19px}.ders p{color:var(--mut);font-size:14px;line-height:1.6;margin:0 0 10px}.ders p b{color:var(--tx)}
 .ders .sor{background:var(--bg2);border-radius:12px;padding:12px;margin-top:6px;font-size:13.5px}
-.ders .sor button{margin-top:8px;height:34px;padding:0 12px;border-radius:9px;font:700 12.5px Inter;background:var(--card);border:1px solid var(--line);color:var(--tx)}
+.ders .sor button{margin-top:8px;height:34px;padding:0 12px;border-radius:9px;font:700 12.5px var(--fnt);background:var(--card);border:1px solid var(--line);color:var(--tx)}
 .ders .cev{display:none;margin-top:8px;color:var(--up);font-weight:700}.ders .cev.on{display:block}
-.ders .nv{display:flex;gap:8px;margin-top:14px}.ders .nv button{flex:1;height:42px;border-radius:12px;font:700 13.5px Inter;background:var(--bg2);border:1px solid var(--line);color:var(--tx)}
+.ders .nv{display:flex;gap:8px;margin-top:14px}.ders .nv button{flex:1;height:42px;border-radius:12px;font:700 13.5px var(--fnt);background:var(--bg2);border:1px solid var(--line);color:var(--tx)}
 .ders .nv button.p{background:var(--up);border-color:var(--up);color:#03140D}
 #krsSeg button.ok{color:var(--up)}
 .is-t{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:6px 12px;margin-bottom:12px}
@@ -723,6 +723,80 @@ body:not(.ziy) .ziyy{display:none!important}
 .is-t .b{height:8px;border-radius:9px;background:var(--ac,#5B97FF)}
 .g2x{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .g2x .card b{display:block;margin-bottom:6px}.g2x .card div{display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0;color:var(--mut)}.g2x .card div span:last-child{color:var(--tx);font-weight:700}
+
+/* ===================== TEMA D · Saat Kadranı (dolar yeşili + altın) ===================== */
+:root{--fnt:"Instrument Sans",Inter,-apple-system,sans-serif;--cond:"Instrument Sans",Inter,sans-serif;
+  --bg:#0B2A22;--bg2:#0D3027;--card:#10362C;--card2:#174538;--line:#1E4A3E;--line2:#2A5C4D;--tx:#EAF5EF;--txt:#EAF5EF;--mut:#8FB3A5;--dim:#5F8A7A;
+  --up:#5ED6A0;--upb:rgba(94,214,160,.14);--dn:#FF7A6B;--dnb:rgba(255,122,107,.14);--ac:#E9C46A;--ac2:#F3D78E;--acb:rgba(233,196,106,.14);
+  --wa:#F4A259;--wab:rgba(244,162,89,.14);--vi:#B9A5FF;--vib:rgba(185,165,255,.14);--gl:rgba(233,196,106,.25);--r:16px;--altin:#E9C46A}
+html,body{font-family:var(--fnt);background:var(--bg)}
+body{font-feature-settings:normal}
+.num,.pvv,.sr,.g3 b,.lv b,.kpi b,.stat b,.ck{font-variant-numeric:tabular-nums}
+#splash{background:var(--bg)}
+header{background:rgba(11,42,34,.9);border-bottom:1px solid var(--line)}
+nav{background:rgba(13,48,39,.96);border-top:1px solid var(--line)}
+nav button{color:var(--mut)}nav button.on{color:var(--ac)}nav button.on .ib{background:var(--acb);color:var(--ac)}
+.lt{font-stretch:80%;font-weight:700;letter-spacing:-.2px}
+h3,.sh b,.ptl b{font-stretch:88%}
+.pvv{font-stretch:75%;font-weight:700;letter-spacing:-.5px}
+.btn3,.btnw{color:#1A1405}
+a{color:var(--ac)}
+.card,.ovi,.sig,.pos,.run,.list,.stat,.tw,.cwrap,.empty,.news,.gn,.hava,.tk{border-color:var(--line)!important;background:var(--card)}
+.ff.on{background:var(--ac);color:#1A1405;border-color:var(--ac)}
+.dk-SEC{background:rgba(94,214,160,.12);color:var(--up);border-color:rgba(94,214,160,.4)}
+.secn{background:rgba(233,196,106,.08);border-color:rgba(233,196,106,.3)}.secn b{color:var(--ac)}
+
+/* ---- Bugün: kadran + seçili sinyaller; telefonda tek akış, bilgisayarda 3 sütun ---- */
+.anaG{display:flex;flex-direction:column}
+.aK{display:contents}
+.kdK{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:14px 14px 4px;margin:12px 0 4px}
+.kdK svg{display:block;width:100%;height:auto;max-width:420px;margin:0 auto}
+.kd-t{fill:var(--mut);font:600 13px var(--fnt);font-stretch:80%}
+.kd-1{fill:var(--mut);font:600 14px var(--fnt)}
+.kd-2{fill:var(--tx);font:700 56px var(--fnt);font-stretch:75%;font-variant-numeric:tabular-nums}
+.kd-3{fill:var(--altin);font:600 14px var(--fnt)}
+.kd-4{fill:var(--mut);font:500 13px var(--fnt)}
+.kdL{display:flex;justify-content:center;gap:14px;color:var(--mut);font-size:12.5px;margin-top:-4px;flex-wrap:wrap}
+.kdL i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:0}
+.kdS{display:grid;grid-template-columns:repeat(4,1fr);margin-top:14px;border-top:1px solid var(--line)}
+.kdS div{padding:12px 2px 10px;text-align:center}
+.kdS b{display:block;font-size:32px;font-weight:700;font-stretch:75%;line-height:1;font-variant-numeric:tabular-nums}
+.kdS small{color:var(--mut);font-size:12px}
+.kdS .u{color:var(--up)}.kdS .d{color:var(--dn)}.kdS .a{color:var(--altin)}
+.kdG{text-align:center;color:var(--mut);font-size:12px;margin:-2px 0 8px}
+.ssr{display:grid;grid-template-columns:50px 64px minmax(0,1fr) auto;gap:8px;align-items:center;padding:11px 14px;border-top:1px solid var(--line);cursor:pointer}
+.ssr:first-child{border-top:0}
+.ssr .t{color:var(--mut);font-size:13px;font-variant-numeric:tabular-nums}
+.ssr b{font-size:15.5px;font-stretch:85%;letter-spacing:.2px}
+.ssr .k{color:var(--mut);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ssr .p{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+.ssr .p small{display:block;font-weight:500;font-size:11.5px;color:var(--mut)}
+.ssr .p.up{color:var(--up)}.ssr .p.dn{color:var(--dn)}.ssr .p.op{color:var(--altin)}
+.ssL{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.ssE{padding:16px;color:var(--mut);font-size:13.5px;text-align:center}
+
+/* ---- Bilgisayar: üstte yatay menü, geniş pano ---- */
+@media (min-width:1100px){
+  header{padding:12px 28px 8px}
+  .hrow,.sub{max-width:1320px}
+  main{max-width:1320px;padding:14px 28px 48px}
+  nav{position:fixed;top:calc(var(--safe-t) + 11px);bottom:auto;left:50%;right:auto;transform:translateX(-50%);display:flex;justify-content:center;
+      background:var(--card);border:1px solid var(--line);border-radius:14px;padding:4px;gap:2px;backdrop-filter:none;-webkit-backdrop-filter:none;z-index:40}
+  nav button{flex:none;max-width:none;flex-direction:row;gap:6px;padding:6px 14px 6px 8px;border-radius:10px;font-size:14px;font-weight:600;color:var(--mut)}
+  nav button .ib{width:auto;height:auto;background:none!important}
+  nav button svg{width:18px;height:18px}
+  nav button.on{background:var(--bg);color:var(--tx)}nav button.on .ib{color:var(--ac)}
+  nav .nb{top:-4px;left:auto;right:-2px}
+  .toast{bottom:24px}
+  #t-ana .anaG{display:grid;grid-template-columns:minmax(300px,.9fr) minmax(0,1.2fr) minmax(260px,.8fr);gap:22px;align-items:start}
+  #t-ana .aK{display:flex;flex-direction:column}
+  #t-ana .aK2>.sh:first-child{margin-top:10px}
+  #t-ana .kdK{margin-top:6px}
+  #t-ana .pv{margin-top:4px}
+  #t-ana .dip{margin-top:28px}
+  .tab:not(#t-ana):not(#t-piyasa){max-width:1000px;margin-left:auto;margin-right:auto}
+  #sigs{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}#sigs .sig{margin-bottom:0}
+}
 </style>
 </head>
 <body>
@@ -779,23 +853,34 @@ body:not(.ziy) .ziyy{display:none!important}
 <main>
 <!-- ANA EKRAN -->
 <section class="tab on" id="t-ana">
-  <div class="pv" data-go="portfoy" style="cursor:pointer"><div class="pvl">Portföy</div><div class="pvv" id="aVal">—</div>
-    <div class="pvc"><span class="hapG" id="aCh">—</span><span class="meta" style="font-size:13px">bugün</span></div></div>
-  <div class="durum" id="aDur"></div>
-  <div id="aOgr"></div>
-  <div class="v4ser" id="aSer"></div>
-  <div id="aTg"></div>
-  <div id="aSup"></div>
-  <div id="aTk"></div>
-  <div class="sh"><b>☀️ Günün Listesi</b><span id="aListT"></span></div>
-  <div id="aList"></div>
-  <div class="achart" id="aChart"></div>
-  <div class="rng" id="aRng"><button data-r="1">1G</button><button data-r="7">1H</button><button data-r="30">1A</button><button data-r="90">3A</button><button data-r="0">TÜMÜ</button></div>
-  <div class="bsn" id="aBot" data-go="bot"></div>
-  <div class="sh"><b>Açık işlemler</b><span id="aOpenN" data-go="bot">0 işlem ›</span></div>
-  <div class="hsc" id="aOpen"></div>
-  <div class="sh"><b>İzleme listesi</b><span data-go="piyasa" id="aWlN">Tümü ›</span></div>
-  <div class="wl" id="aWl"></div>
+ <div class="anaG">
+  <div class="aK aK1">
+    <div class="kdK" id="aKad" style="order:3"></div>
+    <div id="aOgr" style="order:6"></div>
+    <div id="aTg" style="order:8"></div>
+  </div>
+  <div class="aK aK2">
+    <div class="sh" style="order:4"><b>Seçili sinyaller</b><span data-go="sinyal" id="aSecN">Tümü ›</span></div>
+    <div id="aSec" style="order:5"></div>
+    <div class="sh" style="order:11"><b>☀️ Günün Listesi</b><span id="aListT"></span></div>
+    <div id="aList" style="order:12"></div>
+    <div class="sh" style="order:16"><b>Açık işlemler</b><span id="aOpenN" data-go="bot">0 işlem ›</span></div>
+    <div class="hsc" id="aOpen" style="order:17"></div>
+    <div class="sh" style="order:18"><b>İzleme listesi</b><span data-go="piyasa" id="aWlN">Tümü ›</span></div>
+    <div class="wl" id="aWl" style="order:19"></div>
+  </div>
+  <div class="aK aK3">
+    <div class="pv" data-go="portfoy" style="cursor:pointer;order:1"><div class="pvl">Botun parası</div><div class="pvv" id="aVal">—</div>
+      <div class="pvc"><span class="hapG" id="aCh">—</span><span class="meta" style="font-size:13px">bugün</span></div></div>
+    <div class="durum" id="aDur" style="order:2"></div>
+    <div class="v4ser" id="aSer" style="order:7"></div>
+    <div class="achart" id="aChart" style="order:13"></div>
+    <div class="rng" id="aRng" style="order:14"><button data-r="1">1G</button><button data-r="7">1H</button><button data-r="30">1A</button><button data-r="90">3A</button><button data-r="0">TÜMÜ</button></div>
+    <div class="bsn" id="aBot" data-go="bot" style="order:15"></div>
+    <div id="aSup" style="order:9"></div>
+    <div id="aTk" style="order:10"></div>
+  </div>
+ </div>
   <div class="dip">$ABDBOT · paper trade · yatırım tavsiyesi değildir<br><a data-go="sicil">Şeffaf sicil</a> · <a data-go="rehber">Nasıl çalışır</a> · <a data-go="yasal">Yasal uyarı</a> · <a data-go="iletisim">Geri bildirim</a></div>
 </section>
 
@@ -805,7 +890,7 @@ body:not(.ziy) .ziyy{display:none!important}
   <div class="meta" id="plN" style="margin:-4px 2px 10px"></div>
   <div class="v4seg" id="plSeg"><button data-k="aktif" class="on">Aktif</button><button data-k="liste">Günün Listesi</button><button data-k="biten">Bugün biten</button></div>
   <div id="plL"></div>
-  <div class="sh"><b>Son sinyaller</b><span data-go="sinyal">Tümü ›</span></div>
+  <div class="sh"><b>Son seçili sinyaller</b><span data-go="sinyal">Tümü ›</span></div>
   <div id="plSig"></div>
 </section>
 
@@ -1375,14 +1460,14 @@ const SES_K={pre:'Öncesi',regular:'Normal',post:'Sonrası'};
 const ST_TR={bekliyor:'Emir bekliyor','açık':'Açık',hedef:'Hedef ✓',stop:'Stop ✗','süre':'Süre doldu','dolmadı':'Dolmadı'};
 const BST_TR={emir:'Emir gönderildi','açık':'Açık','çıkış':'Çıkış emri','kapandı':'Kapandı',iptal:'İptal'};
 const TF_AD={'1':'1dk','5':'5dk','15':'15dk','D':'Günlük'};
-const C={up:'#22C55E',dn:'#F43F5E',ac:'#4F8CFF',wa:'#F5C04E',mut:'#8891A5'};
+const C={up:'#5ED6A0',dn:'#FF7A6B',ac:'#E9C46A',wa:'#F4A259',mut:'#8FB3A5'};
 const $=id=>document.getElementById(id);
 function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
 function esc(x){return String(x==null?'':x).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 
 let ws=null,retry=0,symbols=[],iexSet=new Set(),rows={},status={},offset=0;
 const TGW=(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.initData)?Telegram.WebApp:null;
-try{if(TGW){TGW.ready();TGW.expand();TGW.setHeaderColor&&TGW.setHeaderColor('#0A0D13');TGW.setBackgroundColor&&TGW.setBackgroundColor('#0A0D13')}}catch(e){}
+try{if(TGW){TGW.ready();TGW.expand();TGW.setHeaderColor&&TGW.setHeaderColor('#0B2A22');TGW.setBackgroundColor&&TGW.setBackgroundColor('#0A0D13')}}catch(e){}
 const QS=(()=>{try{const sp=TGW&&TGW.initDataUnsafe&&TGW.initDataUnsafe.start_param;if(sp&&sp.startsWith('s_'))return sp.slice(2).toUpperCase().replace(/[^A-Z.\-]/g,'').slice(0,8);const q=new URLSearchParams(location.search).get('s');return q?q.toUpperCase().replace(/[^A-Z.\-]/g,'').slice(0,8):''}catch(e){return''}})();
 let cur=QS||ls('sym')||'SPY',tf=String(ls('tf')||'1'),sortKey=ls('sort')||'hare',raw=[],info=null,prevLine=null,lastPx={};
 let SECI={},sigList=[],sigStats=[],mine=[],learn=null,sigFilter=ls('sigf')||'secili',sigShow=15,knownIds=null,sigLines=[],openIds=new Set();
@@ -1415,15 +1500,55 @@ MAIN.addEventListener('touchstart',e=>{if(e.target.closest('#cwrap,.tw,.tools,.s
 MAIN.addEventListener('touchend',e=>{if(sx===null)return;const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;sx=null;
   if(Math.abs(dx)>70&&Math.abs(dy)<45&&Date.now()-st0<600){const i=TABS.indexOf(tab)+(dx<0?1:-1);if(i>=0&&i<TABS.length)showTab(TABS[i])}},{passive:true});
 
+
+// ---------------- Bugün: seans kadranı + seçili sinyaller (tema D)
+function trDk(t){const p=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(t*1000)).split(':');return (+p[0]%24)*60+(+p[1])}
+function dkSaat(m){m=((Math.round(m)%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')}
+function etGun(t){return new Date(t*1000).toLocaleDateString('en-CA',{timeZone:'America/New_York'})}
+function sure(m){m=Math.max(0,Math.round(m));return m<60?m+' dk':Math.floor(m/60)+' sa'+(m%60?' '+(m%60)+' dk':'')}
+function secGun(){const L=(sigList||[]).filter(s=>s.sec===1),bugun=etGun(nowS());
+  if(L.some(s=>etGun(s.t)===bugun))return{gun:bugun,L:L.filter(s=>etGun(s.t)===bugun),bugun:true};
+  const son=L.length?L.map(s=>etGun(s.t)).sort().pop():null;return{gun:son,L:son?L.filter(s=>etGun(s.t)===son):[],bugun:false}}
+function sonSinif(s){return['hedef','stop','süre'].includes(s.st)?((s.r||0)>0?'up':'dn'):'op'}
+function kadranCiz(){const el=$('aKad');if(!el)return;const S=SECI||{};
+  const ac=(S.acilis||'16:30').split(':').map(Number),o=ac[0]*60+ac[1],t0=o-330,t1=o+390;
+  const b=o+(S.b!=null?S.b:30),e=o+(S.s!=null?S.s:240);
+  const r=150,k=16,cx=180,cy=176,W=360,a0=-240,a1=60;
+  const cl=t=>Math.max(t0,Math.min(t1,t)),ang=t=>(a0+(cl(t)-t0)/(t1-t0)*(a1-a0))*Math.PI/180;
+  const pt=(t,rr)=>[cx+rr*Math.cos(ang(t)),cy+rr*Math.sin(ang(t))];
+  const yay=(ta,tb,rr)=>{const[x1,y1]=pt(ta,rr),[x2,y2]=pt(tb,rr),big=(cl(tb)-cl(ta))/(t1-t0)*300>180?1:0;return`M${x1.toFixed(1)},${y1.toFixed(1)} A${rr},${rr} 0 ${big} 1 ${x2.toFixed(1)},${y2.toFixed(1)}`};
+  const now=trDk(nowS()),ses=(status&&status.ses)||'closed',G=secGun(),L=G.L.slice().sort((a,b)=>a.t-b.t);
+  const gunAcik=ses!=='closed'||(now>=t0&&now<=t1&&new Date(nowS()*1000).getDay()%6!==0);
+  let h=`<svg viewBox="0 0 ${W} ${W-26}" role="img" aria-label="Seans kadranı">`;
+  h+=`<path d="${yay(t0,t1,r)}" stroke="#163F33" stroke-width="${k}" fill="none" stroke-linecap="round"/><path d="${yay(o,t1,r)}" stroke="#1E5242" stroke-width="${k}" fill="none"/>`;
+  if(S.acik)h+=`<path d="${yay(b,e,r)}" stroke="#E9C46A" stroke-width="${k}" fill="none"/>`;
+  if(gunAcik&&now>t0)h+=`<path d="${yay(t0,Math.min(now,t1),r+k/2+8)}" stroke="#3E6E5E" stroke-width="2" fill="none"/>`;
+  for(let t=Math.ceil(t0/60)*60;t<=t1;t+=60){const[x1,y1]=pt(t,r-k/2-6),[x2,y2]=pt(t,r-k/2-12);h+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#3E6E5E" stroke-width="1.5"/>`;
+    if((t/60)%2===1||t===Math.round(b/60)*60){const[xt,yt]=pt(t,r-k/2-26);h+=`<text x="${xt.toFixed(1)}" y="${(yt+4).toFixed(1)}" text-anchor="middle" class="kd-t">${t/60%24}</text>`}}
+  const yer={};for(const s of L){const tt=trDk(s.t),kk=Math.round(tt/6),n=yer[kk]||0;yer[kk]=n+1;const[x,y]=pt(tt,r+k/2+12+n*11),c=sonSinif(s);
+    h+=c==='op'?`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5" fill="none" stroke="#E9C46A" stroke-width="2"><title>${esc(s.sym)}</title></circle>`:`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5" fill="${c==='up'?'#5ED6A0':'#FF7A6B'}"><title>${esc(s.sym)} ${esc(fS(s))}</title></circle>`}
+  if(gunAcik&&now>=t0&&now<=t1){const[xa,ya]=pt(now,r-k/2-2),[xb,yb]=pt(now,r+k/2+2);h+=`<line x1="${xa.toFixed(1)}" y1="${ya.toFixed(1)}" x2="${xb.toFixed(1)}" y2="${yb.toFixed(1)}" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`}
+  let d3='';if(!S.acik)d3='seçici kapalı';else if(!gunAcik)d3='piyasa kapalı';else if(now<b)d3='seçili saate '+sure(b-now);else if(now<e)d3='seçili saat şimdi · '+sure(e-now)+' kaldı';else d3='bugünün seçili saati bitti';
+  h+=`<text x="${cx}" y="${cy-56}" text-anchor="middle" class="kd-1">şimdi</text><text x="${cx}" y="${cy+6}" text-anchor="middle" class="kd-2">${dkSaat(now)}</text>`;
+  h+=`<text x="${cx}" y="${cy+36}" text-anchor="middle" class="kd-3">${esc(d3)}</text><text x="${cx}" y="${cy+58}" text-anchor="middle" class="kd-4">seçili saat ${esc(S.t1||'17:00')}–${esc(S.t2||'20:30')}</text></svg>`;
+  const nH=L.filter(s=>sonSinif(s)==='up').length,nS=L.filter(s=>sonSinif(s)==='dn').length,nA=L.filter(s=>sonSinif(s)==='op').length;
+  const gl=G.gun&&!G.bugun?new Date(G.gun+'T12:00:00Z').toLocaleDateString('tr-TR',{day:'numeric',month:'long'}):'';
+  el.innerHTML=h+`<div class="kdL"><span><i style="background:#E9C46A"></i>seçili saat</span><span><i style="background:#5ED6A0"></i>hedef</span><span><i style="background:#FF7A6B"></i>stop</span><span><i style="border:2px solid #E9C46A;width:5px;height:5px"></i>açık</span></div>
+   <div class="kdS"><div><b>${L.length}</b><small>seçili sinyal</small></div><div><b class="u">${nH}</b><small>hedefte</small></div><div><b class="d">${nS}</b><small>stop</small></div><div><b class="a">${nA}</b><small>açık</small></div></div>${gl?`<div class="kdG">Son seans: ${esc(gl)}</div>`:''}`}
+function secListe(){const el=$('aSec');if(!el)return;const G=secGun(),L=G.L.slice().sort((a,b)=>b.t-a.t).slice(0,8),S=SECI||{};
+  if(!L.length){el.innerHTML=`<div class="ssL"><div class="ssE">Bugün henüz seçili sinyal yok. Seçili saat ${esc(S.t1||'17:00')}–${esc(S.t2||'20:30')} arasında koşan hisselerden gelir.</div></div>`;return}
+  el.innerHTML='<div class="ssL">'+L.map(s=>{const c=sonSinif(s),bit=c!=='op';return`<div class="ssr" data-sym="${esc(s.sym)}"><span class="t">${dkSaat(trDk(s.t))}</span><b>${esc(s.sym)}</b><span class="k">${esc(SETUP_K[s.setup]||s.setup)} · giriş ${fp(s.e)}</span><span class="p ${c}">${bit?esc(fS(s)):(s.st==='açık'?'açık':'bekliyor')}<small>${bit?(c==='up'?'hedef':s.st==='süre'?'süre':'stop'):'takipte'}</small></span></div>`}).join('')+'</div>'}
+$('aSec').addEventListener('click',e=>{const r=e.target.closest('[data-sym]');if(r)select(r.dataset.sym)});
+setInterval(()=>{if(tab==='ana'){try{kadranCiz()}catch(e){}}},30000);
 // ---------------- grafik (koyu tema)
 const chart=LightweightCharts.createChart($('chart'),{autoSize:true,
-  layout:{background:{type:'solid',color:'#0A1013'},textColor:'#8891A5',fontSize:12,fontFamily:'Inter, sans-serif'},
+  layout:{background:{type:'solid',color:'#0D3027'},textColor:'#8FB3A5',fontSize:12,fontFamily:'Instrument Sans, Inter, sans-serif'},
   grid:{vertLines:{color:'rgba(255,255,255,.035)'},horzLines:{color:'rgba(255,255,255,.035)'}},
-  rightPriceScale:{borderColor:'#1c1c21'},timeScale:{borderColor:'#1c1c21',timeVisible:true,secondsVisible:false,rightOffset:6},
-  crosshair:{mode:0,vertLine:{color:'#5f5f6b',labelBackgroundColor:'#2c2c33'},horzLine:{color:'#5f5f6b',labelBackgroundColor:'#2c2c33'}}});
+  rightPriceScale:{borderColor:'#1E4A3E'},timeScale:{borderColor:'#1E4A3E',timeVisible:true,secondsVisible:false,rightOffset:6},
+  crosshair:{mode:0,vertLine:{color:'#5F8A7A',labelBackgroundColor:'#174538'},horzLine:{color:'#5F8A7A',labelBackgroundColor:'#174538'}}});
 const cs=chart.addCandlestickSeries({upColor:C.up,downColor:C.dn,borderVisible:false,wickUpColor:C.up,wickDownColor:C.dn,priceLineColor:C.ac});
 cs.priceScale().applyOptions({scaleMargins:{top:.06,bottom:.24}});
-const area=chart.addAreaSeries({lineColor:C.up,topColor:'rgba(34,197,94,.28)',bottomColor:'rgba(34,197,94,0)',lineWidth:2,priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:true});
+const area=chart.addAreaSeries({lineColor:C.up,topColor:'rgba(94,214,160,.26)',bottomColor:'rgba(94,214,160,0)',lineWidth:2,priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:true});
 function lineMode(a){if(!opt.line||!a.length){area.setData([]);cs.applyOptions({visible:true});return}
   const up=a[a.length-1][4]>=a[0][1],c=up?C.up:C.dn;cs.applyOptions({visible:false});
   area.applyOptions({lineColor:c,topColor:up?'rgba(34,197,94,.28)':'rgba(244,63,94,.26)',bottomColor:'rgba(0,0,0,0)'});
@@ -2583,7 +2708,7 @@ function connect(){if(document.hidden||ws)return;
     else if(m.type==='bar'&&m.sym===cur){const pc=info&&info.pc;info=m.i;setLV(m.lv);applyBars(m.bars);if(info&&info.pc!==pc)setPrevLine();updateQuote()}
     else if(m.type==='daily'){daily[m.sym]={at:Date.now(),bars:(m.bars||[]).map(x=>[Date.parse(x[0]+'T00:00:00Z')/1000,x[1],x[2],x[3],x[4],x[5],1])};
       if(m.sym===cur&&isD()){srKey='';vpKey='';render(true)}}
-    else if(m.type==='sig'){sigList=m.list||[];SECI=m.secici||SECI;try{secNot();if(typeof durumYaz==='function')durumYaz()}catch(e){}setTimeout(renderOzet,0);setTimeout(renderAna,0);sigStats=m.stats||[];learn=m.learn||learn;if(tab==='tara')setTimeout(()=>{try{renderPlanlar()}catch(e){}},0);if(tab==='strateji')setTimeout(renderStrateji,0);if(tab==='basari')setTimeout(renderBasari,0);if(m.mine)mine=m.mine;
+    else if(m.type==='sig'){sigList=m.list||[];SECI=m.secici||SECI;try{secNot();if(typeof durumYaz==='function')durumYaz();kadranCiz();secListe()}catch(e){}setTimeout(renderOzet,0);setTimeout(renderAna,0);sigStats=m.stats||[];learn=m.learn||learn;if(tab==='tara')setTimeout(()=>{try{renderPlanlar()}catch(e){}},0);if(tab==='strateji')setTimeout(renderStrateji,0);if(tab==='basari')setTimeout(renderBasari,0);if(m.mine)mine=m.mine;
       if(knownIds===null)knownIds=new Set(sigList.map(s=>s.id));
       else for(const s of sigList.slice().reverse())if(!knownIds.has(s.id)){knownIds.add(s.id);
         if(s.super&&nowS()-s.t<900){toast(`<b>💎 Süper Fırsat · ${esc(s.sym)}</b><br><span class="meta">Giriş ${fp(s.e)} · Stop ${fp(s.s)} · Hedef ${fp(s.h)}</span>`,'',()=>select(s.sym));try{navigator.vibrate&&navigator.vibrate([220,90,220,90,420])}catch(e){}continue}
@@ -2662,7 +2787,7 @@ function renderPlanSayfa(){if(tab!=='plan')return;const P=(learn&&learn.plan)||{
   else if(plSeg==='liste'){h=(L.liste||[]).length?L.liste.map(x=>v4kart(x,{bot:x.bot})).join(''):`<div class="v4bos">Bugünün listesi henüz yok (açılıştan ~25 dk önce hazırlanır).</div>`}
   else{const son=P.son||[];h=son.length?son.map(p=>v4kart(p)).join(''):`<div class="v4bos">Bugün biten plan yok.</div>`}
   $('plL').innerHTML=h;
-  const S=(sigList||[]).slice(0,6);
+  const S0=(sigList||[]).filter(s=>s.sec===1),S=(S0.length?S0:(sigList||[])).slice(0,6);
   $('plSig').innerHTML=S.length?`<div class="v4kutu" style="padding:2px 12px">${S.map(s=>`<div class="v4kg" data-sym="${esc(s.sym)}" style="cursor:pointer"><div><div class="ad">${esc(s.sym)} <span class="meta" style="font-weight:600">${esc(SETUP_K[s.setup]||s.setup)}</span></div><small>giriş ${fp(s.e)} · stop ${fp(s.s)} · hedef ${fp(s.h)}</small></div><div class="rr ${cls(s.r)}">${s.r!=null?fS(s):esc(ST_TR[s.st]||s.st)}</div></div>`).join('')}</div>`:'<div class="v4bos">Henüz sinyal yok.</div>'}
 function v4bul(id){const P=(learn&&learn.plan)||{},L=(learn&&learn.liste)||{};
   return [...(P.aktif||[]),...(P.son||[])].find(p=>p.id===id)||(L.liste||[]).find(x=>x.plan===id||x.sym===id)||[...(P.aktif||[]),...(P.son||[])].find(p=>p.sym===id)}
@@ -2895,7 +3020,7 @@ function durumYaz(){const el=$('aDur');if(!el)return;const D=DURUM||{};
   const on=D.calisiyor!==false&&botD?!!botD.active:D.calisiyor!==false;
   let pen='';if(SECI&&SECI.acik&&SECI.t1){const h=new Date().toLocaleTimeString('tr-TR',{timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit',hour12:false}),ic=h>=SECI.t1&&h<SECI.t2;
     pen=` · 🎯 seçili saat ${ic?'<b style="color:#22C55E">şimdi</b> ('+esc(SECI.t1)+'–'+esc(SECI.t2)+')':esc(SECI.t1)+'–'+esc(SECI.t2)}`}
-  el.innerHTML=`<i class="${on?'on':''}"></i><span>${on?'Bot çalışıyor':'Bot duraklatıldı'}${son?' · son sinyal '+ne(son):''}${ses?' · '+esc(ses):''}${pen}</span>`}
+  el.innerHTML=`<i class="${on?'on':''}"></i><span>${on?'Bot çalışıyor':'Bot duraklatıldı'}${son?' · son sinyal '+ne(son):''}${ses?' · '+esc(ses):''}</span>`}
 setInterval(durumYaz,10000);
 // sekmeler + sayaç
 TABS.push('kurs','istatistik');Object.assign(NAVOF,{kurs:'ana',istatistik:'ana'});

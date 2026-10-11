@@ -2609,6 +2609,7 @@ def secici_bilgi():
     t1, t2 = pencere_tr()
     rp_ = OTO.get("rapor") or {}
     return {"acik": BOT_CFG.get("secici", 1), "t1": t1, "t2": t2, "ana": BOT_CFG.get("ana_liste", 0),
+            "b": int(BOT_CFG.get("pencere_bas", 30)), "s": int(BOT_CFG.get("pencere_son", 240)), "acilis": dk_tr(0),
             "oto": BOT_CFG.get("oto_ayar", 1), "ot": OTO.get("t") or 0,
             "kotu": [sinyal.SETUP_AD.get(k, k) for k in sorted(secici_kotu())],
             "dilim": [_dilim_ad(a) for a in OTO.get("ana") or []],
@@ -7530,19 +7531,19 @@ def ask_login():
 
 
 LOGIN_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0a0e17">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0B2A22">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ABD·BOT"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/ikon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <title>ABD·BOT · Giriş</title><style>
-body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 80% at 50% 0%,#16213a 0%,#0a0e17 60%);color:#e6ebf5;font:500 16px Inter,-apple-system,sans-serif}
-form{width:100%;max-width:360px;margin:16px;padding:28px 22px;text-align:center;background:rgba(20,27,42,.75);border:1px solid #222c40;border-radius:24px;backdrop-filter:blur(12px)}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 80% at 50% 0%,#14503F 0%,#0B2A22 60%);color:#EAF5EF;font:500 16px Inter,-apple-system,sans-serif}
+form{width:100%;max-width:360px;margin:16px;padding:28px 22px;text-align:center;background:rgba(16,54,44,.85);border:1px solid #1E4A3E;border-radius:24px;backdrop-filter:blur(12px)}
 img{width:76px;height:76px;border-radius:20px;margin-bottom:14px;box-shadow:0 10px 30px rgba(56,189,248,.25)}
-h1{margin:0 0 4px;font-size:26px;font-weight:800;letter-spacing:-.5px}p{margin:0 0 22px;color:#8b95a9;font-size:14px}
-input{width:100%;box-sizing:border-box;font:600 16px Inter,sans-serif;padding:14px 16px;border-radius:14px;border:1px solid #2a3550;background:#0f1522;color:#e6ebf5;margin-bottom:12px;outline:none}
-input:focus{border-color:#38bdf8}
-button{width:100%;font:700 16px Inter,sans-serif;padding:14px;border:0;border-radius:14px;background:linear-gradient(135deg,#38bdf8,#6366f1);color:#fff;cursor:pointer}
+h1{margin:0 0 4px;font-size:26px;font-weight:800;letter-spacing:-.5px}p{margin:0 0 22px;color:#8FB3A5;font-size:14px}
+input{width:100%;box-sizing:border-box;font:600 16px Inter,sans-serif;padding:14px 16px;border-radius:14px;border:1px solid #2A5C4D;background:#0D3027;color:#EAF5EF;margin-bottom:12px;outline:none}
+input:focus{border-color:#E9C46A}
+button{width:100%;font:700 16px Inter,sans-serif;padding:14px;border:0;border-radius:14px;background:#E9C46A;color:#1A1405;cursor:pointer}
 button:active{opacity:.85}
 .err{color:#fca5a5;background:rgba(239,68,68,.12);border-radius:12px;padding:9px;font-size:14px;margin:0 0 12px}</style></head><body>
 <form method="post" action="/giris"><img src="/ikon-192.png" alt=""><h1>ABD·BOT</h1><p>Canlı sinyal ve sanal işlem botu</p>
@@ -7669,7 +7670,7 @@ async def cikis_yap(request: Request):
 MANIFEST = {
     "name": "ABD·BOT", "short_name": "ABD·BOT", "description": "ABD borsası canlı sinyal ve sanal işlem botu",
     "start_url": "/", "scope": "/", "display": "standalone", "orientation": "portrait",
-    "background_color": "#0a0e17", "theme_color": "#0a0e17", "lang": "tr",
+    "background_color": "#0B2A22", "theme_color": "#0B2A22", "lang": "tr",
     "icons": [
         {"src": "/ikon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
         {"src": "/ikon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
