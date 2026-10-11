@@ -519,6 +519,12 @@ nav button.on{color:var(--up)}nav button.on .ib{background:transparent;color:var
 .supk .bt{display:flex;gap:6px;margin-top:10px}.supk .bt button{flex:1;text-align:center;padding:10px 0;border-radius:12px;font-weight:800;font-size:13.5px}.supk .bt .a{background:#F5C04E;color:#2A1A00}.supk .bt .b{border:1px solid rgba(245,192,78,.5);color:#F5C04E}
 .supk .ne{display:none;margin-top:10px}.supk.open .ne{display:block}
 .dk-SUP{background:linear-gradient(90deg,#FFE08A,#F5C04E);color:#2A1A00;border:0}
+.dk-SEC{background:rgba(34,197,94,.14);color:#22C55E;border:1px solid rgba(34,197,94,.45)}
+.sig.izl{opacity:.62}.sig.izl.open{opacity:1}
+.izt{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;color:var(--mu,#8A97AD)}
+.secn{margin:0 2px 10px;padding:9px 12px;border-radius:12px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.28);font-size:12.5px;line-height:1.45}
+.secn b{color:#22C55E}
+.sec-why{margin-top:8px;font-size:12px;color:var(--mu,#8A97AD)}
 .sig.sup{border-color:rgba(245,192,78,.5)!important;box-shadow:0 0 22px rgba(245,192,78,.12)}
 .skb{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.skb div{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 11px}
 .skb small{display:block;font-size:11px;color:var(--mut);font-weight:800;letter-spacing:.3px}.skb b{display:block;font-size:20px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}.skb span{font-size:11px;color:var(--mut)}
@@ -863,7 +869,8 @@ body:not(.ziy) .ziyy{display:none!important}
 <section class="tab" id="t-sinyal">
   <div class="ptl"><b>AI Sinyalleri</b><span>Yapay zeka destekli gerçek zamanlı sinyaller · her biri Karar Denetçisi'nden geçer</span></div>
   <div id="sigSup"></div>
-  <div class="seg2" id="sigf"><button class="ff" data-k="hepsi">Tümü</button><button class="ff" data-k="super">💎 Süper</button><button class="ff" data-k="yuksek">Yüksek Güven</button><button class="ff" data-k="orta">Orta Güven</button><button class="ff" data-k="dusuk">Düşük</button><button class="ff" data-k="acik">Açık</button><button class="ff" data-k="bu">Bu hisse</button></div>
+  <div class="secn" id="secN" style="display:none"></div>
+  <div class="seg2" id="sigf"><button class="ff" data-k="secili">✅ Seçili</button><button class="ff" data-k="hepsi">Tümü</button><button class="ff" data-k="super">💎 Süper</button><button class="ff" data-k="yuksek">Yüksek Güven</button><button class="ff" data-k="orta">Orta Güven</button><button class="ff" data-k="dusuk">Düşük</button><button class="ff" data-k="acik">Açık</button><button class="ff" data-k="bu">Bu hisse</button></div>
   <div id="sigs"></div>
   <button class="morebtn" id="more">Daha fazla göster</button>
 </section>
@@ -1003,6 +1010,10 @@ body:not(.ziy) .ziyy{display:none!important}
     <div class="fld"><label>Kanala gidecek en küçük hedef (%)<small>Hedef girişe bundan yakınsa sinyal sadece sitede kalır. Örn. 2</small></label><input type="number" inputmode="decimal" step="0.5" data-k="tg_min_hedef"></div>
     <div class="fld"><label>En dar stop (%)<small>Stop girişe bundan yakınsa bot girmez: masraf ve kayma stopu yer. Örn. 0,6</small></label><input type="number" inputmode="decimal" step="0.1" data-k="min_stop_pct"></div>
     <div class="fld"><label>Eksi beklentili işleme girme<small>Öğrenme modeli bu koşullarda kurguyu zararda görüyorsa bot girmez</small></label><button class="tg" data-k="eksi_atla"></button></div>
+    <div class="fld"><label>🎯 Seçici süzgeç<small>Telegram'a ve bota sadece verinin kazandırdığı dilim gider: saat penceresi içinde, koşan hisseler, zararlı kurgular hariç. Kalanlar sitede izleme olarak ölçülür</small></label><button class="tg" data-k="secici"></button></div>
+    <div class="fld"><label>Büyük hisseler de gitsin<small>Kapalıyken ana listedeki büyük hisselerin sinyalleri sadece sitede kalır (geçmiş testte hiçbir dilimi kârlı çıkmadı)</small></label><button class="tg" data-k="ana_liste"></button></div>
+    <div class="fld"><label>Pencere başı (açılıştan dk)<small>30 = 10:00 ET · 17:00 TR</small></label><input type="number" inputmode="numeric" data-k="pencere_bas"></div>
+    <div class="fld"><label>Pencere sonu (açılıştan dk)<small>240 = 13:30 ET · 20:30 TR</small></label><input type="number" inputmode="numeric" data-k="pencere_son"></div>
     <div class="fld"><label>Aynı sektörde en fazla işlem<small>Örn. 2: üç yarı iletken hissesine birden girmez. 0 = sınır yok</small></label><input type="number" inputmode="numeric" data-k="sektor_max"></div>
     <div class="fld"><label>Günlük zarar limiti ($)<small>Dolunca bot o gün yeni işlem açmaz</small></label><input type="number" inputmode="decimal" data-k="daily_loss"></div>
     <div class="fld"><label>Güven eşiği, normal seans</label><input type="number" inputmode="numeric" data-k="min_conf"></div>
@@ -1365,7 +1376,7 @@ const TGW=(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.initData)?Telegram.
 try{if(TGW){TGW.ready();TGW.expand();TGW.setHeaderColor&&TGW.setHeaderColor('#0A0D13');TGW.setBackgroundColor&&TGW.setBackgroundColor('#0A0D13')}}catch(e){}
 const QS=(()=>{try{const sp=TGW&&TGW.initDataUnsafe&&TGW.initDataUnsafe.start_param;if(sp&&sp.startsWith('s_'))return sp.slice(2).toUpperCase().replace(/[^A-Z.\-]/g,'').slice(0,8);const q=new URLSearchParams(location.search).get('s');return q?q.toUpperCase().replace(/[^A-Z.\-]/g,'').slice(0,8):''}catch(e){return''}})();
 let cur=QS||ls('sym')||'SPY',tf=String(ls('tf')||'1'),sortKey=ls('sort')||'hare',raw=[],info=null,prevLine=null,lastPx={};
-let sigList=[],sigStats=[],mine=[],learn=null,sigFilter=ls('sigf')||'hepsi',sigShow=15,knownIds=null,sigLines=[],openIds=new Set();
+let SECI={},sigList=[],sigStats=[],mine=[],learn=null,sigFilter=ls('sigf')||'secili',sigShow=15,knownIds=null,sigLines=[],openIds=new Set();
 let botD=null,knownJ=null,runRows=[],runDrop=[],runPats=[],runStatus='',tab=ls('v3')?(ls('tab')||'ana'):'ana';ls('v3','1');
 let LV={lv:[],sup:null,res:null},lvLines=[],srLines=[],vpLines=[],srKey='',vpKey='',VP=null,daily={};
 let opt={sr:1,vp:1,vol:1,vwap:1,ema:0,kl:0,mk:1,fx:1,zn:1,rsi:0,macd:0,line:0,kn:1,fvg:1,yp:0,fib:0,e50:0};
@@ -1836,14 +1847,14 @@ function sigCard(s){const al=s.dir>0;
   const done=['hedef','stop','süre'].includes(s.st),k=done?(s.r>0?'win':'loss'):(s.st==='dolmadı'?'':'live');
   const taken=botD&&(botD.open.concat(botD.recent)).some(p=>p.sig===s.id&&p.st!=='iptal');
   const sag=done?`<b class="sr ${cls(s.r)}">${fS(s)}</b>`:`<span class="stt ${k}">${ST_TR[s.st]||s.st}</span>`;
-  return `<div class="sig sg2${openIds.has(s.id)?' open':''}${s.super?' sup':''}" data-id="${esc(s.id)}">
-  <div class="h">${logo(s.sym)}<div class="hn"><div><b>${esc(s.sym)}</b><span class="hp ${al?'al':'sat'}">${al?'AL':'SAT'}</span>${s.super?'<span class="dk dk-SUP">💎 SÜPER</span>':s.den?`<span class="dk dk-${s.den.karar}">${DKAD[s.den.karar]||s.den.karar}</span>`:''}${taken?'<span class="tag">BOT</span>':''}</div>
-    <small>${SETUP_K[s.setup]||s.setup} · ${SES_K[s.ses]||s.ses}${s.runner?' · koşan':''}</small></div>
+  return `<div class="sig sg2${openIds.has(s.id)?' open':''}${s.super?' sup':''}${s.sec===0?' izl':''}" data-id="${esc(s.id)}">
+  <div class="h">${logo(s.sym)}<div class="hn"><div><b>${esc(s.sym)}</b><span class="hp ${al?'al':'sat'}">${al?'AL':'SAT'}</span>${s.sec===1?'<span class="dk dk-SEC">✅ SEÇİLİ</span>':''}${s.super?'<span class="dk dk-SUP">💎 SÜPER</span>':s.den?`<span class="dk dk-${s.den.karar}">${DKAD[s.den.karar]||s.den.karar}</span>`:''}${taken?'<span class="tag">BOT</span>':''}</div>
+    <small>${SETUP_K[s.setup]||s.setup} · ${SES_K[s.ses]||s.ses}${s.runner?' · koşan':''}${s.sec===0?'<span class="izt">👁 izleme</span>':''}</small></div>
     <div class="hr"><small>${s.conf}/100 · ${tTR(s.t+60).slice(-5)}</small>${sag}</div></div>
   <div class="g3"><span>Giriş<b>${fp(s.e)}</b></span><span>Stop<b>${fp(s.s)}</b></span><span>Hedef<b>${fp(s.h)}</b></span></div>
   ${s.den?`<div class="meta" style="margin-top:8px">${esc(s.den.neden)}</div>`:''}
   ${s.yz&&(s.yz.karar==='AL'||s.yz.karar==='PAS')?`<div class="yzline">🧠 <b>Yapay zekâ: ${s.yz.karar==='AL'?'AL':'PAS GEÇ'}</b> · olasılık %${s.yz.p} (eşik %${s.yz.esik}) · ${esc(s.yz.neden||'')}</div>`:''}
-  <ul>${s.den?'<li style="list-style:none;margin-left:-18px">'+denMods(s.den,s.yz)+'</li>':''}${(s.why||[]).map(w=>'<li>'+esc(w)+'</li>').join('')}<li style="list-style:none;margin:8px 0 0 -18px"><span class="go" data-sym="${esc(s.sym)}">Grafiği aç →</span></li></ul></div>`}
+  <ul>${s.sec===0&&s.sec_n?`<li class="sec-why" style="list-style:none;margin:0 0 6px -18px">👁 Telegram'a ve bota gitmedi: ${esc(s.sec_n)}</li>`:''}${s.den?'<li style="list-style:none;margin-left:-18px">'+denMods(s.den,s.yz)+'</li>':''}${(s.why||[]).map(w=>'<li>'+esc(w)+'</li>').join('')}<li style="list-style:none;margin:8px 0 0 -18px"><span class="go" data-sym="${esc(s.sym)}">Grafiği aç →</span></li></ul></div>`}
 const DKAD={AL:'ONAYLI',BEKLE:'BEKLE',PAS:'PAS GEÇ'};
 const ADLAR={SPY:'S&P 500 ETF',QQQ:'Nasdaq 100 ETF',IWM:'Russell 2000 ETF',DIA:'Dow Jones ETF',TQQQ:'Nasdaq 3x ETF',SQQQ:'Nasdaq −3x ETF',SOXL:'Yarı iletken 3x ETF',NVDA:'NVIDIA',TSLA:'Tesla',AAPL:'Apple',
 MSFT:'Microsoft',AMZN:'Amazon',META:'Meta Platforms',GOOGL:'Alphabet',AMD:'AMD',AVGO:'Broadcom',PLTR:'Palantir',NFLX:'Netflix',INTC:'Intel',MU:'Micron',COIN:'Coinbase',MSTR:'MicroStrategy',HOOD:'Robinhood',SOFI:'SoFi',
@@ -1869,8 +1880,10 @@ function renderDenetci(){const L=learn||{},k=L.den,p=L.perf||{};
     <div><small>Kapanan işlem</small><b>${p.n}</b><i>toplam maliyet ~${(p.maliyet_toplam||0).toFixed(2)} $</i></div>`;
     $('perfS').innerHTML=p.strateji&&p.strateji.length?`<div class="sh"><b>Strateji bazında</b><span>kâr faktörü</span></div><div class="card" style="padding:4px 14px">${p.strateji.map(x=>`<div class="kmr" style="grid-template-columns:minmax(0,1fr) 46px 64px 52px"><b style="font-weight:600">${esc(SETUP[x.k]||x.k)}</b><span style="text-align:right">${x.n}</span><span style="text-align:right" class="${cls(x.pnl)}">${fusd(x.pnl)}</span><span style="text-align:right">${x.pf==null?'—':x.pf.toFixed(2)}</span></div>`).join('')}</div>`:''}
   else{$('perfK').innerHTML='<div style="grid-column:span 2"><small>Henüz kapanan işlem yok</small><i>Bot işlem kapattıkça kâr faktörü, düşüş ve maliyet burada hesaplanır.</i></div>';$('perfS').innerHTML=''}}
-function renderSigs(){try{renderSigSup()}catch(e){}let L=sigFilter==='bu'?mine.slice().sort((a,b)=>b.t-a.t):sigList.filter(s=>sigFilter==='super'?s.super:sigFilter==='acik'?(s.st==='bekliyor'||s.st==='açık'):sigFilter==='yuksek'?s.conf>=75:sigFilter==='orta'?(s.conf>=60&&s.conf<75):sigFilter==='dusuk'?s.conf<60:true);
-  if(!L.length){$('sigs').innerHTML=empty(sigFilter==='super'?'Son sinyallerde süper fırsat yok. Çok sıkı bir süzgeç: günde en fazla 3 tane, bazı günler hiç çıkmaz.':sigFilter==='acik'?'Şu an açık sinyal yok.':sigFilter==='bu'?'Bu hissede son günlerde sinyal yok.':'Henüz sinyal yok. Sinyaller seans içinde, kapanan ve hacmi teyitli 1 dk mumlarda üretilir.');$('more').style.display='none';return}
+function secNot(){const e=$('secN');if(!e)return;if(!SECI.acik){e.style.display='none';return}e.style.display='block';
+  e.innerHTML=`🎯 <b>Seçili sinyaller</b> ${esc(SECI.t1||'17:00')}–${esc(SECI.t2||'20:30')} (TR) arasında, ${SECI.ana?'tüm listede':'koşan küçük hisselerde'} gelir. Telegram'a ve bota sadece bunlar gider. Geçmiş testte bu dilim işlem başı <b>+0,22R</b> (%45 kazanma) getirdi; dışındaki saatler −0,32R. Soluk görünenler izleme amaçlıdır, sonuçları yine ölçülür.`}
+function renderSigs(){try{renderSigSup()}catch(e){}let L=sigFilter==='bu'?mine.slice().sort((a,b)=>b.t-a.t):sigList.filter(s=>sigFilter==='secili'?s.sec===1:sigFilter==='super'?s.super:sigFilter==='acik'?(s.st==='bekliyor'||s.st==='açık'):sigFilter==='yuksek'?s.conf>=75:sigFilter==='orta'?(s.conf>=60&&s.conf<75):sigFilter==='dusuk'?s.conf<60:true);
+  if(!L.length){$('sigs').innerHTML=empty(sigFilter==='secili'?`Şu an seçili sinyal yok. Seçili sinyaller ${SECI.t1||'17:00'}–${SECI.t2||'20:30'} (TR) arasında, koşan hisselerde gelir. Diğerlerini görmek için “Tümü”.`:sigFilter==='super'?'Son sinyallerde süper fırsat yok. Çok sıkı bir süzgeç: günde en fazla 3 tane, bazı günler hiç çıkmaz.':sigFilter==='acik'?'Şu an açık sinyal yok.':sigFilter==='bu'?'Bu hissede son günlerde sinyal yok.':'Henüz sinyal yok. Sinyaller seans içinde, kapanan ve hacmi teyitli 1 dk mumlarda üretilir.');$('more').style.display='none';return}
   $('sigs').innerHTML=L.slice(0,sigShow).map(sigCard).join('');$('more').style.display=L.length>sigShow?'flex':'none'}
 $('sigs').addEventListener('click',e=>{const g=e.target.closest('.go');if(g){select(g.dataset.sym);return}
   const c=e.target.closest('.sig');if(!c)return;const id=c.dataset.id;openIds.has(id)?openIds.delete(id):openIds.add(id);c.classList.toggle('open')});
@@ -1957,7 +1970,7 @@ function renderHava(){const H=status.hava||MKT.hava;if(!H||!H.etiket||H.etiket==
   for(const id of['havaA','havaK']){const e=$(id);e.className='hava '+c;e.innerHTML=t;e.style.display='flex'}}
 function renderLearn(){try{renderYZ()}catch(e){}try{renderPlanKarne()}catch(e){}try{renderDenetci()}catch(e){}renderBT();try{renderKT()}catch(e){}renderHours();const T=sigStats.find(r=>r.k==='Tümü'),n=T?T.n:0;$('pn').textContent=n;$('pbar').style.width=Math.min(100,n)+'%';
   $('resnote').textContent=n<100?`Henüz ${n}/100 sonuç var. En az 100 işlem görmeden bu sayfadan sonuç çıkarma.`:'';$('resnote').style.display=n<100?'block':'none';
-  const main=new Set(['Tümü','Piyasa öncesi','Normal seans','Piyasa sonrası','Güven ≥ 70','Güven < 70','Koşan küçük hisseler']);
+  const main=new Set(['✅ Seçili (Telegram + bot)','Tümü','Piyasa öncesi','Normal seans','Piyasa sonrası','Güven ≥ 70','Güven < 70','Koşan küçük hisseler']);
   tbl('res',['Grup','Adet','Kazanma','İşlem başı','Toplam %','Dolmadı','Açık'],sigStats.length?sigStats.map(r=>`<tr class="${main.has(r.k)?'main':''}"><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr.toFixed(0)+'%'}</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td class="${cls(r.tot)}">${fR(r.tot,1)}</td><td>${r.nf}</td><td>${r.open}</td></tr>`).join(''):'<tr><td colspan="7">Henüz sonuç yok.</td></tr>');
   if(!learn)return;
   tbl('cmp',['','Adet','Kazanma','İşlem başı','Toplam'],learn.cmp.map(r=>`<tr class="main"><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.wr==null?'—':r.wr.toFixed(0)+'%'}</td><td class="${cls(r.avg)}">${fR(r.avg)}</td><td class="${cls(r.usd!=null?r.usd:r.tot)}">${r.usd!=null?fusd(r.usd):fR(r.tot,1)}</td></tr>`).join(''));
@@ -2558,7 +2571,7 @@ function connect(){if(document.hidden||ws)return;
     else if(m.type==='bar'&&m.sym===cur){const pc=info&&info.pc;info=m.i;setLV(m.lv);applyBars(m.bars);if(info&&info.pc!==pc)setPrevLine();updateQuote()}
     else if(m.type==='daily'){daily[m.sym]={at:Date.now(),bars:(m.bars||[]).map(x=>[Date.parse(x[0]+'T00:00:00Z')/1000,x[1],x[2],x[3],x[4],x[5],1])};
       if(m.sym===cur&&isD()){srKey='';vpKey='';render(true)}}
-    else if(m.type==='sig'){sigList=m.list||[];setTimeout(renderOzet,0);setTimeout(renderAna,0);sigStats=m.stats||[];learn=m.learn||learn;if(tab==='tara')setTimeout(()=>{try{renderPlanlar()}catch(e){}},0);if(tab==='strateji')setTimeout(renderStrateji,0);if(tab==='basari')setTimeout(renderBasari,0);if(m.mine)mine=m.mine;
+    else if(m.type==='sig'){sigList=m.list||[];SECI=m.secici||SECI;try{secNot();if(typeof durumYaz==='function')durumYaz()}catch(e){}setTimeout(renderOzet,0);setTimeout(renderAna,0);sigStats=m.stats||[];learn=m.learn||learn;if(tab==='tara')setTimeout(()=>{try{renderPlanlar()}catch(e){}},0);if(tab==='strateji')setTimeout(renderStrateji,0);if(tab==='basari')setTimeout(renderBasari,0);if(m.mine)mine=m.mine;
       if(knownIds===null)knownIds=new Set(sigList.map(s=>s.id));
       else for(const s of sigList.slice().reverse())if(!knownIds.has(s.id)){knownIds.add(s.id);
         if(s.super&&nowS()-s.t<900){toast(`<b>💎 Süper Fırsat · ${esc(s.sym)}</b><br><span class="meta">Giriş ${fp(s.e)} · Stop ${fp(s.s)} · Hedef ${fp(s.h)}</span>`,'',()=>select(s.sym));try{navigator.vibrate&&navigator.vibrate([220,90,220,90,420])}catch(e){}continue}
@@ -2868,7 +2881,9 @@ function durumYaz(){const el=$('aDur');if(!el)return;const D=DURUM||{};
   const ses={pre:'öncesi seans',regular:'piyasa açık',post:'sonrası seans',closed:'piyasa kapalı'}[(status&&status.ses)||'']||D.seans||'';
   const ne=t=>{const d=Math.max(0,Math.round(nowS()-t));return d<90?'az önce':d<3600?Math.round(d/60)+' dk önce':d<86400?Math.round(d/3600)+' sa önce':Math.round(d/86400)+' gün önce'};
   const on=D.calisiyor!==false&&botD?!!botD.active:D.calisiyor!==false;
-  el.innerHTML=`<i class="${on?'on':''}"></i><span>${on?'Bot çalışıyor':'Bot duraklatıldı'}${son?' · son sinyal '+ne(son):''}${ses?' · '+esc(ses):''}</span>`}
+  let pen='';if(SECI&&SECI.acik&&SECI.t1){const h=new Date().toLocaleTimeString('tr-TR',{timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit',hour12:false}),ic=h>=SECI.t1&&h<SECI.t2;
+    pen=` · 🎯 seçili saat ${ic?'<b style="color:#22C55E">şimdi</b> ('+esc(SECI.t1)+'–'+esc(SECI.t2)+')':esc(SECI.t1)+'–'+esc(SECI.t2)}`}
+  el.innerHTML=`<i class="${on?'on':''}"></i><span>${on?'Bot çalışıyor':'Bot duraklatıldı'}${son?' · son sinyal '+ne(son):''}${ses?' · '+esc(ses):''}${pen}</span>`}
 setInterval(durumYaz,10000);
 // sekmeler + sayaç
 TABS.push('kurs','istatistik');Object.assign(NAVOF,{kurs:'ana',istatistik:'ana'});

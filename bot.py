@@ -85,6 +85,8 @@ class Bot:
         self.extra_mult = None   # app.py: piyasa havası / bilanço günü lot çarpanı → (çarpan, not)
         self.sector_of = None    # app.py: sembol → sektör adı (sektör yoğunluğu sınırı için)
         self.engel = None        # app.py: zaman → engel sebebi (ekonomik veri saati) ya da None
+        self.secici = None       # app.py: sinyal → seçici süzgeç sebebi (saat penceresi / büyük hisse) ya da None
+        self.kesirsiz = set()    # Alpaca'da kesirli alınamayan hisseler (ör. WFF): bunlarda tam adet
         self.ver = 0
         self.dirty_days = set()
         self.seen = set()
@@ -250,6 +252,15 @@ class Bot:
         golge = self.golge(sig["setup"]) if getattr(self, "golge", None) else None
         if golge:
             return skip(golge)
+        secili = False
+        if getattr(self, "secici", None) and not onayli:
+            try:
+                sec_ = self.secici(sig)
+            except Exception:
+                sec_ = None
+            if sec_:
+                return skip("seçici süzgeç — " + sec_)
+            secili = bool(self.cfg.get("secici", 1))
         if d < 0 and ses != "regular":
             return skip("uzatılmış seansta açığa satış yapılmıyor")
         if d < 0 and sig.get("runner") and sig["setup"] != "fade":
@@ -266,6 +277,12 @@ class Bot:
                 and not any(v.get("k") == "veto" for v in (den.get("mod") or {}).values()):
             # kırılım planında onay (hacim + mum kapanışı) zaten alındı; sadece VETO (seyreltme, spread, zarar hakkı) durdurur
             den = dict(den, karar="AL")
+        elif den and secili and den["karar"] == "PAS" \
+                and not any(v.get("k") == "veto" for v in (den.get("mod") or {}).values()):
+            # Seçili dilim (koşan hisse, 17:00–20:30 TR) bütün olarak kârlı çıktı; denetçinin PAS'ı bu dilimde ayırt
+            # etmiyor (canlı: PAS −0,02R, AL −0,15R). PAS → yarım lot; VETO (spread, seyreltme, zarar hakkı) yine durdurur.
+            den = dict(den, karar="AL", lot=min(float(den.get("lot", 1.0) or 1.0), 0.5),
+                       neden="seçili dilim: denetçi PAS → yarım lot")
         if den and self.cfg.get("denetci", 1) and not onayli:
             if den["karar"] == "PAS":
                 return skip("Karar Denetçisi PAS GEÇ — " + den["neden"])
@@ -301,7 +318,8 @@ class Bot:
         min_stop = float(self.cfg.get("min_stop_pct", 0.6) or 0)
         if min_stop and stop_pct < min_stop and not sig.get("super"):
             return skip(f"stop çok dar (%{stop_pct:.2f} < %{min_stop:g}): masraf ve kayma bu işlemi yer")
-        if self.cfg.get("eksi_atla", 1) and not sig.get("super") and sig.get("setup") != "kirilim" and not onayli:
+        if self.cfg.get("eksi_atla", 1) and not sig.get("super") and sig.get("setup") != "kirilim" and not onayli \
+                and not secili:
             try:
                 ev_ = self.learner.predict(sig["setup"], ses, sig.get("f"))[0]
             except Exception:
@@ -369,6 +387,8 @@ class Bot:
         # Açığa satış ve uzatılmış seansta sadece tam adet.
         if d > 0 and ses == "regular" and (whole < 1 or (notional - whole * px) / notional > 0.15):
             qty = round(notional / px, 4)
+        if sym in self.kesirsiz and qty != int(qty):
+            qty = self._tam_adet(qty, px, abs(sig["e"] - sig["s"]), free)
         if qty <= 0 or (qty < 1 and not (d > 0 and ses == "regular")):
             return skip(f"fiyat ({px:.2f} $) pozisyon büyüklüğünden ({notional:.0f} $) yüksek"
                         + (" — açığa satışta kesirli adet yok" if d < 0 else " — uzatılmış seansta kesirli adet yok"))
@@ -409,10 +429,32 @@ class Bot:
             self.note("emir", f"Giriş emri gönderildi: {side} {pos['qty']:g} {body['type']}"
                               + (f" @ {body.get('limit_price')}" if body.get("limit_price") else ""), pos["sym"])
         except Exception as e:
+            # Alpaca bu hissede kesirli adet kabul etmiyor (ör. WFF 0,6682 adet): tam adede yuvarla, bir kez daha dene
+            if "fractionable" in str(e) and float(pos["qty"]) != int(float(pos["qty"])) and not pos.get("kesir_fix"):
+                self.kesirsiz.add(pos["sym"])
+                try:
+                    free = self.capital()[2]
+                except Exception:
+                    free = self.cfg.get("notional", 250)
+                q = self._tam_adet(float(pos["qty"]), pos["plan"], abs(pos["plan"] - pos["stop"]), free)
+                if q >= 1:
+                    pos.update(qty=q, notional=round(q * pos["plan"], 2), kesir_fix=1)
+                    self.note("emir", f"Bu hisse kesirli alınamıyor: {q} tam adede yuvarlandı, emir yeniden gönderiliyor",
+                              pos["sym"])
+                    return await self._submit_entry(pos)
             pos["st"] = "iptal"
             pos["xr"] = f"emir reddedildi: {e}"
             self.note("hata", f"Giriş emri reddedildi: {e}", pos["sym"])
         self._touch(pos)
+
+    def _tam_adet(self, qty, px, risk_px, free):
+        """Kesirli alınamayan hisse için tam adet: aşağı yuvarla; 1'in altına düşerse 1 adetin riski ve
+        tutarı sınırların içindeyse 1 adet al (WFF gibi ucuz hisseler kaçmasın)."""
+        q = int(math.floor(qty))
+        if q < 1 and px > 0 and px <= free and risk_px * 1 <= float(self.cfg.get("risk_usd", 5.0)) \
+                and px <= float(self.cfg.get("notional", 250)):
+            q = 1
+        return q
 
     async def _submit_exit(self, pos, px, reason):
         side = "sell" if pos["dir"] > 0 else "buy"

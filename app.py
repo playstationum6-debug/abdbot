@@ -128,6 +128,10 @@ BOT_CFG = {
     "eksi_atla": 1,                                           # bot: öğrenme modeli işlemi eksi görüyorsa girmez
     "tg_kalite": 1,                                           # Telegram'a sadece iş gören sinyaller (küçük hedef / büyük hisse scalp / eksi kurgu gitmez)
     "tg_min_hedef": 2.0,                                      # Telegram'a gidecek sinyalde hedef en az % kaç uzakta olmalı
+    "secici": 1,                                              # Telegram'a ve bota sadece verinin kazandırdığı dilim gider (saat penceresi + koşan hisse)
+    "ana_liste": 0,                                           # seçici açıkken büyük hisseler de gitsin mi (0: sitede izleme olarak kalır)
+    "pencere_bas": 30,                                        # seçici pencere: açılıştan kaç dk sonra başlar (30 → 10:00 ET · 17:00 TR)
+    "pencere_son": 240,                                       # seçici pencere: açılıştan kaç dk sonra biter (240 → 13:30 ET · 20:30 TR)
 }
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
@@ -1336,7 +1340,8 @@ AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd"
             "tg_min_guven": (int, 0, 100), "yer_ac": (int, 0, 1), "yer_min_guven": (int, 50, 100),
             "eko_dur": (int, 0, 1), "yz_yetki": (int, 0, 2), "kirilim_yetki": (int, 0, 2),
             "kesici": (int, 0, 1), "cikis_kural": (int, 0, 4), "liste_oncelik": (int, 0, 1),
-            "min_stop_pct": (float, 0, 5), "eksi_atla": (int, 0, 1), "tg_kalite": (int, 0, 1), "tg_min_hedef": (float, 0, 20)}
+            "min_stop_pct": (float, 0, 5), "eksi_atla": (int, 0, 1), "tg_kalite": (int, 0, 1), "tg_min_hedef": (float, 0, 20),
+            "secici": (int, 0, 1), "ana_liste": (int, 0, 1), "pencere_bas": (int, 0, 390), "pencere_son": (int, 0, 390)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1,
              "tg_kosan": 1, "tg_tablo": 1, "tg_uyari": 1,
@@ -1832,7 +1837,8 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
                     durum=ex.get("tg_durum"), konu="sinyal", mk=super_dugmeler(sig_))
     elif k in ("bot", "sinyal") and PUSH_PREF["tg_islem"] and not ex.get("tg_skip") and \
             (not (k == "sinyal" and tekrar) or ex.get("setup") == "kirilim") and \
-            (k == "bot" or ex.get("conf", 0) >= BOT_CFG.get("tg_min_guven", TG_MIN_CONF) or ex.get("setup") == "kirilim"):
+            (k == "bot" or ex.get("sec") or ex.get("conf", 0) >= BOT_CFG.get("tg_min_guven", TG_MIN_CONF)
+             or ex.get("setup") == "kirilim"):            # seçili sinyal güven eşiğini (bot ile aynı) süzgeçte geçti
         if k == "sinyal":
             _TG_SON[("sinyal", s0)] = time.time()
         if ex.get("tg_html"):
@@ -1919,7 +1925,10 @@ def kurgu_sicil_pct(gun=30):
         return _KSP["d"]
     cut = (datetime.now(ET).date() - timedelta(days=gun)).isoformat()
     by = {}
+    sec = BOT_CFG.get("secici", 1)
     for x in engine.signals:
+        if sec and not secili_mi(x):
+            continue                              # seçici açıkken kurgunun karnesi sadece seçili dilimden çıkar
         if (x.get("day") or "") >= cut and x.get("st") in ("hedef", "stop", "süre") and x.get("r") is not None:
             v = sig_yuzde(x)
             if v is not None:
@@ -1928,8 +1937,61 @@ def kurgu_sicil_pct(gun=30):
     return _KSP["d"]
 
 
+# ---- Seçici süzgeç: Telegram'a ve bota sadece verinin kazandırdığı dilim gider (kalanlar sitede "izleme")
+# Geçmiş test · koşan küçük hisseler (1.156 sinyal): 10:00–13:30 ET arası +0,22R / %45 kazanma, dışı −0,32R.
+# Canlı (8–9 Eki): pencere içi +0,03R, dışı −0,72R. Ana liste (büyük hisseler, 14.189 sinyal): hiçbir saat /
+# kurgu diliminde artı yok (en iyisi −0,06R); denetçinin AL dedikleri bile −0,43R.
+SECICI_KOTU = {"kanal", "fade", "yapi", "gapgo", "sicrama"}
+
+
+def acilis_dk(t):
+    """Sinyal zamanı normal seans açılışından (09:30 ET) kaç dakika sonra."""
+    d = datetime.fromtimestamp(t, ET)
+    return d.hour * 60 + d.minute - 570
+
+
+def pencere_tr():
+    """Seçici pencerenin TR saatiyle gösterimi: ('17:00', '20:30')."""
+    b, s = int(BOT_CFG.get("pencere_bas", 30)), int(BOT_CFG.get("pencere_son", 240))
+    a = datetime.now(ET).replace(hour=9, minute=30, second=0, microsecond=0)
+    return ((a + timedelta(minutes=b)).astimezone(TR).strftime("%H:%M"),
+            (a + timedelta(minutes=s)).astimezone(TR).strftime("%H:%M"))
+
+
+def secici_neden(sig):
+    """None: sinyal seçici süzgeçten geçer (Telegram + bot). Değilse nedeni; sinyal sitede izleme olarak ölçülür."""
+    if not BOT_CFG.get("secici", 1):
+        return None
+    if not sig.get("runner") and not BOT_CFG.get("ana_liste", 0):
+        return "büyük hisse: geçmiş testte bu listenin hiçbir diliminde kâr çıkmadı (sitede izleme)"
+    b, s = int(BOT_CFG.get("pencere_bas", 30)), int(BOT_CFG.get("pencere_son", 240))
+    dk = acilis_dk(sig.get("t") or time.time())
+    if sig.get("ses") != "regular" or not (b <= dk < s):
+        t1, t2 = pencere_tr()
+        return f"saat penceresi dışında: en iyi dilim {t1}–{t2} TR (normal seans)"
+    if sig.get("setup") in SECICI_KOTU and sig.get("setup") not in (BOT_CFG.get("zorla") or []):
+        return f"{sinyal.SETUP_AD.get(sig['setup'], sig['setup'])}: koşan hisselerde zarar ettiren kurgu"
+    c0, esik = sig.get("conf0", sig.get("conf")) or 0, int(BOT_CFG.get("min_conf", 55) or 0)
+    if c0 < esik:
+        return f"güven {c0} < eşik {esik}"
+    return None
+
+
+def secili_mi(sig):
+    try:
+        return secici_neden(sig) is None
+    except Exception:
+        return True
+
+
 def tg_kalite(sig):
     """None: Telegram'a gidebilir. Değilse nedeni (sinyal sitede kalır, sicile girmez)."""
+    sn_ = secici_neden(sig)
+    if sn_:
+        return sn_
+    vet_ = [v.get("n") for v in ((sig.get("den") or {}).get("mod") or {}).values() if v.get("k") == "veto"]
+    if vet_ and BOT_CFG.get("secici", 1):
+        return "denetçi VETO: " + str(vet_[0] or "")[:90]
     if not BOT_CFG.get("tg_kalite", 1) or sig.get("super"):
         return None
     e, h = sig.get("e"), sig.get("h")
@@ -1967,7 +2029,7 @@ def feed_signal(sig):
                     "tg_html": sinyal_tg(sig, d, ad), "tg_durum": "⏳ Takipte", "kart": kart_bilgi(sig, ad),
                     "setup": sig["setup"], "sig_t": sig["t"], "super": 1 if sig.get("super") else 0, "sid": sig["id"],
                     "golge": 1 if (kesici_golge(sig["setup"]) or sig["setup"] in (BOT_CFG.get("kapali") or [])) else 0,
-                    "tg_kalite": tg_kalite_kaydet(sig),
+                    "tg_kalite": tg_kalite_kaydet(sig), "sec": 1 if (BOT_CFG.get("secici", 1) and secili_mi(sig)) else 0,
                     **({"tgr": f"k:{sig['plan']}"} if sig.get("plan") else {}),
                     "tg_haber": ((scanner.runners.get(sig["sym"]) or {}).get("news") or {}).get("headline")})
 
@@ -1999,6 +2061,9 @@ def sinyal_tg(sig, d, ad):
         if sig.get("setup") == "kirilim" and den["karar"] != "AL" and \
                 not any(v.get("k") == "veto" for v in (den.get("mod") or {}).values()):
             rozet, neden_ = "🟢 AL", "kırılım onayı (hacim + mum kapanışı) alındı, veto yok"
+        elif den["karar"] == "PAS" and secili_mi(sig) and BOT_CFG.get("secici", 1) and \
+                not any(v.get("k") == "veto" for v in (den.get("mod") or {}).values()):
+            rozet, neden_ = "🟡 TEMKİNLİ", "seçili saat diliminde; denetçi temkinli, bot yarım lotla girer"
     if sig.get("setup") == "kirilim":
         p = next((q for q in list(PLAN.planlar.values()) + PLAN.gecmis[-80:] if q["id"] == sig.get("plan")), None) or {}
         out = [f"✅ <b>KIRILDI{' (RETEST)' if sig.get('plan_tip') == 'retest' else ''} · #{_h(sym)}</b>  <code>{fk(sig['e'])}</code>"]
@@ -2338,6 +2403,65 @@ def ziyaretci_sig(x):
     return y
 
 
+_SEK = {"v": None, "d": []}
+
+
+def secili_isaretle(lst):
+    """Listeye son seçili sinyalleri de ekle (seyrek oldukları için kaybolmasınlar) ve her birine sec=1/0 yaz."""
+    ids = {x["id"] for x in lst}
+    if _SEK.get("v") != (engine.ver, len(engine.signals)):
+        _SEK.update(v=(engine.ver, len(engine.signals)),
+                    d=[engine.slim(s) for s in engine.signals[-3000:] if secili_mi(s)][-15:])
+    ek = [x for x in _SEK["d"] if x["id"] not in ids]
+    out = []
+    for x in sorted(lst + ek, key=lambda y: -(y.get("t") or 0)):
+        y = dict(x)
+        n_ = None
+        try:
+            n_ = secici_neden(x)
+        except Exception:
+            pass
+        y["sec"] = 0 if n_ else 1
+        if n_:
+            y["sec_n"] = n_
+        out.append(y)
+    return out
+
+
+_SST = {"t": 0.0, "d": []}
+
+
+def secili_stat():
+    """Sinyal istatistik tablosunun başına: seçili dilimin canlı sonucu (30 sn önbellek)."""
+    if time.time() - _SST["t"] < 30:
+        return _SST["d"]
+    if not BOT_CFG.get("secici", 1):
+        _SST.update(t=time.time(), d=[])
+        return []
+    g = {"k": "✅ Seçili (Telegram + bot)", "n": 0, "w": 0, "tot": 0.0, "nf": 0, "open": 0, "sec": 1}
+    for s in engine.signals:
+        if not secili_mi(s):
+            continue
+        if s["st"] in ("hedef", "stop", "süre"):
+            g["n"] += 1
+            g["w"] += 1 if (s.get("r") or 0) > 0 else 0
+            g["tot"] += s.get("r") or 0.0
+        elif s["st"] == "dolmadı":
+            g["nf"] += 1
+        else:
+            g["open"] += 1
+    g["avg"] = round(g["tot"] / g["n"], 3) if g["n"] else None
+    g["wr"] = round(100 * g["w"] / g["n"], 1) if g["n"] else None
+    g["tot"] = round(g["tot"], 2)
+    _SST.update(t=time.time(), d=[g])
+    return [g]
+
+
+def secici_bilgi():
+    t1, t2 = pencere_tr()
+    return {"acik": BOT_CFG.get("secici", 1), "t1": t1, "t2": t2, "ana": BOT_CFG.get("ana_liste", 0)}
+
+
 async def send_sig(cl):
     now = time.time()
     ara = 4 if cl.admin else 15                  # ziyaretçiye 15 sn'de bir: sunucu ve bot yorulmasın
@@ -2346,10 +2470,10 @@ async def send_sig(cl):
     cl.sig_t = now
     cl.sigv = engine.ver
     L = learn_yuku()
-    lst = engine.recent(60 if cl.admin else 40)
+    lst = secili_isaretle(engine.recent(60 if cl.admin else 40))
     if not cl.admin:
         lst = [ziyaretci_sig(x) for x in lst]
-    await cl.send({"type": "sig", "list": lst, "stats": engine.stats(),
+    await cl.send({"type": "sig", "list": lst, "stats": secili_stat() + engine.stats(), "secici": secici_bilgi(),
                    "mine": engine.for_symbol(cl.sym, time.time() - 4 * 86400) if cl.sym else [],
                    "learn": L if cl.admin else ziyaretci_learn(L)})
 
@@ -4227,7 +4351,7 @@ def _sim_sinyaller(gun):
             rp = abs(s_["e"] - s_["s"]) / s_["e"]
         out.append({"t": s_["t"], "xt": s_.get("xt") or s_["t"] + 1800, "setup": s_["setup"], "ses": s_.get("ses"),
                     "conf": s_.get("conf0", s_.get("conf", 0)), "r": s_["r"], "rp": rp or 0.01, "sym": s_["sym"],
-                    "bt": bool(s_.get("bt")), "p": sig_yuzde(s_, rp)})
+                    "bt": bool(s_.get("bt")), "p": sig_yuzde(s_, rp), "sec": secili_mi(s_)})
     out.sort(key=lambda x: x["t"])
     return out
 
@@ -4346,7 +4470,12 @@ def kesici_guncelle(zorla=False):
     if not KESICI["d"] and isinstance(backup.data.get("kesici"), dict):
         KESICI["d"] = backup.data["kesici"]
     rows, ps = {}, {}
+    # Seçici açıkken kesici kurguları sadece seçili dilimde (Telegram + bot'a giden) ölçer; büyük hisselerin
+    # zararı koşan hissedeki iyi kurguyu gölgeye atmasın. Mod değişince eski durumlar sıfırlanır.
+    mod_ = "sec" if BOT_CFG.get("secici", 1) else "tum"
     for s_ in _sim_sinyaller(KESICI_ESIK["gun"]):
+        if mod_ == "sec" and not s_.get("sec"):
+            continue
         if not s_["bt"]:
             rows.setdefault(s_["setup"], []).append(s_["r"])
             ps.setdefault(s_["setup"], []).append(s_["p"])
@@ -4357,6 +4486,8 @@ def kesici_guncelle(zorla=False):
         son = rs[-KESICI_ESIK["ac_n"]:]
         savg = sum(son) / len(son)
         o = eski.get(k) or {}
+        if o.get("mod", "tum") != mod_:
+            o = {}
         dur = o.get("durum", "acik")
         t_ = o.get("t") or 0
         if dur == "acik" and n >= KESICI_ESIK["n"] and avg < KESICI_ESIK["kes"]:
@@ -4367,11 +4498,11 @@ def kesici_guncelle(zorla=False):
             olay.append((k, "acik", len(son), savg))
         pp = ps.get(k) or []
         yeni[k] = {"durum": dur, "n": n, "avg": round(avg, 3), "wr": round(100 * sum(1 for r in rs if r > 0) / n),
-                   "son": round(savg, 3), "son_n": len(son), "t": t_,
+                   "son": round(savg, 3), "son_n": len(son), "t": t_, "mod": mod_,
                    "avg_p": _ort(pp), "son_p": _ort(pp[-KESICI_ESIK["ac_n"]:])}
     for k, v in eski.items():
         if k not in yeni:
-            yeni[k] = dict(v, n=0)
+            yeni[k] = dict(v, n=0) if v.get("mod", "tum") == mod_ else {"durum": "acik", "n": 0, "t": 0, "mod": mod_}
     KESICI["d"] = yeni
     backup.data["kesici"] = yeni
     if olay and not _SEEDING[0] and BOT_CFG.get("kesici", 1):
@@ -4570,6 +4701,7 @@ def golge_kurgu(setup):
 
 
 bot.golge = golge_kurgu
+bot.secici = secici_neden
 
 
 async def kt_run(n_days=20):
@@ -6213,6 +6345,9 @@ def sabah_tg():
     if et and et != "bilinmiyor":
         ik = "🟢" if "olumlu" in et or "iyi" in et else "🔴" if "riskli" in et or "kötü" in et else "🟡"
         out.append(f"🧭 Piyasa havası: {ik} <b>{_h(et)}</b>")
+    if BOT_CFG.get("secici", 1):
+        t1, t2 = pencere_tr()
+        out.append(f"🎯 Sinyal saatleri: <b>{t1}–{t2}</b> · sadece koşan hisseler (verinin kazandırdığı dilim)")
     o = super_ozet()
     if o["n"]:
         out.append(f"💎 Süper fırsat karnesi: {o['n']} sonuç · %{o['wr']} · işlem başı ort. {_p_(o.get('avg_p'))}")
@@ -6648,6 +6783,10 @@ def plan_olaylari():
         if key not in tg.meta and key not in PLAN_DURUM:
             continue
         sa = datetime.fromtimestamp(p.get("ot") or p.get("bitis") or time.time(), TR).strftime("%H:%M")
+        if ev == "onaylı" and BOT_CFG.get("secici", 1):
+            sg_ = engine.by_id.get(p.get("sig") or "")
+            if sg_ is not None and not secili_mi(sg_):
+                sa += " · 👁 <i>seçili saat dışında: izleme</i>"
         if ev == "onaylı" and p.get("bitis"):
             e_ = engine.by_id.get(p.get("sig") or "", {}).get("e") or p["giris"]
             PLAN_DURUM[key] = DURUM_AD["onaylı"] + f" {sa} · giriş <code>{fk(e_)}</code> · kırılım tuttu"
