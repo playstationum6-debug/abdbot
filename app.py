@@ -138,7 +138,7 @@ BOT_CFG = {
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
 RUN_MAX = int(os.getenv("RUN_MAX", "25"))                    # aynı anda izlenecek en fazla koşan hisse
-BACKUP_SEC = int(os.getenv("BACKUP_SEC", "600"))
+BACKUP_SEC = int(os.getenv("BACKUP_SEC", "1800"))
 
 # İlk 30'u IEX ile anlık izlenir (ücretsiz planın sembol sınırı 30).
 DEFAULT_SYMBOLS = (
@@ -248,6 +248,7 @@ class Backup:
         self.status = "kapalı (GH_TOKEN/GH_REPO yok)" if not (GH_TOKEN and GH_REPO) else "başlıyor"
         self.last_ok = 0.0
         self.dirty = False
+        self._hash = {}
 
     @property
     def enabled(self):
@@ -279,6 +280,9 @@ class Backup:
 
     async def _put(self, c, path, obj):
         body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        _h = hashlib.md5(body).hexdigest()
+        if self._hash.get(path) == _h:      # içerik aynıysa bant genişliği harcama
+            return
         payload = {"message": f"{path} {datetime.now(TR):%Y-%m-%d %H:%M}", "content": base64.b64encode(body).decode()}
         if self.shas.get(path):
             payload["sha"] = self.shas[path]
@@ -290,6 +294,7 @@ class Backup:
                 r = await c.put(self._url(path), headers=self._headers(), json=payload)
         r.raise_for_status()
         self.shas[path] = r.json()["content"]["sha"]
+        self._hash[path] = _h
 
     async def restore(self):
         if not self.enabled:
@@ -3140,7 +3145,7 @@ async def bt_run(n_days):
     async def ara_kayit():
         """Her 3 dakikada bir ilerlemeyi GitHub'a yaz: sunucu yeniden başlarsa kaldığı yerden devam edilir."""
         while True:
-            await asyncio.sleep(180)
+            await asyncio.sleep(900)
             if not ara["kirli"] or not backup.enabled:
                 continue
             ara["kirli"] = False
@@ -5970,7 +5975,7 @@ async def dis_oto(m):
 _YEDEK_HEMEN = {"t": 0.0}
 
 
-def yedek_hemen(min_ara=20):
+def yedek_hemen(min_ara=180):
     """Önemli değişiklikte yedeği beklemeden al (bot sık yeniden başlarsa kayıt kaybolmasın)."""
     backup.dirty = True
     if backup.enabled and time.time() - _YEDEK_HEMEN["t"] >= min_ara:
@@ -7351,7 +7356,7 @@ async def housekeeping():
                 store.prune_xvol()
             if backup.enabled and (n * 15) % BACKUP_SEC < 15:
                 await backup.save(engine, bot)
-            elif backup.enabled and bot.dirty_days and time.time() - (backup.last_ok or 0) > 60:
+            elif backup.enabled and bot.dirty_days and time.time() - (backup.last_ok or 0) > 300:
                 # İşlem açılıp kapandıkça dakikada bir yedekle: yeniden başlamada kayıt kaybolmasın
                 await backup.save(engine, bot)
         except Exception as e:
