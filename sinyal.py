@@ -13,6 +13,7 @@ Kurgular (setup):
   Öncesi/sonrası: gap (boşluk devamı), uz_seviye (seviye kırılımı) — likidite filtresi + 2 mum teyidi
 """
 import math
+import os
 import sys
 from bisect import bisect_left
 import time
@@ -85,6 +86,28 @@ EXT_MIN_5BAR_VOL = 600      # son 5 mum toplam IEX hacmi
 EXT_MIN_BAR_VOL = 150       # sinyal mumu IEX hacmi
 EXT_MIN_ACTIVE = 5          # son 10 mumun en az 5'inde işlem olmalı
 EXT_MIN_VOLR = 2.0          # sinyal mumu hacmi seans ortalamasının en az 2 katı
+
+
+# Momentum filtresi (Alpaca momentum örneğinden): kırılım anında MACD histogramı kırılım yönünde
+# pozitif ve son 3 mumda artıyor olmalı; yavaş MACD (40/60) de aynı yönde. ONAY_MACD=0 ile kapanır.
+ONAY_MACD = os.getenv("ONAY_MACD", "1") == "1"
+
+
+def _macd_hist(closes, f, s_, sig=9):
+    if len(closes) < s_:
+        return []
+    m = [a - b for a, b in zip(_ema_series(closes, f), _ema_series(closes, s_))]
+    return [a - b for a, b in zip(m, _ema_series(m, sig))]
+
+
+def _momentum_ok(x, d):
+    """Kırılım yönünde momentum: hızlı histogram >0 ve 3 mumdur artıyor, yavaş histogram >0 ve artıyor."""
+    h, h2 = x.get("macd_h") or [], x.get("macd_h2") or []
+    if len(h) < 3 or len(h2) < 2:
+        return True                                    # yeterli veri yoksa engelleme
+    hizli = h[-1] * d > 0 and h[-3] * d < h[-2] * d < h[-1] * d
+    yavas = h2[-1] * d > 0 and (h2[-1] - h2[-2]) * d >= 0
+    return hizli and yavas
 
 
 def _ema_series(vals, n):
@@ -298,6 +321,9 @@ class Engine:
         closes = [bars[t][3] for t in win]
         e9, e21 = _ema_series(closes, 9), _ema_series(closes, 21)
         x["ema9"], x["ema21"] = e9[-1], e21[-1]
+        if ONAY_MACD:
+            x["macd_h"] = _macd_hist(closes, 12, 26)[-3:]
+            x["macd_h2"] = _macd_hist(closes, 40, 60)[-2:]
         x["ema20"], x["ema50"] = _ema_series(closes, 20)[-1], _ema_series(closes, 50)[-1]
         x["ema9p"] = e9[-2] if len(e9) > 1 else e9[-1]
         x["ema21_10"] = e21[-11] if len(e21) > 11 else e21[0]
@@ -776,6 +802,9 @@ class Engine:
                     continue                                          # onay mumu seviyenin gerisine düştü
                 if not ext and x["vwap"] and (c - x["vwap"]) * d <= 0:
                     continue                                          # VWAP'ın ters tarafında kırılım zayıf
+                if ONAY_MACD and not _momentum_ok(x, d):
+                    self._red(sym, x, "onay", "MACD momentumu kırılımı desteklemiyor")
+                    break
                 if not self._ready(sym, "onay", d, T):
                     break
                 base_stop = (min(pl, R) - 0.1 * atr) if d > 0 else (max(ph, R) + 0.1 * atr)
@@ -788,6 +817,8 @@ class Engine:
                        f"Onay mumu hacmi ortalamanın {volr:.1f} katı (kırılım mumu {x['prev_v'] / x['avgv']:.1f} katı)",
                        f"Stop kırılım mumunun {'dibinin' if d > 0 else 'tepesinin'} {'altında' if d > 0 else 'üstünde'}",
                        "Giriş onay mumu kapanır kapanmaz (1 dk trader)"]
+                if ONAY_MACD and x.get("macd_h"):
+                    why.append("MACD momentumu kırılım yönünde ve artıyor")
                 out.append(("onay", d, c, stop, risk, 56 if key in ("rh10", "rl10") else 58, why))
                 break
         return out
