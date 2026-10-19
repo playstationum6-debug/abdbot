@@ -127,7 +127,7 @@ BOT_CFG = {
     "limit_tampon_kosan": 0.3,                                # koşan küçük hissede en fazla %0,3 ötesi
     "zaman_stop": 1,                                          # zaman stopu açık
     "zaman_dk": 20,                                           # bu sürede +0,5R gelmezse çık
-    "kosan_rvol": 1,                                          # koşan hissede sadece 5 kat üstü hacimli sinyal
+    "kosan_rvol5": 0,                                         # koşan hissede sadece 5 kat üstü hacim (veride desteklenmedi: kapalı)
     "oto_sinama": 1,                                          # oto ayar değişikliği görülmeyen günlerde doğrulansın
     "gecis_n": 100,                                           # gerçek paraya geçiş: en az işlem
     "gecis_dd": 10,                                           # gerçek paraya geçiş: en büyük düşüş % sınırı
@@ -1366,7 +1366,7 @@ AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd"
             "oto_ayar": (int, 0, 1), "uzatilmis_islem": (int, 0, 1), "kurgu_lot": (int, 0, 1), "atr_iz": (int, 0, 1),
             "atr_k": (float, 1, 8), "rejim": (int, 0, 1), "limit_giris": (int, 0, 1), "limit_tampon": (float, 0, 2),
             "limit_tampon_kosan": (float, 0, 3), "zaman_stop": (int, 0, 1), "zaman_dk": (int, 3, 240),
-            "kosan_rvol": (int, 0, 1), "oto_sinama": (int, 0, 1), "gecis_n": (int, 20, 2000), "gecis_dd": (float, 1, 50)}
+            "kosan_rvol5": (int, 0, 1), "oto_sinama": (int, 0, 1), "gecis_n": (int, 20, 2000), "gecis_dd": (float, 1, 50)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1,
              "tg_kosan": 1, "tg_tablo": 1, "tg_uyari": 1,
@@ -7552,7 +7552,7 @@ def plan_olaylari():
                 tg.send(f"⚠️ <b>SAHTE KIRILIM · #{_h(sym)}</b>\n{_h(p.get('neden', ''))}\n"
                         + (f"<i>Bot içeride: stop <code>{fk(p['stop'])}</code> korunuyor; seviye geri alınmazsa çıkmak mantıklı.</i>"
                            if bot_ic else "<i>Bot girmedi · plan kapandı</i>"),
-                        sym=sym, reply=key, konu="plan", quiet=not bot_ic)
+                        plan_grafik_ch(p, durum="sahte"), sym=sym, reply=key, konu="plan", quiet=not bot_ic)
         elif ev == "kaçtı":
             PLAN_DURUM[key] = DURUM_AD["kaçtı"]
             PLAN_FOTO[key] = "kaçtı"
@@ -7585,7 +7585,69 @@ def plan_olaylari():
                             + (("Bot: yarısını satıyor, stop maliyete çekiliyor." if i == 0 else "Bot: iz süren stop zirveyi arkadan takip ediyor.")
                                if pos_ and pos_["st"] in botmod.OPEN_ST else
                                ("💡 Stopu girişe çekmek mantıklı." if i == 0 else "💰 Kârın bir kısmını almak mantıklı.")),
+                            plan_grafik_ch(p, durum="k1" if i == 0 else "k2"),
                             sym=p["sym"], reply=f"k:{p['id']}", konu="plan", quiet=False)
+    try:
+        plan_takip()
+    except Exception as e:
+        log.warning("Plan takip hatası: %s", e)
+
+
+TAKIP_ESIK = (10, 20, 30, 50, 100)   # kırılım seviyesinden % yükseliş adımları
+TAKIP_HISSE_GUN = 3                   # hisse başına günde en fazla takip mesajı
+
+
+def plan_takip():
+    """Onaylı kırılımları gün boyu izle: seviyeden +%10/20/30… ilerleme ve seviyenin altına dönüş (kırılım bozuldu).
+    Resimli, plan mesajına yanıt olarak; hisse başına günde en fazla TAKIP_HISSE_GUN mesaj."""
+    if not tg.ok or not PUSH_PREF.get("tg_plan", 1):
+        return
+    gun_ = str(datetime.now(ET).date())
+    say = _PLAN_TG.setdefault("takip", {})
+    for k_ in [k for k in say if not k.startswith(gun_)]:
+        del say[k_]
+    for p in PLAN.gecmis[-60:]:
+        if p.get("st") != "onaylı" or p.get("gun") != gun_ or p.get("bozuldu"):
+            continue
+        key = f"k:{p['id']}"
+        if key not in tg.meta and key not in PLAN_DURUM:
+            continue                                  # kanala hiç gitmemiş plan: takip mesajı da gitmesin
+        px = _px(p["sym"])
+        lvl = p.get("lvl") or p.get("giris")
+        if not px or not lvl:
+            continue
+        p["tepe"] = max(p.get("tepe") or px, px)
+        tepe_pct = (p["tepe"] / lvl - 1) * 100
+        sk = f"{gun_}:{p['sym']}"
+        if say.get(sk, 0) >= TAKIP_HISSE_GUN:
+            continue
+
+        def gonder(html, durum):
+            say[sk] = say.get(sk, 0) + 1
+            ch = plan_grafik_ch(p, durum=durum)
+            try:
+                ch["v4"]["last"] = px
+            except Exception:
+                pass
+            tg.send(html, ch, sym=p["sym"], reply=key, konu="plan", quiet=durum != "bozuldu")
+
+        # kırılım bozuldu: onaydan sonra fiyat seviyenin %1 altına döndü
+        if px < lvl * 0.99:
+            p["bozuldu"] = int(time.time())
+            pos_ = next((q for q in bot.positions if q.get("sig") == p.get("sig") and q["st"] in botmod.OPEN_ST), None)
+            gonder(f"⚠️ <b>KIRILIM BOZULDU · #{_h(p['sym'])}</b>\n"
+                   f"Fiyat <code>{fk(px)}</code> ile kırılım seviyesi <code>{fk(lvl)}</code> altına döndü"
+                   f" (kırılımdan sonraki tepe {fy(tepe_pct)}).\n"
+                   + (f"<i>Bot içeride: stop <code>{fk(pos_['stop'])}</code></i>" if pos_ else "<i>Seviye geri alınmadan yeni giriş yok.</i>"),
+                   "bozuldu")
+            continue
+        # ilerleme: seviyeden +%10, +%20 … (her eşik bir kez)
+        es = [e for e in TAKIP_ESIK if tepe_pct >= e and e > (p.get("takip_es") or 0)]
+        if es:
+            p["takip_es"] = max(es)
+            gonder(f"🚀 <b>#{_h(p['sym'])} KIRILIMDAN {fy(tepe_pct)}</b>\n"
+                   f"Kırılım <code>{fk(lvl)}</code> → şimdi <code>{fk(px)}</code> · tepe <code>{fk(p['tepe'])}</code>\n"
+                   "<i>Kırılım tuttu · paper trade · yatırım tavsiyesi değildir</i>", "ilerleme")
 
 
 async def plan_yz(p):

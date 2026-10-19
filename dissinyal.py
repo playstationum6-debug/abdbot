@@ -28,7 +28,7 @@ _DUR = {"AL", "SAT", "BUY", "SELL", "LONG", "SHORT", "TP", "SL", "STOP", "HEDEF"
 _SAYI = r"\$?\s*(\d+(?:[.,]\d+)?)"
 _RE_TAG = re.compile(r"[$#]([A-Za-z]{1,5})\b")
 _RE_KELIME = re.compile(r"\b([A-Z]{2,5})\b")
-_RE_GIRIS = re.compile(r"(giri[şs]|al[ıi][şs]|al[ıi]m|entry|buy\s*zone|maliyet|fiyat)\D{0,14}?" + _SAYI, re.I)
+_RE_GIRIS = re.compile(r"(giri[şs]|al[ıi][şs]|al[ıi]m|entry|buy\s*zone|maliyet|fiyat|k[ıi]r[ıi]l[ıi]m|breakout)\D{0,14}?" + _SAYI, re.I)
 _RE_STOP = re.compile(r"(stop|\bsl\b|zarar\s*kes)\D{0,14}?" + _SAYI, re.I)
 _RE_HEDEF = re.compile(r"(hedef\w*|\btp\d?\b|target\w*|\bt\d\b)\s*[:=]?\s*\D{0,10}?" + _SAYI, re.I)
 _RE_SAT = re.compile(r"\b(sat|sell|short|açığa|aciga)\b", re.I)

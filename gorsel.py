@@ -38,6 +38,7 @@ DURUM = {   # durum → (etiket, renk)
     "bekliyor": ("BEKLİYOR", ACC), "yaklasiyor": ("YAKLAŞIYOR", GOLD), "onaylı": ("ONAYLANDI", UP),
     "giris": ("BOT İÇERİDE", UP), "k1": ("K1 GELDİ", UP), "k2": ("K2 GELDİ", UP), "k3": ("K3 GELDİ", UP),
     "sahte": ("SAHTE KIRILIM", DN), "kaçtı": ("KAÇTI · RETEST", GOLD), "iptal": ("İPTAL", DIM), "süre": ("SÜRE DOLDU", DIM),
+    "ilerleme": ("YÜKSELİŞ SÜRÜYOR", UP), "bozuldu": ("KIRILIM BOZULDU", DN),
     "stop": ("STOP", DN), "al": ("AL", UP), "sat": ("SAT", DN), "super": ("SÜPER FIRSAT", GOLD),
 }
 

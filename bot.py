@@ -289,8 +289,9 @@ class Bot:
                 rj = None
             if rj:
                 return skip(rj)
-        if sig.get("runner") and self.cfg.get("kosan_rvol", 1) and not sig.get("super") \
+        if sig.get("runner") and self.cfg.get("kosan_rvol5", 0) and not sig.get("super") and sig["setup"] != "hizli" \
                 and (sig.get("f") or {}).get("volr") not in (None, "5+"):
+            # hizli (anlık) kırılım mum kapanmadan gelir: o mumun hacmi henüz eksik, bu süzgeç ona uygulanmaz
             return skip(f"koşan hissede hacim katı {(sig.get('f') or {}).get('volr')}: sadece 5 kat üstü hacimli sinyal (Ayarlar)")
         if d < 0 and sig.get("runner") and sig["setup"] != "fade":
             return skip("koşan küçük hisselerde sadece alış (dönüş kurgusu hariç)")
