@@ -3251,11 +3251,23 @@ async def scan_loop():
         await asyncio.sleep(30 if ses != "closed" else 600)
 
 
+def _hizli_pencere():
+    """Hızlı kırılım sıklığı: sinyal penceresinde (normal seans içinde) True, dışında False."""
+    try:
+        now = time.time()
+        if cal.session(now) != "regular":
+            return False
+        b, s = int(BOT_CFG.get("pencere_bas", 30)), int(BOT_CFG.get("pencere_son", 240))
+        return b <= acilis_dk(now) < s
+    except Exception:
+        return True
+
+
 async def fast_loop():
-    """Koşan hisseler: 5 sn'de bir Alpaca anlık fiyatı → tepe kırılımı ŞİMDİ olduysa hemen sinyal + bot."""
+    """Koşan hisseler: pencerede 5 sn, dışında 60 sn'de bir Alpaca anlık fiyatı → tepe kırılımı ŞİMDİ olduysa hemen sinyal + bot."""
     async with httpx.AsyncClient(timeout=10, headers=alpaca_headers()) as c:
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(5 if _hizli_pencere() else 60)
             now = time.time()
             runs = [r for r in scanner.runners if r not in IEX_SYMBOLS]
             if not runs or not (ALPACA_KEY and ALPACA_SECRET) or cal.session(now) == "closed":
