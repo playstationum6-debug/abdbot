@@ -45,6 +45,7 @@ import dissinyal
 import bot as botmod
 import geriye
 import formasyon
+import haberci
 try:
     import grafik                  # Telegram mesajlarına grafik resmi (Pillow)
 except Exception:
@@ -776,6 +777,7 @@ scanner = tarayici.Scanner(ALPACA_KEY, ALPACA_SECRET, SYMBOLS, min_price=RUN_MIN
                            max_runners=RUN_MAX, log=log,
                            ai_key=os.getenv("GEMINI_API_KEY", ""), ai_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
 scanner.sec_ua = os.getenv("SEC_UA", "abdbot paper-trading bot")
+HB = haberci.Haberci(os.getenv("SEC_UA", ""))
 scanner.keep = lambda sym: any(p["sym"] == sym for p in bot.open_positions())
 bot = botmod.Bot(engine, learner, store, cal, ET, ALPACA_KEY, ALPACA_SECRET, log, BOT_CFG)
 YZM = yzmod.YZ(scanner, log)          # Gemini + Google arama (anahtar: Render Environment → GEMINI_API_KEY)
@@ -2460,6 +2462,10 @@ async def news_loop():
                                     params={"limit": 50, "sort": "desc"})
                     if r.status_code == 200:
                         items = r.json().get("news") or []
+                        try:
+                            HB.benzinga(items, _iso_epoch)
+                        except Exception as e:
+                            log.debug("Haberci (Benzinga) hatası: %s", e)
                         yeni_ = [n.get("headline") for n in items if n.get("headline") and f"n:{n.get('id')}" not in FEED_KEYS
                                  and time.time() - _iso_epoch(n.get("created_at", "")) < 6 * 3600
                                  and any(x in scanner.runners or x in SYMBOLS for x in (n.get("symbols") or []))]
@@ -2494,6 +2500,85 @@ async def news_loop():
                 log.debug("Haber akışı hatası: %s", e)
             first = False
             await asyncio.sleep(20 if cal.session(time.time()) != "closed" else 180)
+
+
+HB_SON = {}                  # sym -> son haber bildirimi (aynı hisseye 30 dk'da bir)
+HB_ARA = int(os.getenv("HABER_ARA_DK", "30")) * 60
+HB_ACIK = os.getenv("HABER_BILDIRIM", "1") == "1"
+
+
+async def _hb_fiyat(c, syms):
+    """Alpaca anlık görüntü: sym -> (fiyat, günlük % değişim). Piyasa öncesinde dünkü kapanışa göre."""
+    out = {}
+    if not syms or not ALPACA_KEY:
+        return out
+    try:
+        r = await c.get("https://data.alpaca.markets/v2/stocks/snapshots",
+                        params={"symbols": ",".join(sorted(syms)), "feed": "iex"}, headers=alpaca_headers())
+        if r.status_code != 200:
+            return out
+        bugun = datetime.now(ET).date().isoformat()
+        for sym, sn in (r.json() or {}).items():
+            sn = sn or {}
+            px = ((sn.get("latestTrade") or {}).get("p")) or ((sn.get("minuteBar") or {}).get("c"))
+            db, pb = sn.get("dailyBar") or {}, sn.get("prevDailyBar") or {}
+            ref = pb.get("c") if str(db.get("t", ""))[:10] == bugun else db.get("c")
+            if px and ref:
+                out[sym] = (float(px), (float(px) / float(ref) - 1) * 100)
+    except Exception as e:
+        log.debug("Haberci fiyat hatası: %s", e)
+    return out
+
+
+async def haberci_loop():
+    """Basın bültenleri + SEC 8-K + Benzinga: hisseyi yükseltebilecek haber gelir gelmez Telegram bildirimi."""
+    tur = 0
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:   # Alpaca anahtarı sadece Alpaca isteğine gider
+        while True:
+            ses = cal.session(time.time())
+            try:
+                await HB.tara(c, sec_de=(tur % 2 == 0))
+                tur += 1
+                aday = HB.al()
+                if aday and HB_ACIK:
+                    now = time.time()
+                    aday = [a for a in aday if now - HB_SON.get(a["sym"], 0) >= HB_ARA and not toplu_haber(a["baslik"])]
+                    fiyat = await _hb_fiyat(c, {a["sym"] for a in aday})
+                    for a in aday:
+                        sym = a["sym"]
+                        if now - HB_SON.get(sym, 0) < HB_ARA:
+                            continue                       # aynı haber başka kaynaktan da geldi
+                        px, pct = fiyat.get(sym, (None, None))
+                        if a["seviye"] < 2 and (pct is None or pct < haberci.ORTA_MIN_PCT):
+                            continue                       # orta haber: fiyat tepki vermiyorsa sessiz
+                        if ses == "closed" and not onemli_haber(a["baslik"]):
+                            continue                       # gece / hafta sonu: sadece çok önemli haber
+                        HB_SON[sym] = now
+                        try:
+                            await asyncio.wait_for(tg.ceviri_toplu([a["baslik"]]), 8)
+                        except Exception:
+                            pass
+                        tr_ = tg.tr_cache.get(a["baslik"]) or {}
+                        fs = f"${px:.2f} ({pct:+.1f}%)" if px else "—"
+                        ikon_ = "🚀" if a["seviye"] == 2 else "📈"
+                        html = (f"{ikon_} <b>HABER · #{_h(sym)}</b>\n"
+                                f"<b>{_h(a['tur'])}</b> · Fiyat: {_h(fs)}\n\n"
+                                f"{_h(tr_.get('tr') or a['baslik'])}"
+                                + (f"\n<i>{_h(tr_['ozet'])}</i>" if tr_.get("ozet") else "")
+                                + (f'\n\n<a href="{_h(a["url"])}">Habere git</a>' if a.get("url") else ""))
+                        tg.send(html, sym=sym)
+                        feed_add("haber", [sym], tr_.get("tr") or a["baslik"], tone="iyi", t=a["t"],
+                                 url=a.get("url", ""), key=f"hb:{a['k']}",
+                                 extra={"word": a["tur"], "watched": True})
+                        try:
+                            scanner.recent_news_syms[sym] = now
+                        except Exception:
+                            pass
+                    for k_ in [k_ for k_, v_ in HB_SON.items() if now - v_ > 86400]:
+                        HB_SON.pop(k_, None)
+            except Exception as e:
+                log.debug("Haberci hatası: %s", e)
+            await asyncio.sleep(30 if ses != "closed" else 120)
 
 
 def _iso_epoch(s):
@@ -8131,7 +8216,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, oto_loop, secili_saat_loop)]
+                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, oto_loop, secili_saat_loop, haberci_loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -8666,6 +8751,14 @@ async def og_resim():
     if f.exists():
         return Response(f.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
     return Response(ikon.ICON512 if isinstance(getattr(ikon, "ICON512", None), bytes) else b"", media_type="image/png")
+
+
+@app.get("/api/haberci")
+async def api_haberci():
+    """Haber kaynaklarının durumu: hangisi çalışıyor, son okuma, kaç başlık."""
+    return JSONResponse({"kaynaklar": HB.durum, "bildirim": HB_ACIK,
+                         "son_bildirimler": {k: int(v) for k, v in HB_SON.items()}},
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/saglik")
