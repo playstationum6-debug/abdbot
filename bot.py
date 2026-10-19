@@ -163,6 +163,22 @@ class Bot:
             pass
         self._lt[sym] = (lt[0], lt[1], now) if lt else (None, 0, now)
 
+    def _atr(self, sym, n=14):
+        """Son n adet 1 dk mumdan ortalama gerçek aralık (ATR); veri azsa None."""
+        try:
+            B = self.store.bars.get(sym) or {}
+            ks = sorted(B)[-(n + 1):]
+            if len(ks) < 6:
+                return None
+            trs = []
+            for a, b in zip(ks, ks[1:]):
+                pc, h, l = B[a][3], B[b][1], B[b][2]
+                trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+            v = sum(trs) / len(trs)
+            return v if v > 0 else None
+        except Exception:
+            return None
+
     def open_positions(self):
         return [p for p in self.positions if p["st"] in OPEN_ST]
 
@@ -224,6 +240,9 @@ class Bot:
 
         if self.cal.session(now) == "closed":
             return skip("seans kapalı")
+        if ses != "regular" and not self.cfg.get("uzatilmis_islem", 0):
+            return skip("uzatılmış seansta işlem kapalı: öğrenme verisinde öncesi/sonrası kurgular zayıf, "
+                        "sinyal sadece gölgede ölçülüyor (Ayarlar)")
         if self.engel:
             try:
                 eng_ = self.engel(now)
@@ -263,6 +282,16 @@ class Bot:
             secili = bool(self.cfg.get("secici", 1))
         if d < 0 and ses != "regular":
             return skip("uzatılmış seansta açığa satış yapılmıyor")
+        if self.cfg.get("rejim", 1) and getattr(self, "rejim", None):
+            try:
+                rj = self.rejim(sig)
+            except Exception:
+                rj = None
+            if rj:
+                return skip(rj)
+        if sig.get("runner") and self.cfg.get("kosan_rvol", 1) and not sig.get("super") \
+                and (sig.get("f") or {}).get("volr") not in (None, "5+"):
+            return skip(f"koşan hissede hacim katı {(sig.get('f') or {}).get('volr')}: sadece 5 kat üstü hacimli sinyal (Ayarlar)")
         if d < 0 and sig.get("runner") and sig["setup"] != "fade":
             return skip("koşan küçük hisselerde sadece alış (dönüş kurgusu hariç)")
         thr = self.cfg["min_conf"] if ses == "regular" else self.cfg.get("min_conf_ext", self.cfg["min_conf"])
@@ -332,6 +361,16 @@ class Bot:
             mult, mwhy = self.learner.size_mult(sig["setup"], ses, conf, sig.get("f"))
         except Exception:
             mult, mwhy = 1.0, ""
+        if self.cfg.get("kurgu_lot", 1) and not sig.get("super"):
+            try:
+                km, kwhy = self.learner.kurgu_lot(sig["setup"], ses)
+            except Exception:
+                km, kwhy = 1.0, ""
+            if km <= 0:
+                return skip(kwhy + ": işlem açılmıyor, sinyal gölgede ölçülüyor")
+            if km != 1.0:
+                mult *= km
+                mwhy = (mwhy + ", " if mwhy else "") + kwhy
         if den_lot != 1.0:
             mult *= den_lot
             mwhy = (mwhy + ", " if mwhy else "") + f"denetçi lotu ×{den_lot:g}"
@@ -418,8 +457,13 @@ class Bot:
         side = "buy" if pos["dir"] > 0 else "sell"
         body = {"symbol": pos["sym"], "qty": str(pos["qty"]), "side": side, "time_in_force": "day",
                 "client_order_id": f"abd-{pos['sym']}-{pos['opened']}-{pos['dir']}"[:48]}
-        if pos["ses"] == "regular":
+        if pos["ses"] == "regular" and not self.cfg.get("limit_giris", 1):
             body["type"] = "market"
+        elif pos["ses"] == "regular":
+            # Limit giriş: plan fiyatının en fazla tampon kadar ötesinden dolsun (koşan küçük hisselerde kayma kazancı yiyor).
+            # Dolmazsa 60 sn sonra emir iptal edilir (aşağıdaki bekleme kuralı).
+            tmp = float(self.cfg.get("limit_tampon_kosan" if pos.get("runner") else "limit_tampon", 0.3 if pos.get("runner") else 0.1))
+            body.update(type="limit", limit_price=str(px_round(pos["plan"] * (1 + pos["dir"] * tmp / 100))))
         else:
             body.update(type="limit", limit_price=str(px_round(pos["plan"])), extended_hours=True)
         try:
@@ -457,6 +501,7 @@ class Bot:
         return q
 
     async def _submit_exit(self, pos, px, reason):
+        pos["x_plan"] = px
         side = "sell" if pos["dir"] > 0 else "buy"
         body = {"symbol": pos["sym"], "qty": str(pos["qty"]), "side": side, "time_in_force": "day"}
         ses_now = self.cal.session(time.time())
@@ -678,6 +723,17 @@ class Bot:
                         pos["trail"] = True
                         self.note("iz", "İz süren stop devrede (zirvenin 1R gerisinden)", pos["sym"])
                     self.dirty_days.add(pos["day"])
+            if self.cfg.get("atr_iz", 1) and (best_r >= 1.0 or (pos.get("half") or {}).get("st") == "doldu"):
+                a_ = self._atr(pos["sym"])
+                if a_:
+                    ns = pos["hw"] - d * float(self.cfg.get("atr_k", 3.0)) * a_
+                    if (ns - pos["stop"]) * d > 0 and (px - ns) * d > 0:
+                        pos["stop"] = ns
+                        if not pos.get("atr_not"):
+                            pos["atr_not"] = True
+                            pos["trail"] = True
+                            self.note("iz", f"ATR izleyen stop devrede (zirvenin {float(self.cfg.get('atr_k', 3.0)):g}×ATR gerisinden)", pos["sym"])
+                        self.dirty_days.add(pos["day"])
             tgt = pos["target"] if pr["hr"] is None else (None if pr["hr"] == 0 else entry + d * pr["hr"] * risk)
             if pr["half"] and self.cfg.get("yarim_kapat", 1) and not pos.get("half") and \
                     best_r >= float(self.cfg.get("yarim_r", 1.0)) and self.cal.session(now) == "regular" \
@@ -692,6 +748,9 @@ class Bot:
                 reason = "hedef"
             elif now >= pos["end"] - 180:
                 reason = "seans sonu"
+            elif self.cfg.get("zaman_stop", 1) and not pos.get("half") and best_r < 0.5 \
+                    and now - (pos.get("et") or now) >= 60 * float(self.cfg.get("zaman_dk", 20)):
+                reason = f"zaman stopu ({float(self.cfg.get('zaman_dk', 20)):g} dk'da +0,5R gelmedi)"
             if reason:
                 await self._submit_exit(pos, px, reason)
             return
@@ -725,6 +784,7 @@ class Bot:
         fq = float(o.get("filled_qty") or pos["qty"])
         pos["qty"] = int(fq) if fq == int(fq) else fq
         pos["entry"] = entry
+        pos["kayma_g"] = round((entry - pos["plan"]) / pos["plan"] * 100 * d, 3) if pos.get("plan") else None
         pos["et"] = int(now)
         pos["hw"] = entry
         risk = (entry - pos["stop"]) * d
@@ -747,6 +807,8 @@ class Bot:
         pos["xt"] = int(now)
         pos["st"] = "kapandı"
         pos["pnl"] = round(d * (exit_px - pos["entry"]) * pos["qty"], 2)
+        if pos.get("x_plan"):
+            pos["kayma_c"] = round((pos["x_plan"] - exit_px) / pos["x_plan"] * 100 * d, 3)
         pos["pct"] = round(d * (exit_px / pos["entry"] - 1) * 100, 3)
         pos["r"] = round(d * (exit_px - pos["entry"]) / pos["risk"], 2) if pos.get("risk") else None
         _half_total(pos)
@@ -873,7 +935,29 @@ class Bot:
                 streak += 1
             else:
                 break
+        kg = [p["kayma_g"] for p in closed if p.get("kayma_g") is not None]
+        kc = [p["kayma_c"] for p in closed if p.get("kayma_c") is not None]
+        k_usd = sum((p.get("kayma_g") or 0) / 100 * p["entry"] * abs(p["qty"]) +
+                    (p.get("kayma_c") or 0) / 100 * (p.get("exit") or p["entry"]) * abs(p["qty"]) for p in closed)
+        kayma = {"n": len(kg), "giris": round(sum(kg) / len(kg), 3) if kg else None,
+                 "cikis": round(sum(kc) / len(kc), 3) if kc else None, "usd": round(k_usd, 2),
+                 "son": [{"sym": p["sym"], "g": p.get("kayma_g"), "c": p.get("kayma_c"), "xt": p.get("xt")}
+                         for p in closed[-12:][::-1] if p.get("kayma_g") is not None or p.get("kayma_c") is not None]}
+        cap0 = float(self.cfg.get("capital", 250.0) or 250.0)
+        eq, tepe, dd = cap0, cap0, 0.0
+        for p in sorted(closed, key=lambda x: x.get("xt") or 0):
+            eq += p["pnl"]
+            tepe = max(tepe, eq)
+            dd = max(dd, (tepe - eq) / tepe * 100 if tepe > 0 else 0)
+        pcts = [p["pct"] for p in closed if p.get("pct") is not None]
+        G = {"min_n": int(self.cfg.get("gecis_n", 100)), "max_dd": float(self.cfg.get("gecis_dd", 10))}
+        G.update(n=len(closed), avg=round(sum(pcts) / len(pcts), 3) if pcts else None, dd=round(dd, 2))
+        G["sart"] = [{"ad": f"En az {G['min_n']} işlem", "ok": G["n"] >= G["min_n"], "v": f"{G['n']}"},
+                     {"ad": "İşlem başı ortalama artı", "ok": (G["avg"] or 0) > 0, "v": f"%{(G['avg'] or 0):+.2f}"},
+                     {"ad": f"En büyük düşüş %{G['max_dd']:g}'dan az", "ok": dd < G["max_dd"], "v": f"%{dd:.1f}"}]
+        G["ok"] = all(x["ok"] for x in G["sart"])
         return {
+            "kayma": kayma, "gecis": G,
             "dec": dec, "streak": streak, "days": len(by_day),
             "left": round(max(0.0, lim + min(0.0, self.today_pnl())), 2),
             "active": self.active, "status": self.status, "cfg": self.cfg, "account": self.account,

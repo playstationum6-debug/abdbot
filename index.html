@@ -947,6 +947,49 @@ header .hrow{gap:8px}
 .bhs b{display:block;color:var(--up);font-size:16px}.bhs small{color:var(--mut)}
 .bhs.off{background:var(--card);border-color:var(--line)}.bhs.off i{background:var(--dim);box-shadow:none}.bhs.off b{color:var(--mut)}
 .sh b{font-size:19px!important}.sh span{color:var(--ac2)}
+
+/* === TEMA v3 ekranlar: grafik, portföy, takvim, kurgular === */
+#t-piyasa.on{display:flex;flex-direction:column}#t-piyasa #ov{order:20;margin-top:14px}
+.quote{display:grid!important;grid-template-columns:1fr auto;align-items:center;gap:4px 10px;padding:6px 2px 10px!important;background:none!important;border:0!important}
+.quote .sym{display:flex;align-items:center;gap:10px;font-size:18px!important;font-weight:700;grid-column:1/3}
+.quote .sym .lg2{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:17px}
+.quote .qn{display:flex;flex-direction:column;line-height:1.15}.quote .qn small{font-size:12px;font-weight:500;color:var(--mut)}
+.quote .px{font-size:36px!important;font-weight:800!important;letter-spacing:-.6px;grid-column:1}
+.quote .ch{justify-self:start;grid-column:1;font-size:15px!important;padding:3px 10px;border-radius:9px}
+.quote .seg{grid-column:1/3;display:grid!important;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+.quote .seg .chip3{text-align:center;padding:7px 0}
+.nedg{display:grid!important;grid-template-columns:1fr 1fr;gap:10px;order:15;margin:12px 0}
+.nedb{justify-content:center;border-radius:16px!important;padding:14px 10px!important;font-weight:700;border:0!important;color:#fff!important}
+.nedb.yzb{background:linear-gradient(135deg,#16A34A,#22C55E)!important;box-shadow:0 8px 22px rgba(34,197,94,.3)}
+#nedB{background:linear-gradient(135deg,#6366F1,#3B82F6)!important;box-shadow:0 8px 22px rgba(59,130,246,.3)}
+.nedb i{display:none}
+#t-piyasa .stat{border-radius:14px!important;text-align:center}
+.dag{display:flex;align-items:center;gap:18px}.dag svg{width:132px;height:132px;flex:0 0 132px}
+.dag .dl{flex:1;display:flex;flex-direction:column;gap:8px}.dag .dl>div{display:flex;align-items:center;gap:8px;font-size:13px}
+.dag .dl i{width:10px;height:10px;border-radius:50%;display:inline-block}.dag .dl b{margin-left:auto}
+#pGun .bars i{border-radius:4px 4px 2px 2px}
+.p3{display:grid!important;grid-template-columns:repeat(3,1fr);gap:8px}.p3>div{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px}
+.tk{display:grid!important;grid-template-columns:48px 26px 1fr auto;align-items:center;gap:8px;padding:12px 4px!important;border-bottom:1px solid var(--line)}
+.tk>b{font-size:14px;color:var(--mut)}.tk .flg{font-size:18px}.tk .ad{font-weight:600}.tk .ad small{display:block;font-weight:500;color:var(--mut)}
+.tk.gec{opacity:.55}.tkd{margin:16px 2px 4px;font-weight:700;color:var(--ac2);font-size:13px}
+.et{border-radius:8px;padding:3px 8px;font-size:11px}.et-y{background:var(--dnb);color:var(--dn)}.et-o{background:rgba(245,158,11,.15);color:#F59E0B}.et-d{background:var(--card2);color:var(--mut)}
+.tkOdak{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:16px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);margin-bottom:6px;font-size:13px}
+.tkOdak span{font-size:20px}
+.kg{display:grid!important;grid-template-columns:1fr auto auto;align-items:center;gap:10px;padding:12px 14px!important;margin-bottom:8px;background:var(--card);border:1px solid var(--line);border-radius:16px}
+.kg small{display:block;color:var(--mut);margin-top:4px}
+.kgbar{height:5px;border-radius:5px;background:var(--card2);margin-top:6px;overflow:hidden}.kgbar i{display:block;height:5px;border-radius:5px}
+.kgnot{font-size:11px;font-weight:700;padding:4px 9px;border-radius:9px}.kgnot.iyi{background:var(--upb);color:var(--up)}.kgnot.zayif{background:var(--dnb);color:var(--dn)}
+.kgnot.notr{background:rgba(245,158,11,.15);color:#F59E0B}.kgnot.yok{background:var(--card2);color:var(--dim)}
+
+/* === v3 ekler === */
+.yaris{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:12px 14px;cursor:pointer}
+.yaris .yh{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}.yaris .yh small{color:var(--mut);font-size:12px}
+.yaris .yr{display:grid;grid-template-columns:38px 1fr 64px;align-items:center;gap:8px;margin:5px 0;font-size:13px}
+.yaris .yb{height:8px;border-radius:8px;background:var(--card2);overflow:hidden}.yaris .yb i{display:block;height:8px;border-radius:8px}.yaris .yr b{text-align:right}
+.gec{padding:10px 12px;border-radius:12px;background:var(--card2);margin-bottom:8px}.gec.ok{background:var(--upb)}.gec b{display:block}.gec small{color:var(--mut)}
+.gsr{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}.gsr:last-child{border-bottom:0}
+.gsr .lg2{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px}
+.rpOyn{width:100%;margin:10px 0}
 </style>
 </head>
 <body>
@@ -1028,6 +1071,7 @@ header .hrow{gap:8px}
     <div class="pv" style="order:1"><div class="pvl">Botun parası<span class="pvGo" data-go="portfoy">Detay ›</span></div><div class="pvv" id="aVal">—</div>
       <div class="pvc"><span class="hapG" id="aCh">—</span><span class="meta" style="font-size:13px">bugün</span></div></div>
     <div class="tk5w" id="aTick" style="order:1"></div>
+    <div class="yaris" id="aYaris" data-go="karne2" style="order:1"></div>
     <div class="durum" id="aDur" style="order:2"></div>
     <div class="v4ser" id="aSer" style="order:7"></div>
     <div class="achart" id="aChart" style="order:13"></div>
@@ -1139,6 +1183,8 @@ header .hrow{gap:8px}
     <div class="chips" id="bcfg"></div>
     <div class="meta" id="bacct" style="margin-top:8px"></div>
   </div>
+  <div class="sh"><b>🎓 Gerçek paraya geçiş</b></div><div class="card" id="bGec"><div class="meta">Hesaplanıyor…</div></div>
+  <div class="sh"><b>💸 Kayma ve masraf</b></div><div class="card" id="bKay"><div class="meta">Hesaplanıyor…</div></div>
   <div class="limit" id="blim"></div>
   <h3>Bugün neden bu kararlar?</h3>
   <div class="card" id="bwhy"></div>
@@ -1252,6 +1298,16 @@ header .hrow{gap:8px}
     <div class="fld"><label>Yarım kapat<small>Kâr belirlenen seviyeye gelince pozisyonun yarısını sat, kalan için stop girişe</small></label><button class="tg" data-k="yarim_kapat"></button></div>
     <div class="fld"><label>Yarım kapat seviyesi (risk katı)<small>Örn. 1 = stop mesafesi kadar kâr gelince (K1)</small></label><input type="number" inputmode="decimal" step="0.1" data-k="yarim_r"></div>
     <div class="fld"><label>Kalan kısmın hedefi (risk katı)<small>Yarım kapattıktan sonra; örn. 3 = K3</small></label><input type="number" inputmode="decimal" step="0.5" data-k="kalan_r"></div>
+    <div class="fld"><label>Uzatılmış seansta işlem<small>Kapalıyken öncesi/sonrası seans sinyalleri sadece gölgede ölçülür (öğrenme verisinde bu kurgular zayıf)</small></label><button class="tg" data-k="uzatilmis_islem"></button></div>
+    <div class="fld"><label>Kurgu notuna göre lot<small>Öğrenme notu iyi olan kurgu tam lot, seçici yarım lot, zayıf olan hiç girmez</small></label><button class="tg" data-k="kurgu_lot"></button></div>
+    <div class="fld"><label>ATR izleyen stop<small>+1R ya da K1 sonrası stop, zirvenin ATR katı gerisinden takip eder</small></label><button class="tg" data-k="atr_iz"></button></div>
+    <div class="fld"><label>ATR katsayısı<small>İzleyen stop mesafesi: 1 dk ATR × bu sayı. Örn. 3</small></label><input type="number" inputmode="decimal" step="0.5" data-k="atr_k"></div>
+    <div class="fld"><label>Riskli rejim süzgeci<small>SPY seans VWAP'ının altında ve VIX yükseliyorsa sadece A+ (85+) sinyal</small></label><button class="tg" data-k="rejim"></button></div>
+    <div class="fld"><label>Limit emirle giriş<small>Normal seansta piyasa emri yerine limit: koşan hissede planın en fazla %0,3, diğerlerinde %0,1 ötesinden dolar. 60 sn'de dolmazsa iptal</small></label><button class="tg" data-k="limit_giris"></button></div>
+    <div class="fld"><label>Zaman stopu<small>Bu kadar dakikada +0,5R gelmezse çık</small></label><button class="tg" data-k="zaman_stop"></button></div>
+    <div class="fld"><label>Zaman stopu süresi (dk)<small>Örn. 20</small></label><input type="number" inputmode="numeric" step="5" data-k="zaman_dk"></div>
+    <div class="fld"><label>Koşan hissede 5 kat hacim şartı<small>Koşan küçük hisselerde sadece hacmi ortalamanın 5 katını aşan sinyaller</small></label><button class="tg" data-k="kosan_rvol"></button></div>
+    <div class="fld"><label>Oto ayarı sına<small>Saat değişikliği, öğrenmede kullanılmayan son günlerde de tutmuyorsa uygulanmaz</small></label><button class="tg" data-k="oto_sinama"></button></div>
     <div class="fld"><label>Güçlü sinyale yer aç<small>Para doluyken çok güçlü sinyal gelirse kârda olmayan en zayıf pozisyon kapatılıp yeni işleme girilir</small></label><button class="tg" data-k="yer_ac"></button></div>
     <div class="fld"><label>Yer açmak için en düşük güven<small>85 = sadece A+ sinyaller</small></label><input type="number" inputmode="numeric" data-k="yer_min_guven"></div>
     <div class="fld"><label>Ekonomik veri saatinde dur<small>Fed, enflasyon, istihdam gibi yüksek etkili veride −5/+15 dk yeni işlem açılmaz</small></label><button class="tg" data-k="eko_dur"></button></div>
@@ -1275,11 +1331,11 @@ header .hrow{gap:8px}
   <div class="note" style="margin:0 2px 8px">Kapatılan kurguda bot işleme girmez; sinyaller öğrenme için takip edilmeye devam eder. Rakamlar son 30 günün sonuçları (canlı + geçmiş test).</div>
   <div class="card" style="padding:2px 14px" id="kgL"><div class="meta" style="padding:12px 0">Yükleniyor…</div></div>
   <button class="btnw" id="kgSave">Kurguları kaydet</button>
-  <h3>Ya öyle olsaydı?</h3>
+  <h3>🧪 Strateji laboratuvarı</h3>
   <div class="card" style="padding:12px 14px" id="simC">
     <div class="note" style="margin:0 0 10px">Ayarları değiştir, geçmiş sinyallerle "bu ayarlarla ne kazanırdı" hesaplansın. Yukarıda kapattığın kurgular da hesaba girer (kaydetmesen bile).</div>
     <div class="simg">
-      <label>Dönem<select id="smGun" class="gsel"><option value="7">7 gün</option><option value="15" selected>15 gün</option><option value="30">30 gün</option><option value="60">60 gün</option></select></label>
+      <label>Seans<select id="smSes" class="gsel"><option value="hepsi">Hepsi</option><option value="normal">Sadece normal seans</option></select></label><label>Hisseler<select id="smKos" class="gsel"><option value="0">Hepsi</option><option value="1">Sadece koşan küçük hisseler</option></select></label><label>Hacim katı<select id="smVol" class="gsel"><option value="">Fark etmez</option><option value="3+">3 kat ve üstü</option><option value="5+">5 kat ve üstü</option></select></label><label>Saat başı (TR)<select id="smBas" class="gsel"><option value="">Tüm gün</option><option value="0">16:30</option><option value="30">17:00</option><option value="60">17:30</option><option value="90">18:00</option><option value="120">18:30</option><option value="150">19:00</option><option value="180">19:30</option><option value="210">20:00</option><option value="240">20:30</option><option value="270">21:00</option><option value="300">21:30</option><option value="330">22:00</option><option value="360">22:30</option><option value="390">23:00</option></select></label><label>Saat sonu (TR)<select id="smSon" class="gsel"><option value="">Tüm gün</option><option value="0">16:30</option><option value="30">17:00</option><option value="60">17:30</option><option value="90">18:00</option><option value="120">18:30</option><option value="150">19:00</option><option value="180">19:30</option><option value="210">20:00</option><option value="240">20:30</option><option value="270">21:00</option><option value="300">21:30</option><option value="330">22:00</option><option value="360">22:30</option><option value="390">23:00</option></select></label><label>Dönem<select id="smGun" class="gsel"><option value="7">7 gün</option><option value="15" selected>15 gün</option><option value="30">30 gün</option><option value="60">60 gün</option></select></label>
       <label>Botun parası ($)<input class="gin" type="number" id="smCap"></label>
       <label>İşlem başı en fazla ($)<input class="gin" type="number" id="smNot"></label>
       <label>İşlem başı risk ($)<input class="gin" type="number" id="smRisk"></label>
@@ -1694,7 +1750,7 @@ header .hrow{gap:8px}
 <div class="sheet" id="plD"><div class="in"><button class="x" data-close>×</button><div id="plDi"></div></div></div>
 <div class="sheet" id="nedS"><div class="in"><button class="x" data-close>×</button><div class="lt" id="nedT" style="margin-top:4px">Bot neden girmedi?</div><div id="nedL"></div>
   <div class="meta" style="margin-top:10px">Aynısını Telegram'da <b>/neden HİSSE</b> yazarak da sorabilirsin.</div></div></div>
-<div class="sheet" id="rp"><div class="in"><button class="x" data-close>×</button><div id="rph"></div><div id="rpc"></div><div id="rpb"></div>
+<div class="sheet" id="rp"><div class="in"><button class="x" data-close>×</button><div id="rph"></div><button class="btnw rpOyn" id="rpOyn" type="button">▶ İşlemi oynat</button><div id="rpc"></div><div id="rpb"></div>
   <button class="btnw" id="rpShare">Paylaşım kartı oluştur</button></div></div>
 
 <script>
@@ -2065,7 +2121,7 @@ function empty(t){return `<div class="empty"><svg><use href="#i-empty"/></svg>${
 
 // ---------------- piyasa
 function needDaily(){if(!isD())return;const d=daily[cur];if(d&&Date.now()-d.at<10*60e3)return;if(ws&&ws.readyState===1)ws.send(JSON.stringify({daily:cur}))}
-function updateQuote(){$('qsym').innerHTML=logo(cur)+esc(cur);$('qtag').innerHTML=rows[cur]&&rows[cur].run?'<span class="tag run">koşan</span>':'';
+function updateQuote(){$('qsym').innerHTML=logo(cur)+`<span class="qn">${esc(cur)}<small>${esc(typeof adi==='function'?adi(cur,''):'')}</small></span>`;$('qtag').innerHTML=rows[cur]&&rows[cur].run?'<span class="tag run">koşan</span>':'';
   const r=rows[cur],lb=raw[raw.length-1];let p=r?r.p:null;if(lb&&(!r||lb[0]+60>=r.t-1))p=lb[4];
   const pc=info&&info.pc,ch=(p!=null&&pc)?(p/pc-1)*100:(r?r.ch:null);
   $('qpx').textContent=fp(p);$('qch').textContent=fch(ch);$('qch').className='ch '+(ch>0?'hapY':ch<0?'hapK':'hapG');
@@ -2191,10 +2247,13 @@ function renderPortfoy(){const d=botD;if(!d||!d.capital)return;const c=d.capital
   $('pVal').textContent='$'+v.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});$('pCh').className=pn>=0?'hapY':'hapK';$('pCh').textContent=`${fusd(pn)} (${fch(pc)})`;
   cizEq($('pChart'),0,false);
   $('p3').innerHTML=`<div><small>Nakit</small><b>$${c.free.toFixed(2)}</b></div><div><small>Pozisyonlarda</small><b>$${c.used.toFixed(2)}</b></div><div><small>Toplam P/L</small><b class="${cls(d.total.pnl)}">${fusd(d.total.pnl)}</b></div>`;
-  const hp=v?Math.max(0,Math.min(100,c.used/(c.used+c.free||1)*100)):0,C2=2*Math.PI*38,o=C2*(1-hp/100);
-  $('pDag').innerHTML=`<div class="dag"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="38" fill="none" stroke="#123A2C" stroke-width="14"/><circle cx="50" cy="50" r="38" fill="none" stroke="${C.up}" stroke-width="14" stroke-dasharray="${C2.toFixed(1)}" stroke-dashoffset="${o.toFixed(1)}" transform="rotate(-90 50 50)" stroke-linecap="round"/></svg>
-    <div class="dl"><div><i style="background:${C.up}"></i>Hisseler<b>%${hp.toFixed(1)}</b></div><div><i style="background:#123A2C"></i>Nakit<b>%${(100-hp).toFixed(1)}</b></div>
-    <div class="meta" style="margin-top:6px">${(d.open||[]).length} açık pozisyon</div></div></div>`;
+  {const PAL=['#22C55E','#3B82F6','#EC4899','#A78BFA','#F59E0B','#22D3EE'],seg=[];
+   for(const p of (d.open||[])){const val=Math.abs(p.qty||0)*(p.last||p.entry||p.plan||0);if(val>0)seg.push({ad:p.sym,v:val})}
+   seg.sort((a,b)=>b.v-a.v);const top=seg.slice(0,5),diger=seg.slice(5).reduce((a,x)=>a+x.v,0);if(diger>0)top.push({ad:'Diğer',v:diger});
+   top.push({ad:'Nakit',v:Math.max(0,c.free),renk:'#334155'});const T=top.reduce((a,x)=>a+x.v,0)||1,R=38,C2=2*Math.PI*R;let off=0;
+   const arcs=top.map((x,k)=>{const L=x.v/T*C2,col=x.renk||PAL[k%PAL.length];x.col=col;const a=`<circle cx="50" cy="50" r="${R}" fill="none" stroke="${col}" stroke-width="13" stroke-dasharray="${Math.max(0,L-1.2).toFixed(1)} ${C2.toFixed(1)}" stroke-dashoffset="${(-off).toFixed(1)}" transform="rotate(-90 50 50)"/>`;off+=L;return a}).join('');
+   $('pDag').innerHTML=`<div class="dag"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="${R}" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="13"/>${arcs}<text x="50" y="47" text-anchor="middle" font-size="7" fill="#8C97B0">açık</text><text x="50" y="58" text-anchor="middle" font-size="11" font-weight="700" fill="#EEF2FA">${(d.open||[]).length}</text></svg>
+    <div class="dl">${top.map(x=>`<div><i style="background:${x.col}"></i>${esc(x.ad)}<b>%${(x.v/T*100).toFixed(1)}</b></div>`).join('')}</div></div>`}
   const days=((d.karne&&d.karne.days)||[]).slice(-22);
   if(!days.length){$('pGun').innerHTML='<div class="meta">Kapanan işlem oldukça günlük kâr/zarar burada çubuk olarak görünür.</div>';$('pGunT').textContent='';return}
   const mx=Math.max(...days.map(x=>Math.abs(x.pnl)))||1,son=days[days.length-1];$('pGunT').innerHTML=`<b class="${cls(son.pnl)}" style="font-size:14px">${fusd(son.pnl)}</b>`;
@@ -2203,7 +2262,7 @@ function renderPortfoy(){const d=botD;if(!d||!d.capital)return;const c=d.capital
 $('pSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const k=b.dataset.k;if(k==='islem'){showTab('gunluk');return}if(k==='perf'){showTab('ogren');return}});
 $('t-portfoy').addEventListener('click',e=>{const g=e.target.closest('[data-go]');if(g)showTab(g.dataset.go)});
 function renderAna(){if(botD){const h=$('hbot');h.className='hb'+(botD.active?'':' off');h.lastChild.textContent=botD.active?'Bot aktif':'Bot durdu';try{const q=$('aBotP');q.className='qbot'+(botD.active?'':' off');q.lastChild.textContent=botD.active?'Bot aktif':'Bot durdu';const H=$('bHs');H.className='bhs'+(botD.active?'':' off');H.querySelector('b').textContent=botD.active?'Bot aktif':'Bot durdu';H.querySelector('small').textContent=botD.active?'Taramalar devam ediyor…':'Yeni işlem açmıyor'}catch(e){}}
-  try{anaTick();anaPiy()}catch(e){}
+  try{anaTick();anaPiy();botEk()}catch(e){}
   if(tab!=='ana')return;const t=Date.now();if(t-anaAt<700){clearTimeout(renderAna.tm);renderAna.tm=setTimeout(renderAna,720);return}anaAt=t;
   const d=botD;if(d&&d.capital){const upnl=(d.open||[]).reduce((a,p)=>a+(p.upnl||0),0),v=d.capital.total+upnl,pn=d.today.pnl+upnl,pc=v-pn?pn/(v-pn)*100:0;
     $('aVal').textContent='$'+v.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -2222,6 +2281,31 @@ function anaPiy(){const el=$('aPiy');if(!el)return;const L=Object.keys(PIY_AD).f
   el.innerHTML=L.length?L.map(k=>{const r=rows[k];return `<div class="pyr" data-s="${esc(k)}"><span class="pyi">${esc(k[0])}</span><b>${PIY_AD[k]}</b><span class="p">${fp(r.p)}</span><span class="c ${cls(r.ch)}">${r.ch>=0?'▲':'▼'} ${fch(Math.abs(r.ch||0)).replace(/^[+−-]/,'')}</span></div>`}).join(''):'<div class="meta" style="padding:10px 2px">Endeksler yükleniyor…</div>'}
 try{const pv=document.querySelector('#t-ana .pv');pv.appendChild($('aChart'));pv.appendChild($('aRng'))}catch(e){}
 try{$('hsrc').addEventListener('click',()=>showTab('tara'))}catch(e){}
+
+// ---------------- v3: geçiş kriteri, kayma panosu, SPY yarışı, işlem oynatma
+function botEk(){const d=botD;if(!d)return;
+  try{const G=d.gecis;if(G&&$('bGec'))$('bGec').innerHTML=`<div class="gec ${G.ok?'ok':''}"><b>${G.ok?'Şartlar sağlandı':'Henüz değil'}</b><small>Paper sonuçlar bu şartları sağlarsa bot Telegram'dan haber verir.</small></div>`+
+    G.sart.map(x=>`<div class="gsr"><span class="${x.ok?'up':'dn'}">${x.ok?'✓':'✗'}</span><span>${esc(x.ad)}</span><b>${esc(x.v)}</b></div>`).join('')+
+    `<div class="bar" style="margin-top:10px"><i style="width:${Math.min(100,G.n/G.min_n*100).toFixed(0)}%"></i></div><div class="meta" style="margin-top:4px">${G.n}/${G.min_n} işlem</div>`}catch(e){}
+  try{const K=d.kayma;if(K&&$('bKay'))$('bKay').innerHTML=!K.n?'<div class="meta">Yeni sürümde açılan işlemler kapandıkça planlanan ve gerçekleşen fiyat farkı burada birikecek.</div>':
+    `<div class="kpis"><div class="kpi"><b>Girişte</b><span class="${K.giris>0?'dn':'up'}">%${(K.giris||0).toFixed(2)}</span></div><div class="kpi"><b>Çıkışta</b><span class="${(K.cikis||0)>0?'dn':'up'}">%${(K.cikis||0).toFixed(2)}</span></div><div class="kpi"><b>Toplam</b><span class="${K.usd>0?'dn':'up'}">${K.usd.toFixed(2)} $</span></div></div>
+    <div class="meta" style="margin:10px 0 4px">Artı değer: plandan kötü fiyattan doldu (kayma). ${K.n} işlem.</div>`+
+    (K.son||[]).map(x=>`<div class="gsr"><span>${logo(x.sym)}</span><span>${esc(x.sym)}</span><b>giriş %${x.g==null?'—':x.g.toFixed(2)} · çıkış %${x.c==null?'—':x.c.toFixed(2)}</b></div>`).join('')}catch(e){}
+  try{const k=d.karne||{},eq=k.eq||[],sp=k.spy||[],el=$('aYaris');if(!el)return;
+    if(eq.length<2||sp.length!==eq.length){el.style.display='none';return}el.style.display='';
+    const cut=Date.now()/1000-30*86400;let i=eq.findIndex(x=>x[0]>=cut);if(i<0)i=eq.length-1;if(i>0)i--;
+    const b=(eq[eq.length-1][1]/eq[i][1]-1)*100,s_=(sp[sp.length-1][1]/sp[i][1]-1)*100,kz=b>=s_;
+    const w=v=>Math.max(4,Math.min(100,50+v*8)).toFixed(0);
+    el.innerHTML=`<div class="yh"><b>Bot ile SPY yarışı</b><small>son 30 gün</small></div>
+      <div class="yr"><span>Bot</span><div class="yb"><i style="width:${w(b)}%;background:${b>=0?'var(--up)':'var(--dn)'}"></i></div><b class="${cls(b)}">${fch(b)}</b></div>
+      <div class="yr"><span>SPY</span><div class="yb"><i style="width:${w(s_)}%;background:var(--ac)"></i></div><b class="${cls(s_)}">${fch(s_)}</b></div>
+      <div class="meta" style="margin-top:6px">${kz?'🏆 Bot önde':'SPY önde'} · fark ${Math.abs(b-s_).toFixed(2)} puan</div>`}catch(e){}}
+let rpTm=null;
+$('rpOyn').addEventListener('click',()=>{const m=RPM;if(!m||!m.bars||!m.bars.length||!rpSeries)return;clearInterval(rpTm);
+  const B=m.bars.map(b=>({time:b[0]+TR_OFF,open:b[1],high:b[2],low:b[3],close:b[4]}));let i=Math.min(5,B.length);
+  const sp=Math.max(40,Math.min(160,6000/B.length));$('rpOyn').textContent='⏸ Oynatılıyor…';
+  rpTm=setInterval(()=>{i++;try{rpSeries.setData(B.slice(0,i));rpChart.timeScale().fitContent()}catch(e){}
+    if(i>=B.length){clearInterval(rpTm);$('rpOyn').textContent='↻ Tekrar oynat'}},sp)});
 $('t-gunluk').addEventListener('click',e=>{const g=e.target.closest('.geri');if(g)showTab(g.dataset.go)});
 $('t-ana').addEventListener('click',e=>{const s=e.target.closest('[data-s]');if(s){select(s.dataset.s);return}const g=e.target.closest('[data-go]');if(g)showTab(g.dataset.go)});
 
@@ -2551,15 +2635,15 @@ let KG=[],kgKap=null;
 async function loadKurgular(){try{const r=await fetch('/api/kurgular?gun=30',{credentials:'same-origin'});KG=(await r.json()).list||[]}catch(e){KG=[]}
   if(kgKap===null)kgKap=new Set(KG.filter(x=>x.kapali).map(x=>x.k));renderKurgular()}
 function renderKurgular(){if(!KG.length){$('kgL').innerHTML='<div class="meta" style="padding:12px 0">Henüz sonuç yok.</div>';return}
-  $('kgL').innerHTML=KG.map(x=>`<div class="kg"><div><b>${esc(x.ad)}</b><small>${x.n?`${x.n} sinyal · kazanma %${x.wr} · işlem başı ort. <span class="${cls(x.avg)}">${fA(x)}</span> · toplam ${fA(x,'tot')}`:'henüz sonuç yok'}</small></div>
-    <span class="${cls(x.avg)}" style="font-weight:800">${x.avg!=null&&x.n>=20?(x.avg>0.05?'iyi':x.avg<-0.05?'zayıf':'nötr'):''}</span><button class="tg${kgKap.has(x.k)?'':' on'}" data-kg="${esc(x.k)}"></button></div>`).join('')}
+  $('kgL').innerHTML=KG.map(x=>`<div class="kg"><div><b>${esc(x.ad)}</b>${x.n?`<div class="kgbar"><i style="width:${Math.max(3,Math.min(100,x.wr||0))}%;background:${(x.avg||0)>0?'var(--up)':'var(--dn)'}"></i></div>`:''}<small>${x.n?`${x.n} sinyal · kazanma %${x.wr} · işlem başı ort. <span class="${cls(x.avg)}">${fA(x)}</span> · toplam ${fA(x,'tot')}`:'henüz sonuç yok'}</small></div>
+    <span class="kgnot ${x.avg!=null&&x.n>=20?(x.avg>0.05?'iyi':x.avg<-0.05?'zayif':'notr'):'yok'}">${x.avg!=null&&x.n>=20?(x.avg>0.05?'iyi':x.avg<-0.05?'zayıf':'nötr'):'az veri'}</span><button class="tg${kgKap.has(x.k)?'':' on'}" data-kg="${esc(x.k)}"></button></div>`).join('')}
 $('kgL').addEventListener('click',e=>{const b=e.target.closest('[data-kg]');if(!b)return;const k=b.dataset.kg;kgKap.has(k)?kgKap.delete(k):kgKap.add(k);b.classList.toggle('on',!kgKap.has(k))});
 $('kgSave').onclick=async()=>{try{await postJSON('/api/ayar',{kapali:[...kgKap]});toast(`<b>Kurgular kaydedildi</b><br><span class="meta">${kgKap.size?kgKap.size+' kurgu kapalı':'Bütün kurgular açık'}</span>`,'info')}catch(e){toast('Kaydedilemedi: '+esc(e.message),'sat')}};
 function simDoldur(){const c=(botD&&botD.cfg)||{};const set=(id,v)=>{if(!$(id).value&&v!=null)$(id).value=v};
   set('smCap',c.capital);set('smNot',c.notional);set('smRisk',c.risk_usd);set('smThr',c.min_conf);set('smMax',c.max_open)}
 $('smGo').onclick=async()=>{$('smR').innerHTML='<div class="meta" style="margin-top:10px">Hesaplanıyor…</div>';
   const n=id=>$(id).value===''?null:+$(id).value;
-  try{const r=await postJSON('/api/simulasyon',{gun:+$('smGun').value,capital:n('smCap'),notional:n('smNot'),risk_usd:n('smRisk'),min_conf:n('smThr'),max_open:n('smMax'),kapali:[...(kgKap||[])]});
+  try{const _b=$('smBas').value,_s=$('smSon').value;const r=await postJSON('/api/simulasyon',{seans:$('smSes').value,kosan:+$('smKos').value,volr:$('smVol').value,dk_bas:_b&&_s?+_b:null,dk_son:_b&&_s?+_s:null,gun:+$('smGun').value,capital:n('smCap'),notional:n('smNot'),risk_usd:n('smRisk'),min_conf:n('smThr'),max_open:n('smMax'),kapali:[...(kgKap||[])]});
     if(r.hata){$('smR').innerHTML=`<div class="bozul">${esc(r.hata)}</div>`;return}
     const A=r.atla||{};
     $('smR').innerHTML=`<div class="kpis"><div class="kpi"><b>Sonuç</b><span class="${cls(r.pnl)}">${fusd(r.pnl)}</span></div><div class="kpi"><b>Getiri</b><span class="${cls(r.pct)}">${(r.pct>0?'+':'')+r.pct}%</span></div><div class="kpi"><b>İşlem</b><span>${r.n}</span></div></div>
@@ -2617,8 +2701,9 @@ $('ksD').addEventListener('click',e=>{const b=e.target.closest('[data-d]');if(!b
 // ---------------- ekonomik takvim
 function renderTakvim(){const L=MKT.eko||[];if(!L.length){$('tkL').innerHTML=empty('Takvim yükleniyor ya da bu hafta veri yok.');return}
   const now=Date.now()/1000,by={};for(const e of L){const k=new Date(e.t*1000).toLocaleDateString('tr-TR',{timeZone:'Europe/Istanbul',weekday:'long',day:'numeric',month:'long'});(by[k]=by[k]||[]).push(e)}
-  $('tkL').innerHTML=Object.entries(by).map(([d,es])=>`<div class="tkd">${esc(d)}</div>`+es.map(e=>{const c=e.etki==='yüksek'?'y':e.etki==='orta'?'o':'d';
-    return `<div class="tk${e.t<now-900?' gec':''}"><b>${hm(e.t)}</b><div class="ad">${esc(e.ad)}<small>${[e.beklenti?'beklenti '+esc(e.beklenti):'',e.onceki?'önceki '+esc(e.onceki):'',e.gercek?'<b>gerçek '+esc(e.gercek)+'</b>':''].filter(Boolean).join(' · ')||esc(e.en||'')}</small></div><span class="et et-${c}">${esc(e.etki)}</span></div>`}).join('')).join('')}
+  const bug=new Date().toLocaleDateString('tr-TR',{timeZone:'Europe/Istanbul'}),odak=L.filter(e=>e.etki==='yüksek'&&new Date(e.t*1000).toLocaleDateString('tr-TR',{timeZone:'Europe/Istanbul'})===bug);
+  $('tkL').innerHTML=(odak.length?`<div class="tkOdak"><span>💡</span><div>Piyasa bugün <b>${odak.map(e=>esc(e.ad)).slice(0,2).join(' ve ')}</b> verisine odaklı. Bu saatlerde oynaklık artabilir; bot −5/+15 dk yeni işlem açmaz.</div></div>`:'')+Object.entries(by).map(([d,es])=>`<div class="tkd">${esc(d)}</div>`+es.map(e=>{const c=e.etki==='yüksek'?'y':e.etki==='orta'?'o':'d';
+    return `<div class="tk${e.t<now-900?' gec':''}"><b>${hm(e.t)}</b><span class="flg">🇺🇸</span><div class="ad">${esc(e.ad)}<small>${[e.beklenti?'beklenti '+esc(e.beklenti):'',e.onceki?'önceki '+esc(e.onceki):'',e.gercek?'<b>gerçek '+esc(e.gercek)+'</b>':''].filter(Boolean).join(' · ')||esc(e.en||'')}</small></div><span class="et et-${c}">${esc(e.etki)}</span></div>`}).join('')).join('')}
 
 // ---------------- karne
 let bTab=ls('bseg')||'bugun';

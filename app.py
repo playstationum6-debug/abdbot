@@ -117,6 +117,20 @@ BOT_CFG = {
     "tg_min_guven": 70,                                       # Telegram'a gidecek sinyallerde en düşük güven
     "yer_ac": 1,                                              # para doluyken çok güçlü sinyale yer aç
     "yer_min_guven": 85,
+    "uzatilmis_islem": 0,                                     # 0: öncesi/sonrası seansta işlem yok, sinyaller sadece gölgede ölçülür
+    "kurgu_lot": 1,                                           # öğrenme notuna göre lot: iyi ×1, seçici ×0,5, zayıf girmez
+    "atr_iz": 1,                                              # +1R ya da K1 sonrası ATR tabanlı izleyen stop
+    "atr_k": 3.0,                                             # izleyen stop mesafesi: 1 dk ATR × bu katsayı
+    "rejim": 1,                                               # SPY VWAP altı + VIX yükseliyorsa sadece A+ (85+) sinyal
+    "limit_giris": 1,                                         # normal seansta piyasa emri yerine limit emirle giriş
+    "limit_tampon": 0.1,                                      # limit fiyatı: planın en fazla %0,1 ötesi (büyük hisse)
+    "limit_tampon_kosan": 0.3,                                # koşan küçük hissede en fazla %0,3 ötesi
+    "zaman_stop": 1,                                          # zaman stopu açık
+    "zaman_dk": 20,                                           # bu sürede +0,5R gelmezse çık
+    "kosan_rvol": 1,                                          # koşan hissede sadece 5 kat üstü hacimli sinyal
+    "oto_sinama": 1,                                          # oto ayar değişikliği görülmeyen günlerde doğrulansın
+    "gecis_n": 100,                                           # gerçek paraya geçiş: en az işlem
+    "gecis_dd": 10,                                           # gerçek paraya geçiş: en büyük düşüş % sınırı
     "eko_dur": 1,                                             # yüksek etkili ekonomik veri saatinde yeni işlem yok
     "kapali": [],                                             # kapatılan kurgular: sinyal üretilir (öğrenme sürer), bot girmez
     "zorla": [],                                              # elle açık tutulan kurgular: kurgu kesici bunlara dokunmaz
@@ -1349,7 +1363,10 @@ AYAR_DEF = {"capital": (float, 10, 1e6), "notional": (float, 5, 1e6), "risk_usd"
             "kesici": (int, 0, 1), "cikis_kural": (int, 0, 4), "liste_oncelik": (int, 0, 1),
             "min_stop_pct": (float, 0, 5), "eksi_atla": (int, 0, 1), "tg_kalite": (int, 0, 1), "tg_min_hedef": (float, 0, 20),
             "secici": (int, 0, 1), "ana_liste": (int, 0, 1), "pencere_bas": (int, 0, 390), "pencere_son": (int, 0, 390),
-            "oto_ayar": (int, 0, 1)}
+            "oto_ayar": (int, 0, 1), "uzatilmis_islem": (int, 0, 1), "kurgu_lot": (int, 0, 1), "atr_iz": (int, 0, 1),
+            "atr_k": (float, 1, 8), "rejim": (int, 0, 1), "limit_giris": (int, 0, 1), "limit_tampon": (float, 0, 2),
+            "limit_tampon_kosan": (float, 0, 3), "zaman_stop": (int, 0, 1), "zaman_dk": (int, 3, 240),
+            "kosan_rvol": (int, 0, 1), "oto_sinama": (int, 0, 1), "gecis_n": (int, 20, 2000), "gecis_dd": (float, 1, 50)}
 PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "tg_islem": 1, "tg_plan": 1, "tg_haber": 0, "tg_rapor": 1, "tg_grafik": 1,
              "tg_kosan": 1, "tg_tablo": 1, "tg_uyari": 1,
@@ -2097,7 +2114,8 @@ def oto_calistir(duyur=True):
     kosan, ana = oto_veri()
     durum = {"pencere": [int(BOT_CFG.get("pencere_bas", 30)), int(BOT_CFG.get("pencere_son", 240))],
              "kotu": sorted(secici_kotu()), "ana": list(OTO.get("ana") or [])}
-    yeni, olaylar, rapor = otoayar.ogren(kosan, ana, durum, int(BOT_CFG.get("min_conf", 55) or 0))
+    yeni, olaylar, rapor = otoayar.ogren(kosan, ana, durum, int(BOT_CFG.get("min_conf", 55) or 0),
+                                         sinama=bool(BOT_CFG.get("oto_sinama", 1)))
     satir = []
     for tur, d in olaylar:
         if tur == "pencere":
@@ -2106,6 +2124,8 @@ def oto_calistir(duyur=True):
                                f"{dk_tr(d['yeni'][0])}–{dk_tr(d['yeni'][1])} yaptı",
                           f"Son 20 günün en iyi dilimi {dk_tr(h_[0])}–{dk_tr(h_[1])}"
                           + ("; kenarlar günde en fazla 30 dk kayar" if tuple(h_) != tuple(d["yeni"]) else "")))
+        elif tur == "sinama":
+            satir.append((tur, "Saat değişikliğini sınamada reddetti", d["neden"]))
         elif tur == "kurgu":
             ad = sinyal.SETUP_AD.get(d["k"], d["k"])
             satir.append((tur, f"{ad} kurgusunu {'kapattı' if d['tur'] == 'kapat' else 'yeniden açtı'}",
@@ -3466,6 +3486,85 @@ def bilanco_durum(sym):
     return None
 
 
+def spy_vwap_durum():
+    """(SPY son fiyat, bugünkü seans VWAP'ı) — 1 dk mumlardan; veri yoksa (None, None)."""
+    try:
+        B = store.bars.get("SPY") or {}
+        bas = datetime.now(ET).replace(hour=9, minute=30, second=0, microsecond=0).timestamp()
+        pv = vv = 0.0
+        son = None
+        for ts in sorted(B):
+            if ts < bas:
+                continue
+            o, h, l, c, v = B[ts][:5]
+            pv += (h + l + c) / 3 * (v or 0)
+            vv += v or 0
+            son = c
+        return (son, pv / vv) if vv > 0 and son else (None, None)
+    except Exception:
+        return None, None
+
+
+def rejim_neden(sig):
+    """Riskli rejimde (SPY seans VWAP'ının altında ve VIX yükseliyor) sadece A+ sinyal geçsin."""
+    if sig.get("super") or (sig.get("conf0", sig.get("conf")) or 0) >= 85:
+        return None
+    son, vw = spy_vwap_durum()
+    if not son or not vw or son >= vw:
+        return None
+    vix = _daily_cache.get("^VIX", (0, []))[1]
+    if len(vix) < 2 or vix[-1][4] < vix[-2][4] * 1.03:
+        return None
+    return (f"riskli rejim: SPY seans VWAP'ının altında ({son:.2f} < {vw:.2f}) ve VIX yükseliyor "
+            f"({vix[-2][4]:.1f} → {vix[-1][4]:.1f}); sadece A+ (85+) sinyal")
+
+
+def gecis_kontrol():
+    """Gerçek paraya geçiş şartları ilk kez sağlandığında Telegram'a bir kez haber ver (geri düşerse yeniden kurulur)."""
+    G = bot.summary().get("gecis") or {}
+    once = bool(backup.data.get("gecis_ok"))
+    if G.get("ok") and not once and tg.ok:
+        tg.send("🎓 <b>GERÇEK PARAYA GEÇİŞ ŞARTLARI SAĞLANDI</b>\n" + "\n".join(
+            f"✅ {_h(x['ad'])}: {_h(x['v'])}" for x in G["sart"])
+            + "\n<i>Bu bir tavsiye değil; geçmiş sonuç geleceği garanti etmez. Küçük tutarla başlamak gerekir.</i>", konu="rapor")
+    if bool(G.get("ok")) != once:
+        backup.data["gecis_ok"] = bool(G.get("ok"))
+        backup.dirty = True
+
+
+def kurgu_raporu(gun=7):
+    """Son N gün: kurgu bazında botun gerçek işlemleri + 'ayar değişseydi' karşılaştırması."""
+    cut = time.time() - gun * 86400
+    L = [p for p in bot.positions if p["st"] == "kapandı" and p.get("pnl") is not None and (p.get("xt") or 0) >= cut]
+    if not L:
+        return None
+    G = {}
+    for p in L:
+        g = G.setdefault(p.get("setup") or "?", [0, 0, 0.0, []])
+        g[0] += 1
+        g[1] += p["pnl"] > 0
+        g[2] += p["pnl"]
+        if p.get("r") is not None:
+            g[3].append(p["r"])
+    out = [f"🧪 <b>KURGU KARNESİ</b> · son {gun} gün · {len(L)} işlem · toplam {sum(p['pnl'] for p in L):+.2f} $"]
+    for k, (n, w, pnl, rs) in sorted(G.items(), key=lambda kv: kv[1][2], reverse=True):
+        ik = "🟢" if pnl > 0 else "🔴"
+        out.append(f"{ik} {_h(sinyal.SETUP_AD.get(k, k))}: {n} işlem · kazanan %{round(100 * w / n)} · "
+                   f"{pnl:+.2f} $" + (f" · ort. {sum(rs) / len(rs):+.2f}R" if rs else ""))
+    ext = [p for p in L if p.get("ses") != "regular"]
+    if ext:
+        x = sum(p["pnl"] for p in ext)
+        out.append(f"🌙 Uzatılmış seans: {len(ext)} işlem, {x:+.2f} $ → kapalı olsaydı toplam "
+                   f"{sum(p['pnl'] for p in L) - x:+.2f} $ olurdu")
+    rows = {r["k"]: r for r in learner.group_rows()}
+    iyi = [p for p in L if str((rows.get(f"{ogrenme.SES_AD.get(p.get('ses'), p.get('ses'))} · "
+                                        f"{ogrenme.setup_ad(p.get('setup'))}") or {}).get("durum", "")).startswith("iyi")]
+    if iyi:
+        out.append(f"⭐ Sadece 'iyi' notlu kurgular: {len(iyi)} işlem, {sum(p['pnl'] for p in iyi):+.2f} $")
+    out.append("<i>Gerçek paper işlemler · masraf ve kayma dahil · yatırım tavsiyesi değildir</i>")
+    return "\n".join(out)
+
+
 def extra_mult(sig):
     m, notes = 1.0, []
     b = bilanco_durum(sig["sym"])
@@ -3804,6 +3903,10 @@ async def rapor_loop():
                     log.warning("Sabah ekleri hatası: %s", e)
         if last == "regular" and ses == "post":
             await asyncio.sleep(120)        # son işlemler kapansın
+            try:
+                gecis_kontrol()
+            except Exception as e:
+                log.warning("Geçiş kontrolü hatası: %s", e)
             t_, s_ = gun_sonu_raporu()
             try:
                 gh, gch = gunsonu_tg()
@@ -3844,6 +3947,9 @@ async def rapor_loop():
                     w_txt, w_png = tg_karne(gun=7)
                     tg.send(w_txt, {"png": w_png} if w_png else None, konu="rapor")
                     tg.send(ogrenme_haftalik(), quiet=True, konu="rapor")
+                    _kr = kurgu_raporu(7)
+                    if _kr:
+                        tg.send(_kr, quiet=True, konu="rapor")
                 except Exception as e:
                     log.warning("Haftalık rapor hatası: %s", e)
         last = ses
@@ -4961,7 +5067,9 @@ def _sim_sinyaller(gun):
             rp = abs(s_["e"] - s_["s"]) / s_["e"]
         out.append({"t": s_["t"], "xt": s_.get("xt") or s_["t"] + 1800, "setup": s_["setup"], "ses": s_.get("ses"),
                     "conf": s_.get("conf0", s_.get("conf", 0)), "r": s_["r"], "rp": rp or 0.01, "sym": s_["sym"],
-                    "bt": bool(s_.get("bt")), "p": sig_yuzde(s_, rp), "sec": secili_mi(s_)})
+                    "bt": bool(s_.get("bt")), "p": sig_yuzde(s_, rp), "sec": secili_mi(s_),
+                    "run": bool(s_.get("runner")), "volr": (s_.get("f") or {}).get("volr"),
+                    "dk": acilis_dk(s_["t"]) if s_.get("ses") == "regular" else None})
     out.sort(key=lambda x: x["t"])
     return out
 
@@ -5453,7 +5561,24 @@ def simulasyon(p):
     thr = int(p.get("min_conf") if p.get("min_conf") is not None else BOT_CFG["min_conf"])
     max_open = int(p.get("max_open") or BOT_CFG["max_open"])
     kap = set(p.get("kapali") if isinstance(p.get("kapali"), list) else (BOT_CFG.get("kapali") or []))
-    sigs = _sim_sinyaller(gun)
+    # Strateji laboratuvarı süzgeçleri
+    f_ses = p.get("seans") or "hepsi"                  # hepsi | normal
+    f_kos = int(p.get("kosan") or 0)                    # 1: sadece koşan küçük hisseler
+    f_vol = p.get("volr") or ""                         # "" | "3+" | "5+"
+    f_bas, f_son = p.get("dk_bas"), p.get("dk_son")     # açılıştan dakika (normal seans)
+    sigs = []
+    for s_ in _sim_sinyaller(gun):
+        if f_ses == "normal" and s_["ses"] != "regular":
+            continue
+        if f_kos and not s_["run"]:
+            continue
+        if f_vol == "5+" and s_["volr"] != "5+":
+            continue
+        if f_vol == "3+" and s_["volr"] not in ("3-5", "5+"):
+            continue
+        if f_bas is not None and f_son is not None and (s_["dk"] is None or not (int(f_bas) <= s_["dk"] < int(f_son))):
+            continue
+        sigs.append(s_)
     cap = cap0
     acik = []          # (xt, tutar, pnl, sym)
     eq, alinan, atla = [], [], {"eşik": 0, "kapalı kurgu": 0, "para dolu": 0, "aynı hisse": 0, "en fazla açık": 0}
@@ -7866,6 +7991,7 @@ async def lifespan(app):
     feed_seed()
     bot.on_note = feed_bot_note
     bot.extra_mult = extra_mult
+    bot.rejim = rejim_neden
     bot.sector_of = sektor.sektor_of
     engine.bilanco = bilanco_durum
     engine.hava = lambda: HAVA["etiket"]

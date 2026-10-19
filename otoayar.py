@@ -152,7 +152,46 @@ def ana_dilim_ogren(kayit, mevcut, min_conf):
     return yeni, olay, sira[:5]
 
 
-def ogren(kosan, ana, durum, min_conf):
+SINAV_PAY = 0.3     # sınama: en yeni %30'luk günler öğrenmede kullanılmaz, değişiklik bu günlerde doğrulanır
+
+
+def _pencere_ort(kayit, pen, kotu, min_conf):
+    rs = [x["r"] for x in kayit if x["setup"] not in kotu and (x.get("conf") or 0) >= min_conf and pen[0] <= x["dk"] < pen[1]]
+    return _ort(rs), len(rs)
+
+
+def sinama_bol(kayit):
+    """Günlere göre böl: (öğrenme, sınama). Az günde sınama boş kalır."""
+    gunler = sorted({x.get("day") for x in kayit if x.get("day")})
+    if len(gunler) < 5:
+        return kayit, []
+    sin = set(gunler[-max(1, round(len(gunler) * SINAV_PAY)):])
+    return [x for x in kayit if x.get("day") not in sin], [x for x in kayit if x.get("day") in sin]
+
+
+def ogren(kosan, ana, durum, min_conf, sinama=True):
+    """Bir öğrenme turu; sinama=True ise pencere değişikliği öğrenmede görülmeyen günlerde doğrulanır."""
+    if sinama:
+        ogr, sin = sinama_bol(kosan)
+        if sin:
+            pen0 = tuple(durum.get("pencere") or (30, 240))
+            kotu0 = set(durum.get("kotu") or [])
+            yeni, olaylar, rapor = _ogren(ogr, ana, durum, min_conf)
+            if tuple(yeni["pencere"]) != pen0:
+                a_eski, n_eski = _pencere_ort(sin, pen0, kotu0, min_conf)
+                a_yeni, n_yeni = _pencere_ort(sin, tuple(yeni["pencere"]), kotu0, min_conf)
+                if n_yeni < 10 or a_yeni is None or (a_eski is not None and a_yeni < a_eski):
+                    yeni["pencere"] = list(pen0)
+                    olaylar = [o for o in olaylar if o[0] != "pencere"]
+                    olaylar.append(("sinama", {"neden": f"yeni saat sınama günlerinde tutmadı "
+                                                        f"(yeni {a_yeni if a_yeni is None else round(a_yeni, 3)}R / "
+                                                        f"eski {a_eski if a_eski is None else round(a_eski, 3)}R, {n_yeni} sonuç); değişiklik geri alındı"}))
+            rapor["sinama"] = {"ogr": len(ogr), "sin": len(sin)}
+            return yeni, olaylar, rapor
+    return _ogren(kosan, ana, durum, min_conf)
+
+
+def _ogren(kosan, ana, durum, min_conf):
     """Bir öğrenme turu. durum: {"pencere": [b, s], "kotu": [...], "ana": [...]}
     Dönüş: (yeni_durum, olaylar[(tur, metin_bilgi)], rapor)"""
     pen = tuple(durum.get("pencere") or (30, 240))

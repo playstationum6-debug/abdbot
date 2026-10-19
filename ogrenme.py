@@ -354,6 +354,25 @@ class Learner:
                 "hafiza_gun": HALF_DAYS, "sinav": self.sinav,
                 "kurulus": int(self._fit_t) if self._fit_t else None}
 
+    def kurgu_lot(self, setup, ses):
+        """Öğrenme notuna göre lot: (çarpan, gerekçe). 0 = bu kurguda işlem açma. Az veride karışmaz."""
+        n, e = self.group(setup, ses)
+        if n < MIN_GROUP:
+            return 1.0, ""
+        a = self.sel.get((setup, ses))
+        secilen = round(100 * a[1] / a[0]) if a and a[0] and self.ready() else None
+        if secilen is None:
+            if e >= 0.05:
+                return 1.0, "kurgu notu iyi"
+            if e <= -0.1:
+                return 0.0, f"kurgu notu zayıf ({n} sonuç, beklenti {e:+.2f}R)"
+            return 0.5, "kurgu notu nötr: yarım lot"
+        if secilen >= 60:
+            return 1.0, f"kurgu notu iyi (%{secilen} uygun)"
+        if secilen >= 20:
+            return 0.5, f"kurgu notu seçici (%{secilen} uygun): yarım lot"
+        return 0.0, f"kurgu notu zayıf (%{secilen} uygun)"
+
     def group_rows(self):
         out = []
         for (setup, ses), g in sorted(self.groups.items(), key=lambda kv: -kv[1][3]):
