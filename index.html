@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0B2A22">
+<meta name="theme-color" content="#060A14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -862,6 +862,91 @@ a{color:var(--ac)}
 .sgA{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}.sgA button{height:32px;padding:0 12px;border-radius:99px;background:var(--acb);color:var(--ac);font:700 12.5px var(--fnt)}
 @media (min-width:700px){.k2eg .et{font-size:10px}.k2eg svg{max-height:300px}}
 @media (min-width:1100px){.k2kpi b{font-size:19px}}
+
+/* === TEMA v3: lacivert neon (2026-10-19) === */
+:root{--bg:#060A14;--bg2:#08101F;--card:#0C1424;--card2:#121C31;--line:rgba(96,140,255,.14);--line2:rgba(96,140,255,.24);
+--tx:#EEF2FA;--txt:#EEF2FA;--mut:#8C97B0;--dim:#56617A;--up:#22C55E;--upb:rgba(34,197,94,.14);--dn:#F04452;--dnb:rgba(240,68,82,.14);
+--ac:#3B82F6;--ac2:#22D3EE;--acb:rgba(59,130,246,.16);--grad:linear-gradient(90deg,#6366F1,#3B82F6 55%,#22D3EE);--r:18px;
+--fnt:Inter,-apple-system,"SF Pro Display",sans-serif;--cond:Inter,-apple-system,sans-serif}
+html,body{background:var(--bg)}
+body{background:radial-gradient(120% 60% at 50% -10%,rgba(59,130,246,.16),transparent 60%),var(--bg) fixed}
+#splash{background:var(--bg)}
+.lt,h3,.sh b,.ptl b{font-stretch:100%}
+header{background:rgba(6,10,20,.82)!important;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-bottom:1px solid var(--line)!important}
+header .brand{font-weight:700;letter-spacing:.3px}
+.hb,.pill{border-radius:999px}
+.hb:not(.off){background:var(--upb);color:var(--up);border:1px solid rgba(34,197,94,.35)}
+.hm{background:var(--card2)!important;border:1px solid var(--line)!important;border-radius:12px!important}
+.card,.ovi,.sig,.pos,.run,.list,.stat,.tw,.cwrap,.empty,.news,.gn,.hava,.tk,.kpi,.sheet{
+ background:linear-gradient(180deg,rgba(255,255,255,.025),rgba(255,255,255,0)) ,var(--card)!important;
+ border:1px solid var(--line)!important;border-radius:var(--r)!important;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.card:hover,.sig:hover,.run:hover{border-color:var(--line2)!important}
+.btn3,.btnw,.go{background:var(--grad)!important;color:#fff!important;border:0!important;border-radius:14px!important;box-shadow:0 6px 20px rgba(59,130,246,.35);font-weight:600}
+.ff,.chip,.chip3,.seg2 button,.v4seg button,.tg{border-radius:999px!important;border:1px solid var(--line)!important;background:var(--card2)!important;color:var(--mut)!important}
+.ff.on,.chip.on,.chip3.on,.seg2 .on,.v4seg .on,.tg.on{background:var(--grad)!important;color:#fff!important;border-color:transparent!important;box-shadow:0 4px 14px rgba(59,130,246,.35)}
+input,select,textarea,.fld input,.fld select{background:var(--bg2)!important;border:1px solid var(--line2)!important;border-radius:12px!important;color:var(--tx)!important}
+.up.p,.ssr .p.up,.dirb.al,.tag.run{background:var(--upb);color:var(--up)!important;border-radius:8px}
+.dirb.sat{background:var(--dnb);color:var(--dn)}
+.sn{font-weight:700;letter-spacing:.2px}
+nav{background:rgba(8,13,26,.94)!important;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-top:1px solid var(--line)!important}
+nav button{color:var(--dim)!important}
+nav button.on{color:var(--ac)!important}
+nav button.on .ib{background:var(--acb)!important;color:var(--ac)!important;box-shadow:0 0 18px rgba(59,130,246,.35)}
+.toast{background:var(--card2);border:1px solid var(--line2);border-radius:14px}
+#aKad{display:none!important}
+.tape{border-top:1px solid var(--line)}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px}
+#t-ana .pv{background:radial-gradient(90% 120% at 100% 0%,rgba(34,211,238,.18),transparent 55%),linear-gradient(160deg,#16244A,#0C1424 70%)!important;border:1px solid var(--line2);border-radius:22px;padding:18px 18px 14px;box-shadow:0 12px 32px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.06)}
+#t-ana .pvl{color:var(--mut);font-size:13px}#t-ana .pvv{font-size:34px;font-weight:700;letter-spacing:-.5px}
+.hzl button{background:var(--card2)!important;border:1px solid var(--line)!important;border-radius:14px!important}
+@media (min-width:1100px){nav{background:rgba(8,13,26,.96)!important;border-right:1px solid var(--line)!important}}
+
+/* === TEMA v3 düzen === */
+header .hrow{gap:8px}
+.brand .hi{display:flex;flex-direction:column;line-height:1.15}.brand .hi b{font-size:19px}.brand .hi small{font:500 12px var(--fnt);color:var(--mut);letter-spacing:0}
+.brand .lg{width:40px;height:40px;border-radius:50%;padding:7px;background:linear-gradient(135deg,#6366F1,#3B82F6);color:#fff!important;box-shadow:0 0 18px rgba(99,102,241,.45)}
+#hdil{display:none}
+@media (max-width:1099px){#hbot,#cdot,#ses{display:none!important}}
+@media (max-width:1099px){header .sub,header .tape{display:none!important}}
+#t-ana .pv{display:block;position:relative}
+.pvGo{float:right;font-size:12px;color:var(--ac2);cursor:pointer}
+#t-ana .pv .achart{height:110px!important;margin:6px -4px 0;background:none!important;border:0!important;box-shadow:none!important}
+#t-ana .pv .rng{margin:8px 0 0!important;display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+#t-ana .pv .rng button{padding:5px 0;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid var(--line);color:var(--mut);font-size:12px}
+#t-ana .pv .rng button.on{background:var(--grad);color:#fff;border-color:transparent}
+.tk5w{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:12px 0 6px;padding:2px}.tk5w::-webkit-scrollbar{display:none}
+.tk5{flex:0 0 72px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 4px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer}
+.tk5 .lg2{width:34px;height:34px;border-radius:50%;font-size:15px;display:flex;align-items:center;justify-content:center;font-weight:700}
+.tk5 b{font-size:12px}.tk5 i{font-style:normal;font-size:11px;font-weight:600}
+.qa{display:grid;grid-template-columns:1.5fr repeat(4,1fr);gap:8px;align-items:stretch;margin:4px 0}
+.qa button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;font-size:11px;color:var(--mut)}
+.qa .qi{width:46px;height:46px;border-radius:14px;background:var(--card2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:#C7D2FE}
+.qa .qi svg{width:22px;height:22px}
+.qbot{flex-direction:row!important;gap:8px!important;border-radius:16px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.45)!important;color:var(--up)!important;font-size:13px!important;font-weight:600;box-shadow:0 0 18px rgba(34,197,94,.18)}
+.qbot i{width:12px;height:12px;border-radius:50%;background:var(--up);box-shadow:0 0 10px var(--up)}
+.qbot.off{background:var(--card2);border-color:var(--line)!important;color:var(--mut)!important;box-shadow:none}.qbot.off i{background:var(--dim);box-shadow:none}
+.pyL{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.pyr{display:grid;grid-template-columns:30px 1fr auto 78px;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer}.pyr:last-child{border-bottom:0}
+.pyi{width:28px;height:28px;border-radius:50%;border:1.5px solid #6B7FD7;color:#A5B4FC;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+.pyr b{font-weight:600;font-size:14px}.pyr .p{font-variant-numeric:tabular-nums;font-size:14px}.pyr .c{text-align:right;font-size:13px;font-weight:600}
+.ssL{background:var(--card)!important;border:1px solid var(--line)!important;border-radius:18px!important;padding:0!important;overflow:hidden}
+.ssr{display:grid!important;grid-template-columns:36px 1fr auto;grid-template-rows:auto auto;column-gap:10px;padding:11px 14px!important;border-bottom:1px solid var(--line)}
+.ssr .lg2{grid-row:span 2;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700}
+.ssr b{grid-column:2;font-size:15px}.ssr .t{display:none}.ssr .k{grid-column:2;font-size:11px;color:var(--mut)}
+.ssr .p{grid-column:3;grid-row:1/3;align-self:center;min-width:72px;text-align:center;padding:6px 8px;border-radius:10px;background:var(--card2)}
+.ssr .p.up{background:var(--upb)}.ssr .p.dn{background:var(--dnb);color:var(--dn)}
+.wr{border-radius:16px;margin-bottom:8px;padding:10px 12px!important;background:var(--card)!important;border:1px solid var(--line)!important}
+.wr .lg2{width:36px;height:36px;border-radius:12px}
+.wr .c.cu,.wr .po.up{background:var(--upb);color:var(--up);padding:5px 9px;border-radius:9px;font-weight:600}
+.wr .c.cd,.wr .po.dn{background:var(--dnb);color:var(--dn);padding:5px 9px;border-radius:9px;font-weight:600}
+.bhero{display:flex;align-items:center;gap:16px;margin:6px 0 14px}
+.bh-ic{width:84px;height:84px;border-radius:50%;background:radial-gradient(circle at 50% 40%,#1E3A8A,#0B1530 70%);border:1px solid rgba(96,165,250,.4);display:flex;align-items:center;justify-content:center;color:#7DD3FC;box-shadow:0 0 40px rgba(59,130,246,.45)}
+.bh-ic svg{width:46px;height:46px}.bh-t{font-size:28px;font-weight:800;letter-spacing:.5px}.bh-s{color:var(--mut);font-size:13px}
+.bhs{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:18px;margin-bottom:14px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.35)}
+.bhs i{width:22px;height:22px;border-radius:50%;background:var(--up);box-shadow:0 0 16px var(--up);flex:0 0 22px}
+.bhs b{display:block;color:var(--up);font-size:16px}.bhs small{color:var(--mut)}
+.bhs.off{background:var(--card);border-color:var(--line)}.bhs.off i{background:var(--dim);box-shadow:none}.bhs.off b{color:var(--mut)}
+.sh b{font-size:19px!important}.sh span{color:var(--ac2)}
 </style>
 </head>
 <body>
@@ -904,11 +989,12 @@ a{color:var(--ac)}
 
 <header>
   <div class="hrow">
-    <div class="brand"><svg class="lg"><use href="#i-logo"/></svg>ABD·BOT</div>
+    <div class="brand"><svg class="lg"><use href="#i-logo"/></svg><div class="hi"><b>ABD·BOT</b><small>Piyasalar bugün seninle.</small></div></div>
     <span class="hb off" id="hbot"><i></i><span>Bot</span></span>
     <span id="ses" class="pill" style="display:none">—</span><i class="cdot" id="cdot"></i>
     <a class="hm tgb" id="htg" target="_blank" rel="noopener" aria-label="Telegram kanalı" style="display:none"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.6 18.8 19c-.2 1-.9 1.3-1.7.8l-4.7-3.5-2.3 2.2c-.3.3-.5.5-1 .5l.3-4.8 8.8-7.9c.4-.3-.1-.5-.6-.2L6.8 12.9l-4.6-1.4c-1-.3-1-1 .2-1.5L20.5 3c.9-.3 1.6.2 1.4 1.6z"/></svg></a>
     <button class="hm dil" id="hdil" aria-label="Dil / Language" type="button">EN</button>
+    <button class="hm" id="hsrc" aria-label="Ara" type="button"><svg><use href="#i-empty"/></svg></button>
     <button class="hm bl" id="hbell" aria-label="Bildirimler"><svg><use href="#i-bell"/></svg><i class="nb" id="nbZ"></i></button>
     <button class="hm" id="hmenu" aria-label="Menü"><svg><use href="#i-more"/></svg><i class="nb" id="nbS"></i><i class="nb" id="nbA" style="display:none"></i></button>
   </div>
@@ -922,7 +1008,9 @@ a{color:var(--ac)}
  <div class="anaG">
   <div class="aK aK1">
     <div class="kdK" id="aKad" style="order:3"></div>
-    <div class="hzl" id="aHzl" style="order:3"><button data-go="canli">📡 Canlı anlatım</button><button data-go="karne2">📊 Canlı karne</button><button data-go="oyun">🎯 Tahmin et</button><button data-go="quiz">🧠 Quiz</button><button data-go="sor">💬 Bota sor</button></div>
+    <div class="qa" id="aHzl" style="order:3"><button class="qbot" data-go="bot" id="aBotP"><i></i><span>Bot</span></button><button data-go="canli"><span class="qi"><svg><use href="#i-trend"/></svg></span>Canlı</button><button data-go="karne2"><span class="qi"><svg><use href="#i-karne"/></svg></span>Karne</button><button data-go="haber"><span class="qi"><svg><use href="#i-news"/></svg></span>Haberler</button><button data-go="sor"><span class="qi"><svg><use href="#i-bot"/></svg></span>Bota sor</button></div>
+    <div class="sh" style="order:3"><b>Piyasa özeti</b><span id="aPiyT"></span></div>
+    <div class="pyL" id="aPiy" style="order:3"></div>
     <div id="aOgr" style="order:6"></div>
     <div id="aTg" style="order:8"></div>
   </div>
@@ -937,8 +1025,9 @@ a{color:var(--ac)}
     <div class="wl" id="aWl" style="order:19"></div>
   </div>
   <div class="aK aK3">
-    <div class="pv" data-go="portfoy" style="cursor:pointer;order:1"><div class="pvl">Botun parası</div><div class="pvv" id="aVal">—</div>
+    <div class="pv" style="order:1"><div class="pvl">Botun parası<span class="pvGo" data-go="portfoy">Detay ›</span></div><div class="pvv" id="aVal">—</div>
       <div class="pvc"><span class="hapG" id="aCh">—</span><span class="meta" style="font-size:13px">bugün</span></div></div>
+    <div class="tk5w" id="aTick" style="order:1"></div>
     <div class="durum" id="aDur" style="order:2"></div>
     <div class="v4ser" id="aSer" style="order:7"></div>
     <div class="achart" id="aChart" style="order:13"></div>
@@ -1037,7 +1126,8 @@ a{color:var(--ac)}
 
 <!-- BOT -->
 <section class="tab" id="t-bot">
-  <div class="lt">Bot</div>
+  <div class="bhero"><div class="bh-ic"><svg><use href="#i-bot"/></svg></div><div><div class="bh-t">ABD·BOT</div><div class="bh-s">Önce seviye, sonra giriş.</div></div></div>
+  <div class="bhs off" id="bHs"><i></i><div><b>Bot</b><small>—</small></div></div>
   <div class="card lvc" id="bsMini" data-go="basari" style="cursor:pointer;padding:12px 14px;margin-bottom:10px"></div>
   <div class="seg2" id="bseg"><button class="ff" data-k="bugun">Bugün</button><button class="ff" data-k="karne">Karne</button></div>
   <div id="bKarne"></div>
@@ -1693,7 +1783,7 @@ function kadranCiz(){const el=$('aKad');if(!el)return;const S=SECI||{};
    <div class="kdS"><div><b>${L.length}</b><small>seçili sinyal</small></div><div><b class="u">${nH}</b><small>hedefte</small></div><div><b class="d">${nS}</b><small>stop</small></div><div><b class="a">${G.bugun?nA:nE}</b><small>${G.bugun?'açık':'sonuçsuz'}</small></div></div>${gl?`<div class="kdG">Son seans: ${esc(gl)}</div>`:''}`}
 function secListe(){const el=$('aSec');if(!el)return;const G=secGun(),L=G.L.slice().sort((a,b)=>b.t-a.t).slice(0,8),S=SECI||{};
   if(!L.length){el.innerHTML=`<div class="ssL"><div class="ssE">Bugün henüz seçili sinyal yok. Seçili saat ${esc(S.t1||'17:00')}–${esc(S.t2||'20:30')} arasında koşan hisselerden gelir.</div></div>`;return}
-  el.innerHTML='<div class="ssL">'+L.map(s=>{const c=sonSinif(s),bit=c!=='op';return`<div class="ssr" data-sym="${esc(s.sym)}"><span class="t">${dkSaat(trDk(s.t))}</span><b>${esc(s.sym)}</b><span class="k">${esc(SETUP_K[s.setup]||s.setup)} · giriş ${fp(s.e)}</span><span class="p ${c}">${bit?esc(fS(s)):c==='es'?'—':(s.st==='açık'?'açık':'bekliyor')}<small>${bit?(c==='up'?'hedef':s.st==='süre'?'süre':'stop'):c==='es'?'sonuç yok':'takipte'}</small></span></div>`}).join('')+'</div>'}
+  el.innerHTML='<div class="ssL">'+L.map(s=>{const c=sonSinif(s),bit=c!=='op';return`<div class="ssr" data-sym="${esc(s.sym)}">${logo(s.sym)}<span class="t">${dkSaat(trDk(s.t))}</span><b>${esc(s.sym)}</b><span class="k">${esc(SETUP_K[s.setup]||s.setup)} · giriş ${fp(s.e)}</span><span class="p ${c}">${bit?esc(fS(s)):c==='es'?'—':(s.st==='açık'?'açık':'bekliyor')}<small>${bit?(c==='up'?'hedef':s.st==='süre'?'süre':'stop'):c==='es'?'sonuç yok':'takipte'}</small></span></div>`}).join('')+'</div>'}
 $('aSec').addEventListener('click',e=>{const r=e.target.closest('[data-sym]');if(r)select(r.dataset.sym)});
 setInterval(()=>{if(tab==='ana'){try{kadranCiz()}catch(e){}}},30000);
 // ---------------- grafik (koyu tema)
@@ -2112,12 +2202,26 @@ function renderPortfoy(){const d=botD;if(!d||!d.capital)return;const c=d.capital
     <div class="meta" style="display:flex;justify-content:space-between;margin-top:6px"><span>${esc(days[0].d.slice(5))}</span><span>${esc(son.d.slice(5))}</span></div>`}
 $('pSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const k=b.dataset.k;if(k==='islem'){showTab('gunluk');return}if(k==='perf'){showTab('ogren');return}});
 $('t-portfoy').addEventListener('click',e=>{const g=e.target.closest('[data-go]');if(g)showTab(g.dataset.go)});
-function renderAna(){if(botD){const h=$('hbot');h.className='hb'+(botD.active?'':' off');h.lastChild.textContent=botD.active?'Bot aktif':'Bot durdu'}
+function renderAna(){if(botD){const h=$('hbot');h.className='hb'+(botD.active?'':' off');h.lastChild.textContent=botD.active?'Bot aktif':'Bot durdu';try{const q=$('aBotP');q.className='qbot'+(botD.active?'':' off');q.lastChild.textContent=botD.active?'Bot aktif':'Bot durdu';const H=$('bHs');H.className='bhs'+(botD.active?'':' off');H.querySelector('b').textContent=botD.active?'Bot aktif':'Bot durdu';H.querySelector('small').textContent=botD.active?'Taramalar devam ediyor…':'Yeni işlem açmıyor'}catch(e){}}
+  try{anaTick();anaPiy()}catch(e){}
   if(tab!=='ana')return;const t=Date.now();if(t-anaAt<700){clearTimeout(renderAna.tm);renderAna.tm=setTimeout(renderAna,720);return}anaAt=t;
   const d=botD;if(d&&d.capital){const upnl=(d.open||[]).reduce((a,p)=>a+(p.upnl||0),0),v=d.capital.total+upnl,pn=d.today.pnl+upnl,pc=v-pn?pn/(v-pn)*100:0;
     $('aVal').textContent='$'+v.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
     $('aCh').className=pn>=0?'hapY':'hapK';$('aCh').textContent=`${fusd(pn)} (${fch(pc)})`}
   try{renderSupAna()}catch(e){}try{renderSer();renderListe()}catch(e){}anaGrafik();anaBot();anaAcik();anaListe()}
+
+// ---------------- v3 ana sayfa: hisse şeridi ve piyasa özeti
+const PIY_AD={SPY:'S&P 500',QQQ:'Nasdaq 100',DIA:'Dow Jones',IWM:'Russell 2000'};
+function anaTick(){const el=$('aTick');if(!el)return;const op=((botD&&botD.open)||[]).map(p=>p.sym);
+  const ks=Object.keys(rows).filter(k=>rows[k]&&rows[k].ch!=null&&!PIY_AD[k]);
+  const mov=ks.sort((a,b)=>Math.abs(rows[b].ch)-Math.abs(rows[a].ch));
+  const L=[...new Set(op.concat(mov))].filter(k=>rows[k]).slice(0,8);
+  el.innerHTML=L.map(k=>{const c=rows[k].ch;return `<div class="tk5" data-s="${esc(k)}">${logo(k)}<b>${esc(k)}</b><i class="${cls(c)}">${c==null?'—':fch(c)}</i></div>`}).join('')}
+function anaPiy(){const el=$('aPiy');if(!el)return;const L=Object.keys(PIY_AD).filter(k=>rows[k]&&rows[k].p!=null);
+  $('aPiyT').textContent=($('clk').textContent||'').replace(/^TR [^·]*· ?/,'');
+  el.innerHTML=L.length?L.map(k=>{const r=rows[k];return `<div class="pyr" data-s="${esc(k)}"><span class="pyi">${esc(k[0])}</span><b>${PIY_AD[k]}</b><span class="p">${fp(r.p)}</span><span class="c ${cls(r.ch)}">${r.ch>=0?'▲':'▼'} ${fch(Math.abs(r.ch||0)).replace(/^[+−-]/,'')}</span></div>`}).join(''):'<div class="meta" style="padding:10px 2px">Endeksler yükleniyor…</div>'}
+try{const pv=document.querySelector('#t-ana .pv');pv.appendChild($('aChart'));pv.appendChild($('aRng'))}catch(e){}
+try{$('hsrc').addEventListener('click',()=>showTab('tara'))}catch(e){}
 $('t-gunluk').addEventListener('click',e=>{const g=e.target.closest('.geri');if(g)showTab(g.dataset.go)});
 $('t-ana').addEventListener('click',e=>{const s=e.target.closest('[data-s]');if(s){select(s.dataset.s);return}const g=e.target.closest('[data-go]');if(g)showTab(g.dataset.go)});
 
