@@ -13,6 +13,7 @@ Kurgular (setup):
   Öncesi/sonrası: gap (boşluk devamı), uz_seviye (seviye kırılımı) — likidite filtresi + 2 mum teyidi
 """
 import math
+import sys
 from bisect import bisect_left
 import time
 from datetime import datetime
@@ -1635,6 +1636,30 @@ class Engine:
                 self._lab(sig, [], {}, now)
 
     # ------------------------------------------------------------ kayıt / özet
+    def hafiflet(self, gun):
+        """Bellek: önceki günlerin sonuçlanmış sinyallerinden ağır alanları at (gerekçe metinleri, çıkış laboratuvarı
+        ayrıntısı), denetçi kararını özet olarak tut, tekrar eden yazıları tek kopyaya indir. Öğrenme ve karne bozulmaz."""
+        I = sys.intern
+        n = 0
+        for s in self.signals:
+            if s.get("_hf") or s.get("day") == gun or s.get("st") in ("bekliyor", "açık"):
+                continue
+            for k in ("why", "lab", "lab_last", "lab_c"):
+                s.pop(k, None)
+            d = s.get("den")
+            if isinstance(d, dict):
+                s["den"] = {"karar": d.get("karar"), "lot": d.get("lot"), "sinif": d.get("sinif"),
+                            "mod": {k: {"k": v.get("k")} for k, v in (d.get("mod") or {}).items() if isinstance(v, dict)}}
+            for k in ("sym", "setup", "ses", "st", "day", "typ"):
+                if isinstance(s.get(k), str):
+                    s[k] = I(s[k])
+            f = s.get("f")
+            if isinstance(f, dict):
+                s["f"] = {I(k): (I(v) if isinstance(v, str) else v) for k, v in f.items()}
+            s["_hf"] = 1
+            n += 1
+        return n
+
     def load(self, sigs):
         for sig in sorted(sigs, key=lambda z: z.get("t", 0)):
             if not isinstance(sig, dict) or "id" not in sig or sig["id"] in self.by_id:

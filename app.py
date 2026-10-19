@@ -172,7 +172,7 @@ POLL_IDLE = 900                                       # piyasa kapalıyken
 KEEP_DAYS = int(os.getenv("KEEP_DAYS", "20"))         # veritabanında tutulan gün
 MEM_SEC = int(os.getenv("MEM_DAYS", "4")) * 86400     # ana liste: bellekte tutulan süre (sinyaller ~4 gün yeter)
 YAN_SEC = 86400                                       # koşusu biten / bakılıp geçilen hisseler: 1 gün
-BELLEK_SINIR = int(os.getenv("BELLEK_SINIR_MB", "430"))  # Render ücretsiz: 512 MB; bunu geçince önbellek boşaltılır
+BELLEK_SINIR = int(os.getenv("BELLEK_SINIR_MB", "390"))  # Render ücretsiz: 512 MB; bunu geçince önbellek boşaltılır
 try:   # Python'un boşalan belleği işletim sistemine geri vermesi + iş parçacığı başına ayrı bellek havuzunu sınırla
     _LIBC = ctypes.CDLL("libc.so.6")
     _LIBC.mallopt(-8, 2)                              # M_ARENA_MAX = 2
@@ -3708,6 +3708,13 @@ async def bt_run(n_days):
                                              lambda: cal.session(time.time()) == "regular",
                                              set(ara["done"]), list(ara["sigs"]), on_symbol)
         if sigs and len(set(ara["done"])) >= len(syms) * 0.9:
+            for x_ in sigs:      # yükleme yolundaki gibi: aynı metinler bellekte tek kopya
+                for k_ in ("sym", "setup", "ses", "st", "day"):
+                    if isinstance(x_.get(k_), str):
+                        x_[k_] = sys.intern(x_[k_])
+                f_ = x_.get("f")
+                if isinstance(f_, dict):
+                    x_["f"] = {sys.intern(k): (sys.intern(v) if isinstance(v, str) else v) for k, v in f_.items()}
             BT.update(sigs=sigs, sum=summ, t=int(time.time()))
             learner._sig = None
             learner.rebuild(engine.signals + BT["sigs"] + dis.as_signals())
@@ -8038,6 +8045,10 @@ async def housekeeping():
                 bellek_acil()
             elif n % 20 == 0:  # 5 dk'da bir: eski mumları at, belleği sisteme geri ver
                 store.prune(aktif_semboller())
+                try:
+                    engine.hafiflet(datetime.now(ET).date().isoformat())
+                except Exception as e:
+                    log.debug("Sinyal hafifletme hatası: %s", e)
                 bellek_bosalt()
             if n % 240 == 0:   # saatte bir
                 await cal.refresh()
