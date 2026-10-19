@@ -38,6 +38,10 @@ SEC_MAP = "https://www.sec.gov/files/company_tickers.json"
 TICKER_RE = re.compile(r"\(\s*(?i:nasdaq|nyse|nyse american|nyse mkt|nyse arca|amex|cboe|otcqb|otcqx|otc|otc markets)"
                        r"(?:\s*(?i:cm|gs|gm|global select|global market|capital market))?\s*:\s*\"?([A-Z]{1,5})\b")
 TAG_RE = re.compile(r"<[^>]+>")
+TARAYICI = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/129.0 Safari/537.36",
+            "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.5",
+            "Accept-Language": "en-US,en;q=0.9"}
 
 # olumsuz: bunlardan biri varsa haber hiç bildirilmez
 KOTU = re.compile(r"offering|priced .{0,30}(shares|units)|registered direct|private placement|at[- ]the[- ]market|"
@@ -104,6 +108,7 @@ class Haberci:
         self.ilk = set()                     # ilk okumada eski haberleri bildirme
         self.cik = {}                        # SEC CIK -> hisse kodu
         self._cik_t = 0
+        self.bekle = {}                      # kaynak -> bu zamana kadar deneme (403/429 sonrası)
 
     # ---------------------------------------------------------------- yardımcı
     def _gor(self, k):
@@ -147,10 +152,14 @@ class Haberci:
     # ---------------------------------------------------------------- RSS
     async def rss(self, c, kaynak, url):
         sessiz = kaynak not in self.ilk
+        if time.time() < self.bekle.get(kaynak, 0):
+            return                                  # engelleyen kaynağı bir süre rahat bırak
         try:
-            r = await c.get(url, headers={"User-Agent": "Mozilla/5.0 (abdbot)"})
+            r = await c.get(url, headers=TARAYICI)
             if r.status_code != 200:
                 self._not(kaynak, False, hata=f"HTTP {r.status_code}")
+                if r.status_code in (403, 429):
+                    self.bekle[kaynak] = time.time() + 30 * 60
                 return
             kok = X.fromstring(r.content)
             n = 0
