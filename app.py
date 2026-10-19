@@ -4136,7 +4136,7 @@ def plan_gecmis_yedekle():
 
 
 def _kademe_kaydet():
-    backup.data["kademe"] = {k: KADEME[k] for k in ("gun", "ok", "say", "sym")}
+    backup.data["kademe"] = {k: KADEME[k] for k in ("gun", "ok", "say", "sym", "ilr") if k in KADEME}
     backup.data["girseydin"] = dict(GIRSEYDIN)
     backup.dirty = True
 
@@ -4151,7 +4151,7 @@ def kademe_kontrol():
     KADEME["t"] = now
     gun = datetime.now(ET).date().isoformat()
     if KADEME["gun"] != gun:
-        KADEME.update(gun=gun, ok={}, say=0, sym={})
+        KADEME.update(gun=gun, ok={}, say=0, sym={}, ilr={})
     degisti = False
     for sig in engine.signals[-500:]:
         if sig.get("day") != gun or sig.get("dir", 1) < 0 or sig["id"] in KADEME["ok"] or f"s:{sig['id']}" not in tg.msg:
@@ -4171,8 +4171,60 @@ def kademe_kontrol():
             kademe_gonder(sig, iz)
         except Exception as e:
             log.warning("Kademe bildirimi hatası %s: %s", sig["sym"], e)
+    try:
+        if sinyal_ilerleme(gun, now):
+            degisti = True
+    except Exception as e:
+        log.warning("Sinyal ilerleme hatası: %s", e)
     if degisti:
         _kademe_kaydet()
+
+
+ILR_ESIK = (8, 15, 25, 50, 100)      # Telegram'a giden AL sinyalinde girişten % yükseliş adımları
+
+
+def sinyal_ilerleme(gun, now):
+    """Telegram'a giden AL sinyalleri: girişten +%8/15/25/50/100 olunca resimli 'kırılımdan +%X' mesajı.
+    K3 kartının kapsadığı yüzdeler tekrar gönderilmez; hisse başına günde en fazla TAKIP_HISSE_GUN mesaj."""
+    ilr = KADEME.setdefault("ilr", {})
+    say = _PLAN_TG.setdefault("takip", {})
+    degisti = False
+    for sig in engine.signals[-500:]:
+        if sig.get("day") != gun or sig.get("dir", 1) < 0 or f"s:{sig['id']}" not in tg.msg:
+            continue
+        iz = kademe_izi(sig)
+        if not iz:
+            continue
+        e = sig["e"]
+        zp = _yuzde(iz["zirve"], e)
+        alt = _yuzde(iz["ks"][-1], e) if iz["gel"][-1] else 0     # K3 kartı bu yüzdeye kadarını zaten anlatıyor
+        es = [x for x in ILR_ESIK if zp >= x and x > max(ilr.get(sig["id"], 0), alt)]
+        if not es:
+            continue
+        ilr[sig["id"]] = max(es)
+        degisti = True
+        sk = f"{gun}:{sig['sym']}"
+        if say.get(sk, 0) >= TAKIP_HISSE_GUN or (iz["zt"] and now - iz["zt"] > KADEME_TAZE):
+            continue                           # günlük sınır / eski zirve (yeniden başlamada eski olay yağmasın)
+        say[sk] = say.get(sk, 0) + 1
+        ch = None
+        if gorsel:
+            rows = [r for r in _mumlar_sonra(sig["sym"], sig["t"] - 60 * 60)]
+            b5 = formasyon.to5m(rows)[-72:] if rows else []
+            v = {"sym": sig["sym"], "giris": e, "stop": sig["s"], "ks": iz["ks"], "gel": iz["gel"], "t_sig": sig["t"],
+                 "son": iz["son"], "zirve": iz["zirve"], "zt": iz["zt"], "stop_t": iz["stop_t"]}
+            ch = {"fn": lambda b=b5, v=v: gorsel.kademe_kart(b, v)}
+        pos = next((q for q in bot.positions if q.get("sig") == sig["id"]), None)
+        html = (f"🚀 <b>#{_h(sig['sym'])} KIRILIMDAN {fyk(zp)}</b>\n"
+                f"🔵 Giriş <code>{fk(e)}</code> · {_saat_tr(sig['t'])} · {_h(sinyal.SETUP_AD.get(sig['setup'], sig['setup']))}\n"
+                f"📈 Zirve <code>{fk(iz['zirve'])}</code> · şimdi <code>{fk(iz['son'])}</code> ({fyk(_yuzde(iz['son'], e))})\n"
+                + (f"⚠️ <i>Önce stop geldi ({_saat_tr(iz['stop_t'])}); yükseliş stoptan sonra.</i>\n" if iz["stop_t"] else "")
+                + ("🤖 Bot içeride.\n" if pos and pos["st"] in botmod.OPEN_ST else
+                   f"🤖 Bot bu işlemi {_p_(pos['pct'], 1)} ile kapattı.\n" if pos and pos.get("pct") is not None else "")
+                + "<i>Paper trade · yatırım tavsiyesi değildir</i>")
+        rk = f"k:{sig['plan']}" if sig.get("plan") and f"k:{sig['plan']}" in tg.msg else f"s:{sig['id']}"
+        tg.send(html, ch, sym=sig["sym"], reply=rk, konu="sinyal", quiet=True)
+    return degisti
 
 
 def kademe_html(sig, iz):
@@ -7593,7 +7645,7 @@ def plan_olaylari():
         log.warning("Plan takip hatası: %s", e)
 
 
-TAKIP_ESIK = (10, 20, 30, 50, 100)   # kırılım seviyesinden % yükseliş adımları
+TAKIP_ESIK = (8, 15, 25, 50, 100)   # kırılım seviyesinden % yükseliş adımları
 TAKIP_HISSE_GUN = 3                   # hisse başına günde en fazla takip mesajı
 
 
