@@ -8130,6 +8130,10 @@ def kk_guncelle():
             if z and z > (r.get("zirve") or 0):
                 r["zirve"] = z
                 deg = True
+            px_ = fiyat(r["sym"])                                # yükseldikten sonra kırılımın altına döndü mü
+            if not r.get("geri") and px_ and px_ < r["giris"] and (r.get("zirve") or 0) >= r["giris"] * 1.01:
+                r["geri"] = int(now)
+                deg = True
         if r["st"] in ("stop", "K3", "sahte", "kırılmadı", "bitti", "onaysız"):
             continue
         if r["gun"] != gun:                                    # gün bitti
@@ -8257,6 +8261,11 @@ def _zirve_since(sym, t0):
     return max(hs) if hs else None
 
 
+def _geri(r):
+    """Kırılımdan sonra en az %1 yükselip sonra tekrar kırılım fiyatının altına düştü mü."""
+    return bool(r.get("geri")) or (r.get("st") == "stop" and (_tepe_pct(r) or 0) >= 1)
+
+
 def _tepe_pct(r):
     t = max(r.get("tepe") or 0, r.get("zirve") or 0)
     return round((t / r["giris"] - 1) * 100, 1) if t and r.get("giris") else None
@@ -8272,7 +8281,7 @@ def karne_ozet(gun=None, n=30):
     return {"gonderilen": len(K) if gun else len(KK["kayit"]), "kirilan": len(son), "kazanan": len(kaz), "kaybeden": len(kay),
             "wr": round(100 * len(kaz) / (len(kaz) + len(kay))) if kaz or kay else None,
             "ort_tepe": round(sum(tp) / len(tp), 1) if tp else None,
-            "liste": [dict(r, sonuc=_kk_sonuc(r)[0], renk=_kk_sonuc(r)[1], tepe_pct=_tepe_pct(r)) for r in reversed(K[-40:])]}
+            "liste": [dict(r, sonuc=_kk_sonuc(r)[0], renk=_kk_sonuc(r)[1], tepe_pct=_tepe_pct(r), geri=_geri(r)) for r in reversed(K[-40:])]}
 
 
 def radar_listesi(n=8):
@@ -8369,7 +8378,7 @@ def karne_gonder():
         return
     sat = []
     for r in o["liste"][:10]:
-        sat.append({"sym": r["sym"], "alt": f"kırılım {fk(r['giris'])} · {r['sonuc'].replace(' ✅', '').replace(' ❌', '')}",
+        sat.append({"sym": r["sym"], "alt": f"kırılım {fk(r['giris'])} · " + ("zirveden sonra altına döndü" if r.get("geri") else r['sonuc'].replace(' ✅', '').replace(' ❌', '')),
                     "sag": (f"{_fy0(r['tepe_pct'])} · +{round(planmod.LOT_USD * r['tepe_pct'] / 100)}$" if (r.get("tepe_pct") or 0) > 0
                             else _fy0(r["tepe_pct"])) if r["st"] not in ("kırılmadı", "bekliyor") else "—", "renk": r["renk"],
                     "cubuk": min(1, max(0, (r["tepe_pct"] or 0) / 30)) if r.get("tepe_pct") else None})
@@ -8387,14 +8396,17 @@ def karne_gonder():
         usd = round(planmod.LOT_USD * r["tepe_pct"] / 100)
         top += usd
         zv = max(r.get("tepe") or 0, r.get("zirve") or 0)
-        kaz.append(f"{'🟢' if r['tepe_pct'] > 0 and r['st'] != 'sahte' else '🔴'} <b>#{_h(r['sym'])}</b> "
-                   f"<code>{fk(r['giris'])}</code> → <code>{fk(zv)}</code> · <b>{_fy0(r['tepe_pct'])}</b> · {'+' if usd >= 0 else ''}{usd}$")
+        geri = r.get("geri")
+        kaz.append(f"{'↩️' if geri else '🟢' if r['tepe_pct'] > 0 and r['st'] != 'sahte' else '🔴'} <b>#{_h(r['sym'])}</b> "
+                   f"<code>{fk(r['giris'])}</code> → <code>{fk(zv)}</code> · <b>{_fy0(r['tepe_pct'])}</b> · {'+' if usd >= 0 else ''}{usd}$"
+                   + (" · <i>sonra kırılımın altına döndü</i>" if geri else ""))
     html = (f"📊 <b>GÜNÜN KIRILIM KARNESİ</b>\n"
             f"Gönderilen {o['gonderilen']} · kırılan {o['kirilan']} · ✅ {o['kazanan']} · ❌ {o['kaybeden']}\n"
             + (("\n<b>Kırılımdan zirveye</b> (her plana 250$)\n" + "\n".join(kaz[:8])
                 + (f"\n… ve {len(kaz) - 8} hisse daha (tamamı sitede, Karne sekmesinde)" if len(kaz) > 8 else "")
                 + f"\n💰 <b>Toplam: {'+' if top >= 0 else ''}{top}$</b>\n\n") if kaz else "")
             + (f"Son 30 kırılım: K1+ oranı <b>%{g['wr']}</b> · ortalama zirve {_fy0(g['ort_tepe'])}\n" if g["wr"] is not None else "")
+            + ("↩️ = zirve yaptıktan sonra kırılım fiyatının altına düştü\n" if any(r.get("geri") for r in o["liste"]) else "")
             + "<i>Zirve = kırılımdan sonraki en yüksek fiyat · kazanan da kaybeden de sayıldı · yatırım tavsiyesi değildir</i>")
     tg.send(html, {"png": png} if png else None, konu="plan", quiet=True)
 
@@ -8843,7 +8855,7 @@ def girseydin_listesi(sym, px):
         et, renk, _ = _kk_sonuc(r)
         x = {"giris": r["giris"], "stop": r["stop"], "hed": r.get("hed"), "st": r["st"], "etiket": et, "renk": renk,
              "t": r.get("t"), "kt": r.get("kt"), "tepe": _tepe_pct(r), "k": r.get("k", 0),
-             "zirve": max(r.get("tepe") or 0, r.get("zirve") or 0) or None}
+             "zirve": max(r.get("tepe") or 0, r.get("zirve") or 0) or None, "geri": _geri(r)}
         if px and r["st"] not in ("bekliyor", "kırılmadı"):
             x["pct"] = round((px / r["giris"] - 1) * 100, 1)            # şimdi
             x["usd"] = round(planmod.LOT_USD * x["pct"] / 100)
