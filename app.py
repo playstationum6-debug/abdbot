@@ -4370,8 +4370,25 @@ _PG_ALAN = ("id", "sym", "lvl", "giris", "stop", "hedefler", "tur", "puan", "st"
             "bitis", "tip", "vr", "ust", "liste", "ot", "t_onay", "ses", "kaynak")
 
 
+def _aktif_imza():
+    return tuple(sorted((s, p.get("id"), p.get("st")) for s, p in PLAN.planlar.items())), tuple(sorted(PLAN.retest))
+
+
 def plan_gecmis_yedekle():
-    """Biten planlar (plan / onay / sahte sayıları) yedeğe: Render yeniden başlayınca karne sıfırlanmasın."""
+    """Biten planlar (plan / onay / sahte sayıları) ve AKTİF planlar yedeğe: Render yeniden başlayınca kanala verilen
+    seviyeler unutulmasın (yeniden başlamada plan kaybolup kırılım mesajı gelmiyordu)."""
+    imza = _aktif_imza()
+    if imza != _PG.get("aktif"):
+        _PG["aktif"] = imza
+        try:
+            backup.data["plan_aktif"] = {"gun": _gun_et(),
+                                         "planlar": json.loads(json.dumps(PLAN.planlar, default=list)),
+                                         "retest": json.loads(json.dumps({s: {"p": r["p"], "t": r["t"]} for s, r in PLAN.retest.items()},
+                                                                         default=list))}
+            backup.dirty = True
+            YEDEK_ACIL[0] = YEDEK_ACIL[0] or time.time()
+        except Exception as e:
+            log.debug("Aktif planlar yedeklenemedi: %s", e)
     son = PLAN.gecmis[-1]["id"] if PLAN.gecmis else None
     if son == _PG["son"]:
         return
@@ -8883,6 +8900,16 @@ def plan_olaylari():
         elif ev == "kaçtı":
             PLAN_DURUM[key] = DURUM_AD["kaçtı"]
             PLAN_FOTO[key] = "kaçtı"
+            px_ = fiyat(sym) or p.get("px")
+            if tg.ok and not p.get("kacti_tg"):
+                p["kacti_tg"] = 1
+                tg.send(f"🏃 <b>KIRDI AMA KAÇTI · #{_h(sym)}</b>\n"
+                        f"Kırılım <code>{fk(p['giris'])}</code> tek mumda geçildi, fiyat <code>{fk(px_)}</code>"
+                        f" ({fy(_yuzde(px_, p['giris']))}).\n"
+                        f"⛔ <b>Kovalamayın.</b> Fiyat {fk(p['giris'])}–{fk(p['giris'] * 1.02)} bölgesine geri çekilip "
+                        "üstünde tutarsa 🔁 tekrar test mesajı gelecek (45 dk izlenir).\n<i>Yatırım tavsiyesi değildir</i>",
+                        plan_grafik_ch(p, durum="kaçtı"), sym=sym, reply=key, konu="plan", quiet=False)
+                zincir(key, f"🏃 kırdı ama kaçtı {fk(px_)}")
         else:
             PLAN_DURUM[key] = DURUM_AD.get(ev, ev) + (f" · {_h(p.get('neden'))}" if p.get("neden") else "")
     try:
@@ -9437,6 +9464,17 @@ async def lifespan(app):
         SICIL.update({k: v for k, v in backup.data["sicil"].items() if isinstance(v, (int, float))})
     if isinstance(backup.data.get("kosan_tg"), dict):
         KOSAN_TG.update({k: v for k, v in backup.data["kosan_tg"].items() if isinstance(v, (int, float))})
+    pa_ = backup.data.get("plan_aktif")
+    if isinstance(pa_, dict) and pa_.get("gun") == _gun_et():
+        for s_, p_ in (pa_.get("planlar") or {}).items():
+            if isinstance(p_, dict) and p_.get("giris") and s_ not in PLAN.planlar:
+                PLAN.planlar[s_] = p_
+                IZLE.setdefault(s_, {"t": time.time(), "kaynak": "kanal planı"})
+                ensure_sym(s_)
+        for s_, r_ in (pa_.get("retest") or {}).items():
+            if isinstance(r_, dict) and r_.get("p"):
+                PLAN.retest[s_] = r_
+        log.info("Aktif planlar geri yüklendi: %d", len(PLAN.planlar))
     if isinstance(backup.data.get("plan_gecmis"), list) and not PLAN.gecmis:
         PLAN.gecmis[:] = [p for p in backup.data["plan_gecmis"] if isinstance(p, dict) and p.get("sym")][-300:]
     if isinstance(backup.data.get("kademe"), dict):
