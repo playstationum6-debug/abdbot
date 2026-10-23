@@ -8104,7 +8104,7 @@ def kk_guncelle():
     now = time.time()
     deg = False
     for r in KK["kayit"][-80:]:
-        if r["st"] in ("stop", "K3", "sahte", "kırılmadı", "bitti"):
+        if r["st"] in ("stop", "K3", "sahte", "kırılmadı", "bitti", "onaysız"):
             continue
         if r["gun"] != gun:                                    # gün bitti
             r["st"] = "kırılmadı" if r["st"] == "bekliyor" else "bitti"
@@ -8114,6 +8114,7 @@ def kk_guncelle():
         if not px:
             continue
         if r["st"] == "bekliyor":
+            r["ust_max"] = max(r.get("ust_max") or 0, px)
             p = _plan_bul(r["id"], r["sym"])
             pst = (p or {}).get("st")
             if pst == "sahte" and not r.get("kt"):
@@ -8126,7 +8127,7 @@ def kk_guncelle():
                 r.update(st="kırıldı", kt=now, tepe=px, dip=px, ab=(o or {}).get("pct"), spr=spread_yuzde(r["sym"]) or r.get("spr"))
                 deg = True
             elif pst in ("iptal", "süre"):
-                r["st"] = "kırılmadı"
+                r["st"] = "onaysız" if (r.get("ust_max") or 0) >= r["giris"] else "kırılmadı"
                 deg = True
             elif p is None and px >= r["giris"]:
                 # plan bellekte yok (yeniden başlama) ama fiyat seviyeyi geçti: karne kırılmış sayar
@@ -8210,6 +8211,8 @@ def _kk_sonuc(r):
         return "bekliyor", "acc", None
     if r["st"] == "kırılmadı":
         return "kırılmadı", "acc", None
+    if r["st"] == "onaysız":
+        return "geçti · onay yok", "acc", None
     if r["k"] >= 1:
         return f"K{r['k']} ✅" + (" · sonra stop" if r["st"] == "stop" else ""), "up", True
     if r["st"] == "stop":
@@ -8223,7 +8226,7 @@ def _tepe_pct(r):
 
 def karne_ozet(gun=None, n=30):
     K = [r for r in KK["kayit"] if (gun is None or r["gun"] == gun)]
-    kir = [r for r in K if r["st"] not in ("bekliyor", "kırılmadı")]
+    kir = [r for r in K if r["st"] not in ("bekliyor", "kırılmadı", "onaysız")]
     son = kir[-n:] if gun is None else kir
     kaz = [r for r in son if _kk_sonuc(r)[2] is True]
     kay = [r for r in son if _kk_sonuc(r)[2] is False]
@@ -8780,6 +8783,22 @@ def canli_listesi():
         r_ = scanner.runners.get(x["sym"]) or {}
         x["gun"] = r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct")
     return L
+
+
+def girseydin_listesi(sym, px):
+    """Bugün bu hissede kanala verilen her seviye: durum + 'buradan girseydin şimdi %X · 250$ ile ±Y$'."""
+    out = []
+    for r in [r for r in KK["kayit"] if r["sym"] == sym and r["gun"] == _gun_et()][-4:]:
+        et, renk, _ = _kk_sonuc(r)
+        x = {"giris": r["giris"], "stop": r["stop"], "hed": r.get("hed"), "st": r["st"], "etiket": et, "renk": renk,
+             "t": r.get("t"), "kt": r.get("kt"), "tepe": _tepe_pct(r), "k": r.get("k", 0)}
+        if px and r["st"] not in ("bekliyor", "kırılmadı"):
+            x["pct"] = round((px / r["giris"] - 1) * 100, 1)
+            x["usd"] = round(planmod.LOT_USD * x["pct"] / 100)
+        elif px:
+            x["kalan"] = round((r["giris"] / px - 1) * 100, 1)
+        out.append(x)
+    return out
 
 
 def hisse_gecmis(sym):
@@ -9804,7 +9823,7 @@ async def api_hisse(request: Request, sym: str, bars: int = 0):
            "gun_pct": r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct"),
            "poc": (hacim_profili(sym) or {}).get("poc"), "gecmis": hisse_gecmis(sym),
            "zincir": PLAN_ZINCIR.get((KK["tgplan"].get(sym) or {}).get("key"), [])[-6:],
-           "alarm": [x for x in KK["alarm"] if x["sym"] == sym]}
+           "alarm": [x for x in KK["alarm"] if x["sym"] == sym], "girseydin": girseydin_listesi(sym, sm.get("p") or fiyat(sym))}
     if bars:
         bs = store.bars.get(sym) or {}
         t0 = datetime.now(ET).replace(hour=4, minute=0, second=0, microsecond=0).timestamp()
@@ -9891,7 +9910,7 @@ async def index(request: Request):
             sayac("acilis", _anahtar(request))
         except Exception:
             pass
-    sayfa = "yeni.html" if (BASE / "yeni.html").exists() and request.url.path != "/eski" else "index.html"
+    sayfa = "eski.html" if request.url.path == "/eski" and (BASE / "eski.html").exists() else "index.html"
     resp = HTMLResponse((BASE / sayfa).read_text(encoding="utf-8").replace("__SITE__", site_kok()),
                         headers={"Cache-Control": "no-store"})
     if SITE_PASSWORD:
