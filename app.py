@@ -6359,7 +6359,7 @@ async def tg_analiz(sym):
     return "\n".join(out), png
 
 
-YARDIM = ("<b>Komutlar</b>\n/liste — ☀️ günün listesi ve durumu\n/girseydin — 💡 bugünkü kırılımlardan girseydin kaç % olurdu\n/hafta — 📅 haftalık rapor kartı\n/anket — 🗳 kanala \"bu hafta hangi hisse\" anketi\n/ders 1 — 🎓 mini kurs (5 ders)\n/kurgular — 🧭 kurgu kesici: hangi kurgu açık, hangisi gölgede\n/cikis — 🧪 çıkış laboratuvarı (4 çıkış kuralı karşılaştırması)\n/planlar — 📐 aktif kırılım planları (\"X kırılırsa giriş\")\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/sahip — bu sohbeti bot sahibi yap (sağlık raporları buraya gelir)\n/saglik — 🩺 bot sağlık durumu\n/kuraltest — 🧪 kuralları geçmiş veride karşılaştır\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
+YARDIM = ("<b>Komutlar</b>\n/liste — ☀️ günün listesi ve durumu\n/girseydin — 💡 bugünkü kırılımlardan girseydin kaç % olurdu\n/hafta — 📅 haftalık rapor kartı\n/anket — 🗳 kanala \"bu hafta hangi hisse\" anketi\n/ders 1 — 🎓 mini kurs (5 ders)\n/kurgular — 🧭 kurgu kesici: hangi kurgu açık, hangisi gölgede\n/cikis — 🧪 çıkış laboratuvarı (4 çıkış kuralı karşılaştırması)\n/planlar — 📐 aktif kırılım planları (\"X kırılırsa giriş\")\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/sahip — bu sohbeti bot sahibi yap (sağlık raporları buraya gelir)\n/saglik — 🩺 bot sağlık durumu\n/ekran — 👀 ben olsam bunları takip ederdim listesini kanala şimdi at\n/kuraltest — 🧪 kuralları geçmiş veride karşılaştır\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
           "/analiz QNME — 15 dk analiz ve plan (grafikli)\n/alarm QNME 0.90 — fiyat alarmı\n/alarmlar — kurulu alarmlar\n"
           "/alarmsil QNME — alarmı sil\n/yorum — yapay zekalı piyasa yorumu\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
           "/basla — yeni işlem açmaya devam\n/ogren — bot ne öğrendi (saat, kurgular, model) · /ogren simdi — öğrenme turunu şimdi çalıştır\n"
@@ -6417,6 +6417,9 @@ async def tg_komut(text, chat, thread=None):
                  + "\n".join(saglik_satirlari()))
         else:
             send("Bot sahibi zaten kayıtlı.")
+    elif cmd in ("ekran", "takip"):
+        if not radar_gonder():
+            send("👀 Şu an kırılım seviyesine %4'ten yakın, alıcısı güçlü en az 2 hisse yok.")
     elif cmd in ("saglik", "sağlık"):
         send("🩺 <b>SAĞLIK</b>\n" + "\n".join(saglik_satirlari()))
     elif cmd in ("kuraltest", "kural"):
@@ -7812,8 +7815,14 @@ def kirilim_html(p, retest=False):
            "tuttu; yeşil 5 dk mum yüksek hacimle kapandı ({v}×)") if retest else \
         ("🟢 <b>KIRILIM ONAYLANDI · #{s}</b>\n" + ("1 dk mum (hızlı piyasa: hacim + oynaklık yüksek)" if p.get("tf") == 1 else "5 dk mum")
          + " <code>{e}</code> ile direncin (<code>{l}</code>) üstünde kapandı · hacim {v}×")
-    out = [bas.format(s=_h(p["sym"]), e=fk(e_), l=fk(p.get("lvl") or p["giris"]), v=str(p.get("vr") or "—").replace(".", ",")),
-           "",
+    out = [bas.format(s=_h(p["sym"]), e=fk(e_), l=fk(p["giris"] if not retest else (p.get("lvl") or p["giris"])),
+                      v=str(p.get("vr") or "—").replace(".", ",")),
+           ""]
+    px = fiyat(p["sym"])
+    if px and e_ and px > e_ * 1.02:
+        out.append(f"⚠️ Fiyat şimdi <code>{fk(px)}</code>, girişin {fy(_yuzde(px, e_))} üstünde: <b>kovalamayın</b>, "
+                   f"limit emir ancak {fk(e_)}'e geri çekilirse dolar.")
+    out += [
            f"📝 <b>Limit alış</b> <code>{fk(e_)}</code> · piyasa emri kullanmayın",
            f"🔴 Stop <code>{fk(p['stop'])}</code> <i>(kırılan direncin altı, {fy(_yuzde(p['stop'], e_))})</i>",
            "🟢 Hedef " + " · ".join(f"<code>{fk(h)}</code>" for h in p["hedefler"][:3])]
@@ -8181,19 +8190,48 @@ def karne_gonder():
 
 
 def radar_gonder():
-    L = [x for x in radar_listesi(6) if x["uzak"] <= 3 and (x["spr"] or 0) <= SPREAD_MAX]
+    """'Ben olsam bunları takip ederdim · ekranda olun': kırılım seviyesine yakın, alıcısı güçlü en iyi 4 hisse."""
+    L = []
+    for x in radar_listesi(10):
+        if x["uzak"] > 4 or (x["spr"] or 0) > SPREAD_MAX or (x.get("ab") is not None and x["ab"] < 45):
+            continue
+        r_ = scanner.runners.get(x["sym"]) or {}
+        n_ = r_.get("news") or {}
+        x["haber"] = bool(n_) and r_.get("news_kind") != "kötü"
+        x["kat"] = kat_etiket(n_.get("headline", "")) if n_ else ""
+        x["gun_pct"] = r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct")
+        x["skor"] = (x.get("puan") or 0) + (2 if x["haber"] else 0) + ((x.get("ab") or 50) - 50) / 10 - x["uzak"] / 2
+        L.append(x)
+    L.sort(key=lambda x: -x["skor"])
+    L = L[:4]
     if len(L) < 2:
         return False
-    sat = [{"sym": x["sym"], "alt": f"kırılım {fk(x['giris'])}" + (f" · alım %{x['ab']}" if x.get("ab") is not None else ""),
+    sat = [{"sym": x["sym"], "alt": f"{fk(x['giris'])} üstü" + (f" · alım %{x['ab']}" if x.get("ab") is not None else "")
+            + (" · haberli" if x["haber"] else ""),
             "sag": f"%{str(round(max(0, x['uzak']), 1)).replace('.', ',')} kaldı", "renk": "gold" if x["uzak"] <= 1 else "acc",
-            "cubuk": 1 - min(1, max(0, x["uzak"]) / 3)} for x in L]
-    png = _kart({"baslik": "Kırılım Radarı", "rozet": "RADAR", "renk": "gold", "saat": datetime.now(TR).strftime("%H:%M"),
-                 "alt": "Kırılım seviyesine en çok yaklaşan hisseler", "satirlar": sat,
-                 "not_": "Kırılım = direncin üstünde 5 dk mum kapanışı + 2× hacim · yatırım tavsiyesi değildir"})
-    html = "🎯 <b>KIRILIM RADARI</b>\n" + "\n".join(
-        f"• <b>#{_h(x['sym'])}</b> <code>{fk(x['giris'])}</code> üstü · %{str(round(max(0, x['uzak']), 1)).replace('.', ',')} kaldı" for x in L) + \
-        "\n<i>Kırılınca grafikli mesaj gelecek. Acele etmeyin, 5 dk kapanışı bekleyin.</i>"
-    tg.send(html, {"png": png} if png else None, konu="plan", quiet=True)
+            "cubuk": 1 - min(1, max(0, x["uzak"]) / 4)} for x in L]
+    png = _kart({"baslik": "Ekranda Olun", "rozet": "TAKİP LİSTESİ", "renk": "gold", "saat": datetime.now(TR).strftime("%H:%M"),
+                 "alt": "Ben olsam şu an bu hisseleri takip ederdim", "satirlar": sat,
+                 "not_": "Kırılım = direncin üstünde mum kapanışı + 2× hacim · yatırım tavsiyesi değildir"})
+    out = [f"👀 <b>BEN OLSAM BUNLARI TAKİP EDERDİM</b> · {datetime.now(TR).strftime('%H:%M')}", ""]
+    for x in L:
+        out.append(f"✅ <b>#{_h(x['sym'])}</b>" + (f"  <i>{fy(x['gun_pct'])} bugün</i>" if x.get("gun_pct") is not None else ""))
+        out.append(f"🟢 LONG: <code>{fk(x['giris'])}</code> üzeri · %{str(round(max(0, x['uzak']), 1)).replace('.', ',')} kaldı")
+        out.append(f"🔴 STOP: <code>{fk(x['stop'])}</code> altı")
+        neden = []
+        if x["haber"]:
+            neden.append("📰 " + (trk(x["kat"]) if x.get("kat") else "haberli"))
+        if x.get("ab") is not None:
+            neden.append(f"📊 alım %{x['ab']}")
+        if x.get("tur"):
+            neden.append("📐 " + x["tur"])
+        if neden:
+            out.append("<i>" + _h(" · ".join(neden)) + "</i>")
+        out.append("")
+    out += ["🚀 <b>EKRANDA OLUN!</b> Kırılım gelince grafikli mesaj gelecek.",
+            "⏱ Kırılım gelmeden girmeyin; seviyenin üstünde mum kapanışı + hacim bekleyin.",
+            "<i>Yatırım tavsiyesi değildir</i>"]
+    tg.send("\n".join(out), {"png": png} if png else None, konu="plan", quiet=False)
     return True
 
 
@@ -8426,7 +8464,7 @@ async def krt_loop():
 
 
 async def kanal_loop():
-    """Zamanlı kanal mesajları (ET): radar 10:00 ve 13:00 · karne 16:10 · ders Cuma 16:20. Her biri günde bir kez."""
+    """Zamanlı kanal mesajları (ET): 'ekranda olun' 9:50, 11:00, 13:30 · karne 16:10 · ders Cuma 16:20. Her biri günde bir kez."""
     while True:
         await asyncio.sleep(30)
         try:
@@ -8437,7 +8475,7 @@ async def kanal_loop():
                 continue
             gun, hm = str(n.date()), n.hour * 60 + n.minute
             G = KK["gon"]
-            for ad, dk in (("radar1", 600), ("radar2", 780)):
+            for ad, dk in (("radar1", 590), ("radar2", 660), ("radar3", 810)):   # 16:50 · 18:00 · 20:30 TR
                 if dk <= hm < dk + 20 and G.get(ad) != gun:
                     if radar_gonder() or hm >= dk + 19:
                         G[ad] = gun
