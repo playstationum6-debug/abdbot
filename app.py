@@ -926,7 +926,11 @@ def list_row(sym):
     o = akis_ozet(sym)
     if o:
         out["ab"] = o["pct"]
+    sp_ = spread_yuzde(sym)
+    if sp_ is not None:
+        out["spr"] = sp_
     return out
+
 
 
 def bar_out(ts, b):
@@ -1319,6 +1323,23 @@ def parse_ts(s):
 # ----------------------------------------------------------------- alım/satım akışı (tick kuralı, IEX işlemleri)
 AKIS = {}            # sembol -> {"p": son fiyat, "y": son yön, "dk": {dakika: [alım, satım, adet]}}
 AKIS_DK = 30         # tutulan dakika
+KOTE = {}            # sembol -> (alış, satış, ts)  IEX en iyi alış/satış
+SPREAD_MAX = float(os.getenv("SPREAD_MAX", "2.0"))   # % üstü: plan mesajı gönderilmez (kayma riski)
+
+
+def spread_yuzde(sym):
+    """Alış-satış farkı, orta fiyatın yüzdesi. Kote yoksa/eskiyse None."""
+    k = KOTE.get(sym)
+    if not k or time.time() - k[2] > 180 or k[0] <= 0 or k[1] <= k[0]:
+        return None
+    return round((k[1] - k[0]) / ((k[0] + k[1]) / 2) * 100, 2)
+
+
+def spread_satir(sym):
+    s = spread_yuzde(sym)
+    if s is None:
+        return ""
+    return f"↔️ Spread %{str(s).replace('.', ',')} " + ("✅" if s <= 1 else "⚠️ kayma riski" if s > SPREAD_MAX else "· dikkat")
 
 
 def akis_islem(sym, p, size, ts):
@@ -1327,9 +1348,13 @@ def akis_islem(sym, p, size, ts):
         return
     a = AKIS.get(sym)
     if a is None:
-        a = AKIS[sym] = {"p": p, "y": 0, "dk": {}}
+        a = AKIS[sym] = {"p": p, "y": 0, "dk": {}, "son": []}
     y = 1 if p > a["p"] else -1 if p < a["p"] else a["y"]
     a["p"], a["y"] = p, y
+    son = a.setdefault("son", [])
+    son.append((round(ts, 1), p, int(size), y))
+    if len(son) > 40:
+        del son[:-30]
     dk = int(ts // 60)
     b = a["dk"].get(dk)
     if b is None:
@@ -1406,7 +1431,7 @@ async def alpaca_loop():
                         raise RuntimeError(f"anahtar reddedildi ({code})")
                     raise RuntimeError(f"Alpaca hata {code}: {err.get('msg')}")
                 abone = set(akis_semboller())
-                await ws.send(json.dumps({"action": "subscribe", "trades": sorted(abone)}))
+                await ws.send(json.dumps({"action": "subscribe", "trades": sorted(abone), "quotes": sorted(abone)}))
                 state.iex = "bağlı"
                 backoff = 2
                 log.info("Alpaca IEX bağlandı, %d sembol", len(abone))
@@ -1417,11 +1442,12 @@ async def alpaca_loop():
                         yeni = set(akis_semboller())
                         cik, gir = abone - yeni, yeni - abone
                         if cik:
-                            await ws.send(json.dumps({"action": "unsubscribe", "trades": sorted(cik)}))
+                            await ws.send(json.dumps({"action": "unsubscribe", "trades": sorted(cik), "quotes": sorted(cik)}))
                             for x in cik:
                                 AKIS.pop(x, None)
+                                KOTE.pop(x, None)
                         if gir:
-                            await ws.send(json.dumps({"action": "subscribe", "trades": sorted(gir)}))
+                            await ws.send(json.dumps({"action": "subscribe", "trades": sorted(gir), "quotes": sorted(gir)}))
                         abone.clear()
                         abone.update(yeni)
                 gorev_ = asyncio.create_task(abone_guncelle())
@@ -1435,6 +1461,8 @@ async def alpaca_loop():
                             if m.get("S") in IEX_SYMBOLS:
                                 store.on_trade(m.get("S"), p_, ts_)
                             akis_islem(m.get("S"), p_, float(m.get("s", 0) or 0), ts_)
+                        elif typ == "q":
+                            KOTE[m.get("S")] = (float(m.get("bp", 0) or 0), float(m.get("ap", 0) or 0), time.time())
                         elif typ == "error":
                             log.warning("Alpaca akış hatası: %s", m)
                 finally:
@@ -7706,6 +7734,7 @@ def _plan_html(p):
     return (f"⏳ <b>PLAN · #{_h(p['sym'])}</b>  <code>{fk(px)}</code> → <code>{fk(p['giris'])}</code>\n"
             f"<i>Giriş: {fk(p['giris'])} üstünde 1 dk mum kapanırsa (hacimle) alış</i>\n\n"
             + tg_seviyeler(p["giris"], p["stop"], p["hedefler"], px) + "\n"
+            + (spread_satir(p["sym"]) + "\n" if spread_satir(p["sym"]) else "") +
             f"<blockquote expandable>📌 {_h(tur)} · puan {str(p['puan']).replace('.', ',')}"
             + "".join("\n" + x for x in ek) +
             "\nOnay: hacim ≥1,5× ve mum üst %40'ta kapanmalı. Sonraki mum seviyenin altına dönerse sahte sayılır."
@@ -7774,6 +7803,7 @@ def plan_olaylari():
                                           "plan": p["id"]})
             hs = _PLAN_TG.setdefault("sym", {}).setdefault(sym, [0, 0])
             if tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK \
+                    and (spread_yuzde(sym) or 0) <= SPREAD_MAX \
                     and not sustur_mu(sym) and hs[0] < PLAN_TG_HISSE and time.time() - hs[1] >= PLAN_TG_ARA:
                 hs[0] += 1
                 hs[1] = time.time()
@@ -8467,6 +8497,16 @@ def login_page(err=""):
     return HTMLResponse(LOGIN_HTML.replace("__ERR__", msg).replace("</title>", "</title>" + tanitim.OG.replace("__SITE__", site_kok()), 1),
                         headers={"Cache-Control": "no-store"})
 
+
+
+@app.get("/api/tape")
+def api_tape(sym: str):
+    """Hisse sayfası Time & Sales: son IEX işlemleri + alış/satış kotesi."""
+    sym = sym.upper()
+    a = AKIS.get(sym) or {}
+    k = KOTE.get(sym)
+    return {"sym": sym, "son": list(reversed((a.get("son") or [])[-20:])),
+            "bid": k[0] if k else None, "ask": k[1] if k else None, "spr": spread_yuzde(sym), "ab": akis_ozet(sym)}
 
 @app.get("/")
 async def index(request: Request):
