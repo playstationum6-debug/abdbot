@@ -1362,7 +1362,8 @@ def parse_ts(s):
 AKIS = {}            # sembol -> {"p": son fiyat, "y": son yön, "dk": {dakika: [alım, satım, adet]}}
 AKIS_DK = 30         # tutulan dakika
 KOTE = {}            # sembol -> (alış, satış, ts)  IEX en iyi alış/satış
-KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}, "sahip": "", "tgplan": {}}
+KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}, "sahip": "", "tgplan": {}, "cizgi": []}
+KOMISYON = float(os.getenv("KOMISYON", "1.5"))     # satış başına broker komisyonu ($)
 YEDEK_ACIL = [0]     # plan mesajı gitti: 2 dk içinde yedekle (yeniden başlamada aynı plan tekrar gitmesin)   # kanal ekleri: kırılım karnesi, fiyat alarmı, float, gönderim izleri
 SPREAD_MAX = float(os.getenv("SPREAD_MAX", "2.0"))   # % üstü: plan mesajı gönderilmez (kayma riski)
 
@@ -1442,6 +1443,7 @@ def akis_semboller(tum=False):
     except Exception:
         pass
     s += list(PLAN.planlar) + [x["sym"] for x in KK["alarm"]]
+    s += [c["sym"] for c in KK["cizgi"] if c["st"] in ("bekliyor", "kırıldı")]
     run = sorted(scanner.runners.items(), key=lambda kv: -((kv[1] or {}).get("pct") or 0))
     s += [k for k, _ in run] + list(IZLE)
     out = []
@@ -8031,7 +8033,7 @@ def _gun_et():
 def kk_kaydet():
     backup.data["kk"] = {"kayit": KK["kayit"][-300:], "alarm": KK["alarm"][-40:],
                          "float": dict(list(KK["float"].items())[-300:]), "gon": KK["gon"], "sahip": KK["sahip"],
-                         "tgplan": KK["tgplan"]}
+                         "tgplan": KK["tgplan"], "cizgi": KK["cizgi"][-120:]}
     backup.dirty = True
 
 
@@ -8137,6 +8139,8 @@ def kk_guncelle():
         if r["st"] in ("stop", "K3", "sahte", "kırılmadı", "bitti", "onaysız"):
             continue
         if r["gun"] != gun:                                    # gün bitti
+            if r["st"] != "bekliyor" and r.get("kap") is None:
+                r["kap"] = fiyat(r["sym"])
             r["st"] = "kırılmadı" if r["st"] == "bekliyor" else "bitti"
             deg = True
             continue
@@ -8174,6 +8178,29 @@ def kk_guncelle():
         elif r["k"] >= 3:
             r["st"] = "K3"
             deg = True
+    # kullanıcının çizdiği kırılım çizgileri
+    for c_ in KK["cizgi"][-60:]:
+        if c_["st"] in ("kırılmadı", "bitti"):
+            continue
+        if c_["gun"] != gun:
+            c_["st"] = "kırılmadı" if c_["st"] == "bekliyor" else "bitti"
+            deg = True
+            continue
+        px = fiyat(c_["sym"])
+        if not px:
+            continue
+        if c_["st"] == "bekliyor" and px >= c_["fiyat"]:
+            c_.update(st="kırıldı", kt=int(now), zirve=px)
+            deg = True
+            cizgi_gonder(c_, px)
+        elif c_["st"] == "kırıldı":
+            z = _zirve_since(c_["sym"], c_["kt"])
+            if z and z > (c_.get("zirve") or 0):
+                c_["zirve"] = z
+                deg = True
+            if not c_.get("geri") and px < c_["fiyat"] and (c_.get("zirve") or 0) >= c_["fiyat"] * 1.01:
+                c_["geri"] = int(now)
+                deg = True
     # fiyat alarmları
     for al in list(KK["alarm"]):
         px = fiyat(al["sym"])
@@ -8281,7 +8308,10 @@ def karne_ozet(gun=None, n=30):
     return {"gonderilen": len(K) if gun else len(KK["kayit"]), "kirilan": len(son), "kazanan": len(kaz), "kaybeden": len(kay),
             "wr": round(100 * len(kaz) / (len(kaz) + len(kay))) if kaz or kay else None,
             "ort_tepe": round(sum(tp) / len(tp), 1) if tp else None,
-            "liste": [dict(r, sonuc=_kk_sonuc(r)[0], renk=_kk_sonuc(r)[1], tepe_pct=_tepe_pct(r), geri=_geri(r)) for r in reversed(K[-40:])]}
+            "plan_top": sum((_plan_sonuc(r) or (0, 0))[1] for r in son),
+            "liste": [dict(r, sonuc=_kk_sonuc(r)[0], renk=_kk_sonuc(r)[1], tepe_pct=_tepe_pct(r), geri=_geri(r),
+                           plan_pct=(_plan_sonuc(r) or (None, None))[0], plan_usd=(_plan_sonuc(r) or (None, None))[1],
+                           iz=None) for r in reversed(K[-40:])]}
 
 
 def radar_listesi(n=8):
@@ -8397,14 +8427,17 @@ def karne_gonder():
         top += usd
         zv = max(r.get("tepe") or 0, r.get("zirve") or 0)
         geri = r.get("geri")
+        pu = r.get("plan_usd")
         kaz.append(f"{'↩️' if geri else '🟢' if r['tepe_pct'] > 0 and r['st'] != 'sahte' else '🔴'} <b>#{_h(r['sym'])}</b> "
                    f"<code>{fk(r['giris'])}</code> → <code>{fk(zv)}</code> · <b>{_fy0(r['tepe_pct'])}</b> · {'+' if usd >= 0 else ''}{usd}$"
-                   + (" · <i>sonra kırılımın altına döndü</i>" if geri else ""))
+                   + (f" · plan {'+' if (pu or 0) >= 0 else ''}{pu}$" if pu is not None else "")
+                   + (" · <i>sonra altına döndü</i>" if geri else ""))
     html = (f"📊 <b>GÜNÜN KIRILIM KARNESİ</b>\n"
             f"Gönderilen {o['gonderilen']} · kırılan {o['kirilan']} · ✅ {o['kazanan']} · ❌ {o['kaybeden']}\n"
             + (("\n<b>Kırılımdan zirveye</b> (her plana 250$)\n" + "\n".join(kaz[:8])
                 + (f"\n… ve {len(kaz) - 8} hisse daha (tamamı sitede, Karne sekmesinde)" if len(kaz) > 8 else "")
-                + f"\n💰 <b>Toplam: {'+' if top >= 0 else ''}{top}$</b>\n\n") if kaz else "")
+                + f"\n💰 <b>Zirveden toplam: {'+' if top >= 0 else ''}{top}$</b>"
+                + f"\n📏 <b>Plana uysaydın: {'+' if o['plan_top'] >= 0 else ''}{o['plan_top']}$</b> <i>(stop ve hedeflerle, komisyon dahil)</i>\n\n") if kaz else "")
             + (f"Son 30 kırılım: K1+ oranı <b>%{g['wr']}</b> · ortalama zirve {_fy0(g['ort_tepe'])}\n" if g["wr"] is not None else "")
             + ("↩️ = zirve yaptıktan sonra kırılım fiyatının altına düştü\n" if any(r.get("geri") for r in o["liste"]) else "")
             + "<i>Zirve = kırılımdan sonraki en yüksek fiyat · kazanan da kaybeden de sayıldı · yatırım tavsiyesi değildir</i>")
@@ -8487,6 +8520,44 @@ def ders_gonder():
         html = ((f"📚 <b>HAFTANIN DERSİ · {'✅ İYİ ÖRNEK' if x['iyi'] else '❌ KÖTÜ ÖRNEK'} · #{_h(x['sym'])}</b>\n")
                 + "\n".join("• " + _h(n) for n in x["neden"]) + f"\n\n💡 <b>{_h(x['ders'])}</b>")
         tg.send(html, ch, sym=x["sym"], konu="plan", quiet=True)
+
+
+def cizgi_gonder(c_, px):
+    """Kullanıcının çizdiği çizgi kırıldı: sadece sahibine (kanala gitmez) + telefon bildirimi."""
+    html = (f"✏️ <b>SENİN ÇİZGİN KIRILDI · #{_h(c_['sym'])}</b>\n<code>{fk(c_['fiyat'])}</code> üstüne çıktı · şimdi <code>{fk(px)}</code>\n"
+            "<i>Onay için çizginin üstünde 1 dk mum kapanışını ve 2× hacmi bekle.</i>")
+    if tg.ok and KK.get("sahip"):
+        tg.send(html, None, sym=c_["sym"], chat=KK["sahip"], konu="plan", quiet=False)
+    try:
+        push.notify(f"✏️ {c_['sym']} çizgin kırıldı", f"{fk(c_['fiyat'])} üstü · şimdi {fk(px)}", tag="cizgi", url="/")
+    except Exception:
+        pass
+
+
+def _plan_sonuc(r):
+    """Plana uysaydın: 250$, üçte biri K1/K2/K3'te satılır, K1'den sonra stop girişe çekilir. Satış başına komisyon düşülür."""
+    if not r.get("kt") or r["st"] in ("bekliyor", "kırılmadı", "onaysız"):
+        return None
+    g, hed, k = r["giris"], [h for h in (r.get("hed") or []) if h][:3], min(r.get("k") or 0, 3)
+    if not g:
+        return None
+    if r["st"] == "sahte" or (r["st"] == "stop" and k == 0):
+        pct, satis = (r["stop"] / g - 1) * 100 if r.get("stop") else 0.0, 1
+    else:
+        parca = [(hed[i] / g - 1) * 100 for i in range(min(k, len(hed)))]
+        kalan = 3 - len(parca)
+        if kalan:
+            if r["st"] == "stop":
+                ex = 0.0
+            else:
+                son = fiyat(r["sym"]) if r["gun"] == _gun_et() else r.get("kap")
+                ex = (son / g - 1) * 100 if son else 0.0
+                if k >= 1:
+                    ex = max(0.0, ex)
+            parca += [ex] * kalan
+        pct, satis = sum(parca) / 3, len([1 for _ in range(min(k, len(hed)))]) + (1 if kalan else 0)
+    usd = planmod.LOT_USD * pct / 100 - KOMISYON * satis
+    return round(pct, 1), round(usd)
 
 
 def alarm_gonder(al, px):
@@ -8855,7 +8926,8 @@ def girseydin_listesi(sym, px):
         et, renk, _ = _kk_sonuc(r)
         x = {"giris": r["giris"], "stop": r["stop"], "hed": r.get("hed"), "st": r["st"], "etiket": et, "renk": renk,
              "t": r.get("t"), "kt": r.get("kt"), "tepe": _tepe_pct(r), "k": r.get("k", 0),
-             "zirve": max(r.get("tepe") or 0, r.get("zirve") or 0) or None, "geri": _geri(r)}
+             "zirve": max(r.get("tepe") or 0, r.get("zirve") or 0) or None, "geri": _geri(r),
+             "plan_pct": (_plan_sonuc(r) or (None, None))[0], "plan_usd": (_plan_sonuc(r) or (None, None))[1]}
         if px and r["st"] not in ("bekliyor", "kırılmadı"):
             x["pct"] = round((px / r["giris"] - 1) * 100, 1)            # şimdi
             x["usd"] = round(planmod.LOT_USD * x["pct"] / 100)
@@ -8865,6 +8937,89 @@ def girseydin_listesi(sym, px):
             x["kalan"] = round((r["giris"] / px - 1) * 100, 1)
         out.append(x)
     return out
+
+
+def _kapanislar(sym, t0, t1):
+    """t0..t1 arası 1 dk kapanışlar: önce bellek, yoksa veritabanı (20 gün tutulur)."""
+    b = store.bars.get(sym) or {}
+    L = [(t, b[t][3]) for t in sorted(b) if t0 <= t <= t1]
+    if len(L) < 5:
+        try:
+            L = store.db.execute("SELECT ts, c FROM bars WHERE symbol=? AND ts BETWEEN ? AND ? ORDER BY ts", (sym, t0, t1)).fetchall()
+        except Exception:
+            L = []
+    return L
+
+
+def _iz(r):
+    """Kırılımın izi: kırılımdan önceki 15 dk ve sonraki 60 dk, kırılım fiyatına göre %. Bir kez hesaplanıp saklanır."""
+    if r.get("iz"):
+        return r["iz"]
+    kt = int((r.get("kt") or 0) // 60 * 60)
+    if not kt or time.time() - kt < 65 * 60:
+        return None
+    L = dict(_kapanislar(r["sym"], kt - 15 * 60, kt + 60 * 60))
+    if len(L) < 20:
+        r["iz"] = {"yok": 1}
+        return r["iz"]
+    g, son, on, last = r["giris"], [], [], None
+    for i in range(-15, 61):
+        v = L.get(kt + i * 60, last)
+        last = v if v is not None else last
+        x = round((last / g - 1) * 100, 2) if last else 0.0
+        (on if i < 0 else son).append(x)
+    r["iz"] = {"on": on, "son": son}
+    return r["iz"]
+
+
+def benzer_kirilimlar(sym, giris, kt=None, n=3):
+    """Şu anki kuruluma (kırılımdan önceki 15 dk'nın şekli) en çok benzeyen geçmiş kırılımlar ve sonrası."""
+    ref = int((kt or time.time()) // 60 * 60)
+    L = dict(_kapanislar(sym, ref - 15 * 60, ref - 60))
+    if len(L) < 8 or not giris:
+        return []
+    on, last = [], None
+    for i in range(-15, 0):
+        v = L.get(ref + i * 60, last)
+        last = v if v is not None else last
+        on.append((last / giris - 1) * 100 if last else 0.0)
+    bugun = _gun_et()
+    aday = []
+    for r in KK["kayit"]:
+        if not r.get("kt") or r["st"] in ("bekliyor", "kırılmadı", "onaysız") or (r["sym"] == sym and r["gun"] == bugun):
+            continue
+        iz = _iz(r)
+        if not iz or iz.get("yok"):
+            continue
+        d = math.sqrt(sum((a - b) ** 2 for a, b in zip(on, iz["on"])) / 15)
+        aday.append((d, r, iz))
+    aday.sort(key=lambda x: x[0])
+    out = []
+    for d, r, iz in aday[:n]:
+        out.append({"sym": r["sym"], "gun": r["gun"], "son": iz["son"][::2], "tepe": _tepe_pct(r), "sonuc": _kk_sonuc(r)[0],
+                    "renk": _kk_sonuc(r)[1], "geri": _geri(r), "benzerlik": max(0, round(100 - d * 25))})
+    return out
+
+
+_BENZER = {}
+
+
+def kurulum_gecmisi(tur):
+    """Aynı tip seviyeden (ana seviye türü) geçmişte kurulan planlar nasıl sonuçlandı."""
+    if not tur:
+        return None
+    ana = tur[0]
+    K = [r for r in KK["kayit"] if ana in (r.get("tur") or []) and r["gun"] != _gun_et()]
+    if not K:
+        return {"ad": planmod.TUR_AD.get(ana, ana), "n": 0}
+    kir = [r for r in K if r["st"] not in ("bekliyor", "kırılmadı", "onaysız")]
+    kaz = [r for r in kir if _kk_sonuc(r)[2] is True]
+    kay = [r for r in kir if _kk_sonuc(r)[2] is False]
+    tp = [x for x in (_tepe_pct(r) for r in kir) if x is not None]
+    return {"ad": planmod.TUR_AD.get(ana, ana), "n": len(K), "kirilan": len(kir), "kazanan": len(kaz), "kaybeden": len(kay),
+            "wr": round(100 * len(kaz) / (len(kaz) + len(kay))) if kaz or kay else None,
+            "ort_tepe": round(sum(tp) / len(tp), 1) if tp else None, "geri": sum(1 for r in kir if _geri(r)),
+            "sahte": sum(1 for r in K if r["st"] == "sahte")}
 
 
 def hisse_gecmis(sym):
@@ -9633,7 +9788,7 @@ async def lifespan(app):
     if isinstance(backup.data.get("krt"), dict) and backup.data["krt"].get("sonuc"):
         KRT.update(sonuc=backup.data["krt"]["sonuc"], t=backup.data["krt"].get("t") or 0)
     if isinstance(backup.data.get("kk"), dict):
-        for k_ in ("kayit", "alarm", "float", "gon", "sahip", "tgplan"):
+        for k_ in ("kayit", "alarm", "float", "gon", "sahip", "tgplan", "cizgi"):
             if isinstance(backup.data["kk"].get(k_), type(KK[k_])):
                 KK[k_] = backup.data["kk"][k_]
     if isinstance(backup.data.get("liste"), dict):
@@ -9889,7 +10044,23 @@ async def api_hisse(request: Request, sym: str, bars: int = 0):
            "gun_pct": r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct"),
            "poc": (hacim_profili(sym) or {}).get("poc"), "gecmis": hisse_gecmis(sym),
            "zincir": PLAN_ZINCIR.get((KK["tgplan"].get(sym) or {}).get("key"), [])[-6:],
-           "alarm": [x for x in KK["alarm"] if x["sym"] == sym], "girseydin": girseydin_listesi(sym, sm.get("p") or fiyat(sym))}
+           "alarm": [x for x in KK["alarm"] if x["sym"] == sym], "girseydin": girseydin_listesi(sym, sm.get("p") or fiyat(sym)),
+           "cizgi": [c for c in KK["cizgi"] if c["sym"] == sym and c["gun"] == _gun_et()], "komisyon": KOMISYON}
+    tur_ = (p or {}).get("tur") or (kr or {}).get("tur") or []
+    try:
+        out["kurulum"] = kurulum_gecmisi(tur_)
+        g0 = next((g for g in out["girseydin"] if g.get("kt")), None) or (out["girseydin"][0] if out["girseydin"] else None)
+        gir_ = (g0 or {}).get("giris") or (plan or {}).get("giris")
+        c_ = _BENZER.get(sym)
+        if c_ and time.time() - c_[0] < 90 and c_[1] == gir_:
+            out["benzer"] = c_[2]
+        else:
+            out["benzer"] = await asyncio.to_thread(benzer_kirilimlar, sym, gir_, (g0 or {}).get("kt")) if gir_ else []
+            _BENZER[sym] = (time.time(), gir_, out["benzer"])
+            if len(_BENZER) > 40:
+                _BENZER.pop(min(_BENZER, key=lambda k: _BENZER[k][0]), None)
+    except Exception as e:
+        log.debug("benzer/kurulum hatası %s: %s", sym, e)
     if bars:
         bs = store.bars.get(sym) or {}
         t0 = datetime.now(ET).replace(hour=4, minute=0, second=0, microsecond=0).timestamp()
@@ -9927,7 +10098,7 @@ def api_kk():
     """Kırılım karnesi + radar + haftanın dersleri + kural testi + sağlık."""
     return {"karne": karne_ozet(None, 30), "bugun": karne_ozet(_gun_et()), "radar": radar_listesi(), "ders": ders_listesi(7),
             "kural": kural_karnesi(7), "test": KRT.get("sonuc"), "test_t": KRT.get("t"), "test_run": KRT["running"],
-            "test_prog": KRT.get("prog"), "saglik": saglik_satirlari()}
+            "test_prog": KRT.get("prog"), "saglik": saglik_satirlari(), "cizgi": cizgi_karne()}
 
 
 @app.post("/api/kuraltest")
@@ -9962,6 +10133,51 @@ async def api_alarm(req: Request):
     if sym not in KK["float"]:
         _gorev(float_al(sym))
     return {"ok": True, "alarm": al}
+
+
+@app.post("/api/cizgi")
+async def api_cizgi(req: Request):
+    if not authorized(req):
+        return JSONResponse({"ok": False, "hata": "giriş gerekli"}, status_code=401)
+    d = await req.json()
+    sym = str(d.get("sym", "")).upper().strip()[:8]
+    try:
+        f_ = round(float(str(d.get("fiyat")).replace(",", ".")), 4)
+    except Exception:
+        return {"ok": False, "hata": "fiyat"}
+    if not re.fullmatch(r"[A-Z.\-]{1,8}", sym) or f_ <= 0:
+        return {"ok": False, "hata": "hisse"}
+    gun = _gun_et()
+    if sum(1 for c in KK["cizgi"] if c["sym"] == sym and c["gun"] == gun) >= 4:
+        return {"ok": False, "hata": "bir hisseye en fazla 4 çizgi"}
+    px = fiyat(sym)
+    c_ = {"id": secrets.token_hex(4), "sym": sym, "fiyat": f_, "gun": gun, "t": int(time.time()),
+          "st": "kırıldı" if px and px >= f_ else "bekliyor", "kt": int(time.time()) if px and px >= f_ else None,
+          "zirve": px if px and px >= f_ else None, "puan": d.get("puan")}
+    KK["cizgi"].append(c_)
+    del KK["cizgi"][:-120]
+    ensure_sym(sym)
+    izle_guncelle()
+    kk_kaydet()
+    return {"ok": True, "cizgi": c_}
+
+
+@app.delete("/api/cizgi/{cid}")
+def api_cizgi_sil(cid: str, request: Request):
+    if not authorized(request):
+        return JSONResponse({"ok": False}, status_code=401)
+    KK["cizgi"] = [x for x in KK["cizgi"] if x["id"] != cid]
+    kk_kaydet()
+    return {"ok": True}
+
+
+def cizgi_karne():
+    C = [c for c in KK["cizgi"] if c["st"] in ("kırıldı", "bitti") and c.get("kt")]
+    tp = [round((c["zirve"] / c["fiyat"] - 1) * 100, 1) for c in C if c.get("zirve")]
+    return {"n": len(KK["cizgi"]), "kirilan": len(C), "tuttu": sum(1 for c in C if (c.get("zirve") or 0) >= c["fiyat"] * 1.02),
+            "geri": sum(1 for c in C if c.get("geri")), "ort_tepe": round(sum(tp) / len(tp), 1) if tp else None,
+            "puan": round(sum(c["puan"] for c in KK["cizgi"] if c.get("puan") is not None) / max(1, sum(1 for c in KK["cizgi"] if c.get("puan") is not None))) if any(c.get("puan") is not None for c in KK["cizgi"]) else None,
+            "liste": [dict(c, tepe=round((c["zirve"] / c["fiyat"] - 1) * 100, 1) if c.get("zirve") and c.get("kt") else None) for c in reversed(KK["cizgi"][-12:])]}
 
 
 @app.delete("/api/alarm/{aid}")
