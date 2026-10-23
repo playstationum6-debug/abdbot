@@ -782,6 +782,7 @@ scanner.keep = lambda sym: any(p["sym"] == sym for p in bot.open_positions())
 bot = botmod.Bot(engine, learner, store, cal, ET, ALPACA_KEY, ALPACA_SECRET, log, BOT_CFG)
 YZM = yzmod.YZ(scanner, log)          # Gemini + Google arama (anahtar: Render Environment → GEMINI_API_KEY)
 PLAN = planmod.Planci()               # kanallar gibi: seviyeyi önceden çizer, "X kırılırsa giriş"
+PLAN.kote_fn = lambda s: KOTE.get(s)
 engine.plan = PLAN
 engine.sadece_plan = set()
 PLAN.uygun = lambda s_: s_ not in SYMBOLS        # büyük hisselerde sadece kanalın verdiği seviye
@@ -1463,7 +1464,8 @@ async def alpaca_loop():
                                 store.on_trade(m.get("S"), p_, ts_)
                             akis_islem(m.get("S"), p_, float(m.get("s", 0) or 0), ts_)
                         elif typ == "q":
-                            KOTE[m.get("S")] = (float(m.get("bp", 0) or 0), float(m.get("ap", 0) or 0), time.time())
+                            KOTE[m.get("S")] = (float(m.get("bp", 0) or 0), float(m.get("ap", 0) or 0), time.time(),
+                                                float(m.get("bs", 0) or 0), float(m.get("as", 0) or 0))
                         elif typ == "error":
                             log.warning("Alpaca akış hatası: %s", m)
                 finally:
@@ -6055,7 +6057,7 @@ def liste_tg(L):
         out.append("")
     out += ["🚀 <b>GÖZÜNÜZ BU SEVİYELERDE OLSUN!</b>",
             "📊 Fiyat ve hacmi takip edin. Kırılım gelmeden acele etmeyin; güçlü hareketi hacimle teyit edin.",
-            "⏱ Giriş: seviyenin üstünde <b>1 dk mum kapanışı</b> sonrası. Kırılınca grafikli mesaj gelecek.",
+            "⏱ Giriş: direncin üstünde <b>5 dk mum kapanışı</b> (hızlı piyasada 1 dk) + 2× hacim, <b>limit emirle</b>. Kırılınca grafikli mesaj gelecek.",
             "🔥 Disiplinli takip, doğru zamanlama!",
             "⚠️ <b>HACİMSİZ ALIŞ YAPMAYIN · STOPSUZ İŞLEME GİRMEYİN</b>",
             "<i>Yatırım tavsiyesi değildir.</i>"]
@@ -7750,15 +7752,43 @@ def _plan_html(p):
         sey = {"var": "⚠️ seyreltme VAR", "yok": "seyreltme yok"}.get(yz.get("seyreltme"), "seyreltme bilinmiyor")
         ek.append(f"🧠 {_h(str(yz['katalizor'])[:90])} · {sey}")
     return (f"⏳ <b>PLAN · #{_h(p['sym'])}</b>  <code>{fk(px)}</code> → <code>{fk(p['giris'])}</code>\n"
-            f"<i>Giriş: {fk(p['giris'])} üstünde 1 dk mum kapanırsa (hacimle) alış</i>\n\n"
+            f"<i>Giriş: {fk(p['giris'])} üstünde 5 dk mum kapanırsa (2× hacimle) limit emirle alış · "
+            f"hacim ve oynaklık artarsa 1 dk kapanış yeter</i>\n\n"
             + tg_seviyeler(p["giris"], p["stop"], p["hedefler"], px) + "\n"
             + (spread_satir(p["sym"]) + "\n" if spread_satir(p["sym"]) else "")
             + (float_metin(p["sym"]) + "\n" if float_metin(p["sym"]) else "")
             + _poc_satir(p) +
             f"<blockquote expandable>📌 {_h(tur)} · puan {str(p['puan']).replace('.', ',')}"
             + "".join("\n" + x for x in ek) +
-            "\nOnay: hacim ≥1,5× ve mum üst %40'ta kapanmalı. Sonraki mum seviyenin altına dönerse sahte sayılır."
+            "\nSeviyeler 5 ve 15 dk mumlardan. Onay: 5 dk mum direncin üstünde kapanmalı (hacim ve oynaklık artınca 1 dk), hacmi son 20 mumun ≥2 katı. Açılışın ilk 15 dk'sı, tükenme, "
+            "3 düşen tepe, satış emri baskısı (5×) ya da spread > %2 varsa sinyal yok. Sonraki 5 dk mum seviyenin altına "
+            "kapanırsa sahte sayılır. Kırılım tutarsa eski direncin destek testi (en güçlü giriş) ayrıca bildirilir."
             "</blockquote>")
+
+
+def kirilim_html(p, retest=False):
+    """Onaylanan kırılım / tekrar test mesajı: limit giriş, stop, hedefler, lot, kurallar."""
+    e_ = p.get("e") or p["giris"]
+    lot = planmod.LOT_USD / (2 if p.get("yarim") else 1)
+    adet = int(lot // e_) if e_ else 0
+    bas = ("🔁 <b>TEKRAR TEST · EN GÜÇLÜ GİRİŞ · #{s}</b>\nDirenç <code>{l}</code> kırıldı, geri çekildi, eski direnç destek olarak "
+           "tuttu; yeşil 5 dk mum yüksek hacimle kapandı ({v}×)") if retest else \
+        ("🟢 <b>KIRILIM ONAYLANDI · #{s}</b>\n" + ("1 dk mum (hızlı piyasa: hacim + oynaklık yüksek)" if p.get("tf") == 1 else "5 dk mum")
+         + " <code>{e}</code> ile direncin (<code>{l}</code>) üstünde kapandı · hacim {v}×")
+    out = [bas.format(s=_h(p["sym"]), e=fk(e_), l=fk(p.get("lvl") or p["giris"]), v=str(p.get("vr") or "—").replace(".", ",")),
+           "",
+           f"📝 <b>Limit alış</b> <code>{fk(e_)}</code> · piyasa emri kullanmayın",
+           f"🔴 Stop <code>{fk(p['stop'])}</code> <i>(kırılan direncin altı, {fy(_yuzde(p['stop'], e_))})</i>",
+           "🟢 Hedef " + " · ".join(f"<code>{fk(h)}</code>" for h in p["hedefler"][:3])]
+    if e_ > p["stop"]:
+        out.append(f"⚖️ Risk/ödül <b>1:{(p['hedefler'][1] - e_) / (e_ - p['stop']):.1f}</b>".replace(".", ","))
+    out.append("💡 K1'de yarısını sat, stopu giriş fiyatına çek.")
+    out.append(f"📦 {lot:.0f}$ ≈ {adet} adet" + (" · <i>öncesi seans hacmi düşük: yarım lot</i>" if p.get("yarim") else ""))
+    sp = spread_satir(p["sym"])
+    if sp:
+        out.append(sp)
+    out.append("<i>Paper takip · yatırım tavsiyesi değildir</i>")
+    return "\n".join(out)
 
 
 def plan_grafik_ch(p, durum=None):
@@ -7878,10 +7908,15 @@ async def float_plan(p):
             m["durum"] = None
 
 
-def kk_ekle(p):
-    KK["kayit"].append({"id": p["id"], "sym": p["sym"], "giris": p["giris"], "stop": p["stop"], "hed": p["hedefler"][:3],
-                        "t": int(time.time()), "gun": _gun_et(), "st": "bekliyor", "kt": None, "tepe": None, "dip": None,
-                        "k": 0, "tur": p.get("tur") or [], "puan": p.get("puan"), "spr": spread_yuzde(p["sym"]), "ab": None})
+def kk_ekle(p, kirildi=False):
+    e_ = p.get("e") or p["giris"]
+    KK["kayit"].append({"id": p["id"], "sym": p["sym"], "giris": e_ if kirildi else p["giris"], "stop": p["stop"],
+                        "hed": p["hedefler"][:3], "t": int(time.time()), "gun": _gun_et(),
+                        "st": "kırıldı" if kirildi else "bekliyor", "kt": time.time() if kirildi else None,
+                        "tepe": e_ if kirildi else None, "dip": e_ if kirildi else None, "k": 0, "tur": p.get("tur") or [],
+                        "puan": p.get("puan"), "spr": spread_yuzde(p["sym"]),
+                        "ab": (akis_ozet(p["sym"]) or {}).get("pct") if kirildi else None,
+                        "kural": list(p.get("kurallar") or [])})
     del KK["kayit"][:-300]
     kk_kaydet()
 
@@ -7915,6 +7950,8 @@ def kk_guncelle():
                 r.update(st="sahte", kt=now, tepe=px, dip=px)
                 deg = True
             elif pst in ("onaylı", "kaçtı") or (p or {}).get("ot"):
+                if p and p.get("kurallar"):
+                    r["kural"] = list(dict.fromkeys((r.get("kural") or []) + p["kurallar"]))
                 o = akis_ozet(r["sym"])
                 r.update(st="kırıldı", kt=now, tepe=px, dip=px, ab=(o or {}).get("pct"), spr=spread_yuzde(r["sym"]) or r.get("spr"))
                 deg = True
@@ -8007,7 +8044,7 @@ def ders_metni(r, iyi):
     tp = _tepe_pct(r)
     if iyi:
         neden.append(f"Sonuç: K{r['k']} geldi, kırılımdan tepe {fy(tp)}")
-        ders = "Hacimli, alıcının baskın olduğu kırılımda seviyenin üstünde 1 dk kapanışı beklemek ve K1'de stopu girişe çekmek kazandırdı."
+        ders = "Hacimli, alıcının baskın olduğu kırılımda seviyenin üstünde 5 dk kapanışı beklemek ve K1'de stopu girişe çekmek kazandırdı."
     else:
         neden.append("Sonuç: " + ("kırılım tutmadı, fiyat seviyenin altına döndü" if r["st"] == "sahte" else "stop oldu"))
         zay = []
@@ -8018,6 +8055,25 @@ def ders_metni(r, iyi):
         ders = ("Kırılım " + " ve ".join(zay) + " geldi; böyle durumlarda girmemek daha iyi.") if zay else \
             "Hacim desteği olmayan kırılım tutmadı; stop sayesinde zarar küçük kaldı. Stopsuz girme."
     return neden, ders
+
+
+def kural_karnesi(gun_sayi=7):
+    """Hangi kural kazandırdı, hangisi kaybettirdi: sonuçlanan kırılımlar kural etiketine göre."""
+    t0 = time.time() - gun_sayi * 86400
+    d = {}
+    for r in KK["kayit"]:
+        if r["t"] < t0:
+            continue
+        ok = _kk_sonuc(r)[2]
+        if ok is None:
+            continue
+        for k_ in r.get("kural") or ["(kural kaydı yok)"]:
+            x = d.setdefault(k_, [0, 0])
+            x[0 if ok else 1] += 1
+    ad = lambda k_: ("seviye · " + planmod.TUR_AD.get(k_[7:], k_[7:])) if k_.startswith("seviye:") else k_
+    out = [{"kural": ad(k_), "kaz": v[0], "kay": v[1], "wr": round(100 * v[0] / (v[0] + v[1]))} for k_, v in d.items()]
+    out.sort(key=lambda x: (-(x["kaz"] + x["kay"]), -x["wr"]))
+    return out
 
 
 def ders_listesi(gun_sayi=7):
@@ -8078,15 +8134,28 @@ def radar_gonder():
             "cubuk": 1 - min(1, max(0, x["uzak"]) / 3)} for x in L]
     png = _kart({"baslik": "Kırılım Radarı", "rozet": "RADAR", "renk": "gold", "saat": datetime.now(TR).strftime("%H:%M"),
                  "alt": "Kırılım seviyesine en çok yaklaşan hisseler", "satirlar": sat,
-                 "not_": "Kırılım = seviyenin üstünde 1 dk mum kapanışı + hacim · yatırım tavsiyesi değildir"})
+                 "not_": "Kırılım = direncin üstünde 5 dk mum kapanışı + 2× hacim · yatırım tavsiyesi değildir"})
     html = "🎯 <b>KIRILIM RADARI</b>\n" + "\n".join(
         f"• <b>#{_h(x['sym'])}</b> <code>{fk(x['giris'])}</code> üstü · %{str(round(max(0, x['uzak']), 1)).replace('.', ',')} kaldı" for x in L) + \
-        "\n<i>Kırılınca grafikli mesaj gelecek. Acele etmeyin, 1 dk kapanışı bekleyin.</i>"
+        "\n<i>Kırılınca grafikli mesaj gelecek. Acele etmeyin, 5 dk kapanışı bekleyin.</i>"
     tg.send(html, {"png": png} if png else None, konu="plan", quiet=True)
     return True
 
 
 def ders_gonder():
+    KR = kural_karnesi(7)
+    if KR:
+        sat = [{"sym": x["kural"][:22], "alt": f"{x['kaz']} kazanan · {x['kay']} kaybeden", "sag": f"%{x['wr']}",
+                "renk": "up" if x["wr"] >= 50 else "dn", "cubuk": x["wr"] / 100} for x in KR[:10]]
+        png = _kart({"baslik": "Haftalık Kural Karnesi", "rozet": "ÖĞRENME", "renk": "vio",
+                     "saat": datetime.now(TR).strftime("%d.%m.%Y"), "alt": "Hangi kural kazandırdı, hangisi kaybettirdi",
+                     "satirlar": sat})
+        en_i = max(KR, key=lambda x: (x["wr"], x["kaz"]))
+        en_k = min(KR, key=lambda x: (x["wr"], -x["kay"]))
+        tg.send("🧠 <b>HAFTALIK KURAL KARNESİ</b>\n" + "\n".join(
+            f"{'✅' if x['wr'] >= 50 else '❌'} {_h(x['kural'])}: {x['kaz']}/{x['kaz'] + x['kay']} (%{x['wr']})" for x in KR[:8])
+            + f"\n\n💡 En çok kazandıran: <b>{_h(en_i['kural'])}</b> · en çok kaybettiren: <b>{_h(en_k['kural'])}</b>",
+            {"png": png} if png else None, konu="plan", quiet=True)
     D = ders_listesi(7)
     if not D:
         return
@@ -8104,7 +8173,7 @@ def alarm_gonder(al, px):
     ok = "⬆️ üstüne çıktı" if al["yon"] == "ust" else "⬇️ altına indi"
     html = (f"🔔 <b>FİYAT ALARMI · #{_h(al['sym'])}</b>\n<code>{fk(al['fiyat'])}</code> {ok} · şimdi <code>{fk(px)}</code>\n"
             + (f"{spread_satir(al['sym'])}\n" if spread_satir(al["sym"]) else "")
-            + "<i>Giriş için seviyenin üstünde 1 dk mum kapanışını ve hacmi bekleyin.</i>")
+            + "<i>Giriş için seviyenin üstünde 5 dk mum kapanışını ve 2× hacmi bekleyin.</i>")
     v = {"sym": al["sym"], "giris": al["fiyat"], "stop": None, "hedefler": [], "durum": "ilerleme" if al["yon"] == "ust" else "bozuldu",
          "baslik": f"Fiyat alarmı · {fp_(al['fiyat'])}", "alt": "alarm", "neden": None, "haber": None, "t_sig": None, "tf": "5 dk"}
     if tg.ok:
@@ -8178,8 +8247,25 @@ def plan_olaylari():
                 if kucuk and YZM.hazir and BOT_CFG.get("yz_yetki", 1) and YZM.kalan() > 60:
                     _gorev(plan_yz(p))
             continue
+        if ev == "retest":
+            kok = "k:" + p["id"][:-3]
+            if (kok in tg.meta or kok in PLAN_DURUM) and tg.ok and not sustur_mu(sym):
+                tg.send(kirilim_html(p, retest=True), plan_grafik_ch(p, durum="onaylı"), sym=sym, reply=kok, konu="plan", quiet=False)
+                kk_ekle(p, kirildi=True)
+            continue
         if key not in tg.meta and key not in PLAN_DURUM:
             continue
+        if ev == "red":
+            if tg.ok and not p.get("red_tg"):
+                p["red_tg"] = 1
+                tg.send(f"⚠️ <b>TÜKENME UYARISI · #{_h(sym)} · ALIM YAPMA</b>\n"
+                        f"Fiyat {fk(p['giris'])} üstünde ama: {_h(planmod.RED_AD.get(p.get('red'), p.get('red') or ''))}.\n"
+                        "<i>Koşullar düzelirse kırılım ayrıca bildirilir.</i>",
+                        plan_grafik_ch(p, durum="sahte"), sym=sym, reply=key, konu="plan", quiet=True)
+            continue
+        if ev == "onaylı" and not p.get("bitis") and tg.ok and not p.get("onay_tg"):
+            p["onay_tg"] = 1
+            tg.send(kirilim_html(p), plan_grafik_ch(p, durum="onaylı"), sym=sym, reply=key, konu="plan", quiet=False)
         sa = datetime.fromtimestamp(p.get("ot") or p.get("bitis") or time.time(), TR).strftime("%H:%M")
         if ev == "onaylı" and BOT_CFG.get("secici", 1):
             sg_ = engine.by_id.get(p.get("sig") or "")
@@ -8882,7 +8968,8 @@ def api_tape(sym: str):
 @app.get("/api/kk")
 def api_kk():
     """Kırılım karnesi + radar + haftanın dersleri."""
-    return {"karne": karne_ozet(None, 30), "bugun": karne_ozet(_gun_et()), "radar": radar_listesi(), "ders": ders_listesi(7)}
+    return {"karne": karne_ozet(None, 30), "bugun": karne_ozet(_gun_et()), "radar": radar_listesi(), "ders": ders_listesi(7),
+            "kural": kural_karnesi(7)}
 
 
 @app.post("/api/alarm")

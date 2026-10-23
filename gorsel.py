@@ -206,7 +206,7 @@ def plan_grafik(bars, p, max_bars=84):
             continue
         if lab == "GİRİŞ":
             d.line([(x0, Y(v)), (x1 + LAD * S, Y(v))], fill=col + (245,), width=4 * S)
-            _yazi = T(f"KIRILIM {fp(v)} · 1 dk mum üstünde kapanınca giriş")
+            _yazi = T(f"DİRENÇ {fp(v)} · üstünde mum kapanışı + 2× hacim → limit giriş")
             _pill(d, x0 + 10 * S, Y(v) - 40 * S, _yazi, col, (255, 255, 255), f(15, "b"), px=10 * S, py=6 * S, r=7 * S)
         elif kal:
             _dash(d, x0, Y(v), x1 + 8 * S, col + (220,), 2 * S, 12 * S, 7 * S)
