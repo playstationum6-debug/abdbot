@@ -990,6 +990,13 @@ header .hrow{gap:8px}
 .gsr{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}.gsr:last-child{border-bottom:0}
 .gsr .lg2{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px}
 .rpOyn{width:100%;margin:10px 0}
+#canli{position:fixed;inset:0;z-index:9999;background:#05070c;color:#eef;display:none;flex-direction:column;padding:14px 14px 20px;overflow:auto}#canli.on{display:flex}
+#canli .ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}#canli .ch b{font-size:20px}#canli .ch button{background:#1c2333;color:#fff;border:0;border-radius:10px;padding:8px 12px;font-weight:700}
+#canli .cp{font-size:12px;color:#8a93a8;margin-bottom:10px}#canli .cg{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.cc{border-radius:16px;padding:12px;background:#101521;border:2px solid #1c2333;transition:all .4s}.cc .s{font-size:22px;font-weight:900}.cc .p{font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;margin:2px 0}
+.cc .l{font-size:12px;color:#8a93a8}.cc .bar{height:6px;border-radius:6px;background:#1c2333;margin-top:8px;overflow:hidden}.cc .bar i{display:block;height:6px;background:#4f8cff}
+.cc.yak{border-color:#f5c04e;box-shadow:0 0 18px #f5c04e55}.cc.yak .bar i{background:#f5c04e}.cc.kir{border-color:#22c55e;box-shadow:0 0 22px #22c55e66;background:#0c1d14}.cc.kir .bar i{background:#22c55e}
+.cc.sah,.cc.stp{opacity:.55;border-color:#f43f5e}.cc.flash{animation:cfl 1s 3}@keyframes cfl{50%{transform:scale(1.05);filter:brightness(1.6)}}
 .kkc{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin:0 0 12px}.kkc h4{margin:0 0 8px;font-size:15px;display:flex;justify-content:space-between;align-items:center}.kkc h4 small{color:var(--mut);font-weight:500;font-size:12px}
 .kkb{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}.kkb div{background:rgba(255,255,255,.04);border-radius:10px;padding:8px}.kkb small{display:block;color:var(--mut);font-size:11px}.kkb b{font-size:17px}
 .kkr{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:13px}.kkr .s{font-weight:800}.kkr .a{color:var(--mut);font-size:12px}.kkr .g{font-weight:700}.kkbar{grid-column:1/4;height:4px;border-radius:4px;background:rgba(255,255,255,.06);overflow:hidden}.kkbar i{display:block;height:4px}
@@ -1099,7 +1106,7 @@ nav button[data-t="bot"],[data-go="bot"],[data-go="portfoy"],[data-go="gunluk"],
 
 <!-- PLANLAR (v4) -->
 <section class="tab" id="t-plan">
-  <div class="v4h"><div class="lt" style="margin:0">Planlar</div><button class="v4lnk" data-go="tara">Keşfet ›</button></div>
+  <div class="v4h"><div class="lt" style="margin:0">Planlar</div><span><button class="v4lnk" onclick="canliAc()">📺 Canlı ekran</button> <button class="v4lnk" data-go="tara">Keşfet ›</button></span></div>
   <div class="meta" id="plN" style="margin:-4px 2px 10px"></div>
   <div id="kkRadar"></div>
   <div class="v4seg" id="plSeg"><button data-k="aktif" class="on">Aktif</button><button data-k="liste">Günün Listesi</button><button data-k="biten">Bugün biten</button></div>
@@ -1716,6 +1723,7 @@ nav button[data-t="bot"],[data-go="bot"],[data-go="portfoy"],[data-go="gunluk"],
   <button data-t="ogren"><span class="ib"><svg><use href="#i-karne"/></svg></span>Karne</button>
 </nav>
 <div class="toast" id="toast"></div>
+<div id="canli"><div class="ch"><b>📺 Canlı Kırılım Ekranı</b><button onclick="canliKapat()">Kapat ✕</button></div><div class="cp" id="canliP">yükleniyor…</div><div class="cg" id="canliG"></div></div>
 <div id="onb" role="dialog" aria-label="Hoş geldin">
   <svg class="lg"><use href="#i-logo"/></svg><h1>ABD·BOT</h1>
   <div class="sl">Daha akıllı yatırımlar,<br>daha iyi bir gelecek.</div>
@@ -2137,6 +2145,15 @@ function empty(t){return `<div class="empty"><svg><use href="#i-empty"/></svg>${
 
 // ---------------- piyasa
 function needDaily(){if(!isD())return;const d=daily[cur];if(d&&Date.now()-d.at<10*60e3)return;if(ws&&ws.readyState===1)ws.send(JSON.stringify({daily:cur}))}
+let _cT=null,_cAc=null,_cSt={};
+function canliSes(f){try{if(!_cAc)return;const o=_cAc.createOscillator(),g=_cAc.createGain();o.frequency.value=f;o.connect(g);g.connect(_cAc.destination);g.gain.setValueAtTime(.15,_cAc.currentTime);g.gain.exponentialRampToValueAtTime(.001,_cAc.currentTime+.5);o.start();o.stop(_cAc.currentTime+.5)}catch(e){}}
+function canliAc(){try{_cAc=_cAc||new (window.AudioContext||window.webkitAudioContext)()}catch(e){}$('canli').classList.add('on');try{screen.orientation&&screen.orientation.lock&&screen.orientation.lock('landscape').catch(()=>{})}catch(e){}canliYukle();clearInterval(_cT);_cT=setInterval(canliYukle,3000)}
+function canliKapat(){$('canli').classList.remove('on');clearInterval(_cT)}
+async function canliYukle(){try{const d=await (await fetch('/api/canli')).json();$('canliP').textContent=(d.piyasa||'')+' · '+new Date().toLocaleTimeString('tr-TR')+' · 3 sn\'de bir yenilenir';
+const f=x=>x==null?'—':(+x).toFixed(x<1?4:2).replace('.',',');
+$('canliG').innerHTML=(d.liste||[]).map(x=>{const st=x.st,cl=st==='kırıldı'?'kir':st==='yaklaşıyor'?'yak':st==='sahte'?'sah':st==='stop'?'stp':'';const once=_cSt[x.sym];let fl='';if(once&&once!==st&&(st==='kırıldı'||st==='yaklaşıyor')){fl=' flash';canliSes(st==='kırıldı'?880:660)}_cSt[x.sym]=st;
+const u=x.uzak==null?null:Math.max(0,x.uzak);const w=st==='kırıldı'?100:u==null?0:Math.max(4,100-u/6*100);
+return `<div class="cc ${cl}${fl}" onclick="try{select('${x.sym}');canliKapat();showTab('piyasa')}catch(e){}"><div class="s">#${esc(x.sym)}${x.kanal?' 📣':''}</div><div class="p">${f(x.px)}</div><div class="l">${st==='kırıldı'?`✅ kırıldı ${f(x.giris)}${x.pct!=null?' · '+(x.pct>0?'+':'')+String(x.pct).replace('.',',')+'%':''}`:st==='sahte'?'❌ sahte kırılım':st==='stop'?'🛑 stop':`kırılım ${f(x.giris)} · %${u==null?'—':String(u.toFixed(1)).replace('.',',')} kaldı`}${x.ab!=null?' · alım %'+x.ab:''}</div><div class="bar"><i style="width:${w}%"></i></div></div>`}).join('')||'<div class="cp">Şu an izlenen plan yok.</div>'}catch(e){}}
 let KKD=null,_kkT=0;
 async function kkAl(){if(Date.now()-_kkT<20000&&KKD){kkCiz();return}_kkT=Date.now();try{KKD=await (await fetch('/api/kk')).json();kkCiz()}catch(e){}}
 function kkF(x){return x==null?'—':(x>0?'+':'')+'%'+String(x).replace('.',',')}
@@ -2155,9 +2172,10 @@ async function alarmSil(id){try{await fetch('/api/alarm/'+id,{method:'DELETE'});
 let _tpT=0,_tpS='';
 async function tapeAl(){const now=Date.now();if(cur===_tpS&&now-_tpT<4000)return;_tpT=now;_tpS=cur;try{const d=await (await fetch('/api/tape?sym='+encodeURIComponent(cur))).json();let e=$('qts');if(!e){e=document.createElement('div');e.id='qts';e.className='qts';($('qab')||$('qch')).after(e)}
 e.style.display='';const f=x=>x==null?'—':(+x).toFixed(x<1?4:2).replace('.',',');const sp=d.spr;
-e.innerHTML=`<div class="h"><b>Alış / Satış</b><span>IEX · canlı${d.float?` · float ${(d.float/1e6).toFixed(1).replace('.',',')}M${d.float<1e7?' 🔥':''}`:''}</span></div>${d.bid==null?'':`<div class="ba"><span class="up">Alış ${f(d.bid)}</span><span class="dn">Satış ${f(d.ask)}</span>${sp!=null?`<span class="${sp>2?'w':''}">Spread %${String(sp).replace('.',',')}${sp>2?' ⚠️ kayma riski':sp<=1?' ✅':''}</span>`:''}</div>`}`+
+e.innerHTML=`<div class="h"><b>Alış / Satış</b><span>IEX · canlı${d.float?` · float ${(d.float/1e6).toFixed(1).replace('.',',')}M${d.float<1e7?' 🔥':''}${d.fd?` · ${String(d.fd).replace('.',',')}× döndü`:''}`:''}</span></div>${d.bid==null?'':`<div class="ba"><span class="up">Alış ${f(d.bid)}</span><span class="dn">Satış ${f(d.ask)}</span>${sp!=null?`<span class="${sp>2?'w':''}">Spread %${String(sp).replace('.',',')}${sp>2?' ⚠️ kayma riski':sp<=1?' ✅':''}</span>`:''}</div>`}`+
 (d.son.length?`<div class="h" style="margin-top:6px"><b>Time &amp; Sales</b><span>son işlemler</span></div><table>${d.son.slice(0,12).map(t=>`<tr><td class="${t[3]>0?'up':t[3]<0?'dn':''}">● ${t[3]>0?'BUY':t[3]<0?'SELL':'—'}</td><td>${new Date(t[0]*1000).toLocaleTimeString('tr-TR')}</td><td>${f(t[1])}</td><td>${t[2]}</td></tr>`).join('')}</table>`:'')+
 (d.prof?`<div class="h" style="margin-top:8px"><b>Hacim profili</b><span>bugün · POC ${f(d.prof.poc)}</span></div><div class="qpf">${d.prof.bins.slice().reverse().filter((b,i)=>i%3===1).map(b=>`<div class="${Math.abs(b[0]-d.prof.poc)<(d.prof.hi-d.prof.lo)/24?'poc':''}"><span>${f(b[0])}</span><i style="width:${Math.max(2,b[1]*100)}%"></i></div>`).join('')}</div>`:'')+
+(d.gecmis&&d.gecmis.n?`<div class="h" style="margin-top:8px"><b>📜 Bot bu hissede</b><span>${d.gecmis.n} plan · ${d.gecmis.kirilan} kırıldı · ${d.gecmis.kazanan} K1+ · ${d.gecmis.sahte} sahte</span></div>${d.gecmis.liste.slice(0,5).map(g=>`<div class="ba"><span>${esc(g.gun.slice(5).split('-').reverse().join('.'))} · ${f(g.giris)}</span><span class="${g.renk==='up'?'up':g.renk==='dn'?'dn':''}">${esc(g.sonuc)}${g.tepe!=null?' · '+(g.tepe>0?'+':'')+String(g.tepe).replace('.',',')+'%':''}</span></div>`).join('')}`:'')+
 `<div class="h" style="margin-top:8px"><b>🔔 Fiyat alarmı</b><span>Telegram + bildirim</span></div>${(d.alarm||[]).map(a=>`<div class="ba"><span>${a.yon==='ust'?'⬆️':'⬇️'} ${f(a.fiyat)}</span><span class="dn" style="cursor:pointer" onclick="alarmSil('${a.id}')">✕ sil</span></div>`).join('')}<div class="qal"><input id="qalI" inputmode="decimal" placeholder="Fiyat, örn. ${f(d.bid||0)}"><button onclick="alarmKur()">Alarm kur</button></div>`;}catch(err){}}
 function updateQuote(){$('qsym').innerHTML=logo(cur)+`<span class="qn">${esc(cur)}<small>${esc(typeof adi==='function'?adi(cur,''):'')}</small></span>`;$('qtag').innerHTML=rows[cur]&&rows[cur].run?'<span class="tag run">koşan</span>':'';
   const r=rows[cur],lb=raw[raw.length-1];let p=r?r.p:null;if(lb&&(!r||lb[0]+60>=r.t-1))p=lb[4];

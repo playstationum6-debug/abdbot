@@ -7769,6 +7769,53 @@ def tg_seviyeler(giris, stop, hedefler, px=None, d=1):
     return "\n".join(out)
 
 
+def gun_hacim(sym):
+    """Bugünkü toplam işlem adedi (öncesi seans dahil, 1 dk mumlardan)."""
+    t0 = datetime.now(ET).replace(hour=4, minute=0, second=0, microsecond=0).timestamp()
+    return sum((r[4] or 0) for t, r in (store.bars.get(sym) or {}).items() if t >= t0)
+
+
+def float_donus(sym):
+    fl = (KK["float"].get(sym) or [None, None])[1]
+    if not fl:
+        return None
+    v = gun_hacim(sym)
+    return round(v / fl, 2) if v else None
+
+
+def float_satir(sym):
+    """🔹 Float 4,2M · 🔥 küçük · bugün 1,3× döndü"""
+    s = float_metin(sym)
+    d = float_donus(sym)
+    if not s:
+        return ""
+    if d is not None and d >= 0.3:
+        s += f" · bugün {str(d).replace('.', ',')}× döndü" + (" 🔥" if d >= 1 else "")
+    return s
+
+
+def sec_satir(sym):
+    s = ((scanner.runners.get(sym) or {}).get("sec")) or {}
+    k = s.get("kind")
+    if k == "seyreltme":
+        return f"⚠️ <b>Hisse satışı (offering) riski:</b> {_h(s.get('form', ''))} {_h(s.get('date', ''))}"
+    if k == "dikkat":
+        return f"⚠️ Raf kaydı ({_h(s.get('form', ''))}): şirket her an hisse satabilir"
+    if k == "temiz":
+        return "✅ SEC: son 30 günde hisse satışı bildirimi yok"
+    return ""
+
+
+def piyasa_satir():
+    px, vw = spy_vwap_durum()
+    if not px or not vw:
+        return ""
+    f_ = (px / vw - 1) * 100
+    return (f"☀️ Piyasa güçlü: SPY VWAP üstünde ({fy(f_)})" if f_ >= 0.1 else
+            f"🌧 Piyasa zayıf: SPY VWAP altında ({fy(f_)}) · kırılımlar daha sık bozulur" if f_ <= -0.1 else
+            "⛅ Piyasa yatay: SPY VWAP civarında")
+
+
 def _poc_satir(p):
     try:
         hp = hacim_profili(p["sym"])
@@ -7797,8 +7844,10 @@ def _plan_html(p):
             f"hacim ve oynaklık artarsa 1 dk kapanış yeter</i>\n\n"
             + tg_seviyeler(p["giris"], p["stop"], p["hedefler"], px) + "\n"
             + (spread_satir(p["sym"]) + "\n" if spread_satir(p["sym"]) else "")
-            + (float_metin(p["sym"]) + "\n" if float_metin(p["sym"]) else "")
-            + _poc_satir(p) +
+            + (float_satir(p["sym"]) + "\n" if float_satir(p["sym"]) else "")
+            + _poc_satir(p)
+            + (sec_satir(p["sym"]) + "\n" if sec_satir(p["sym"]) else "")
+            + (piyasa_satir() + "\n" if piyasa_satir() else "") +
             f"<blockquote expandable>📌 {_h(tur)} · puan {str(p['puan']).replace('.', ',')}"
             + "".join("\n" + x for x in ek) +
             "\nSeviyeler 5 ve 15 dk mumlardan. Onay: 5 dk mum direncin üstünde kapanmalı (hacim ve oynaklık artınca 1 dk), hacmi son 20 mumun ≥2 katı. Açılışın ilk 15 dk'sı, tükenme, "
@@ -7831,9 +7880,9 @@ def kirilim_html(p, retest=False):
         out.append(f"⚖️ Risk/ödül <b>1:{(p['hedefler'][1] - e_) / (e_ - p['stop']):.1f}</b>".replace(".", ","))
     out.append("💡 K1'de yarısını sat, stopu giriş fiyatına çek.")
     out.append(f"📦 {lot:.0f}$ ≈ {adet} adet" + (" · <i>öncesi seans hacmi düşük: yarım lot</i>" if p.get("yarim") else ""))
-    sp = spread_satir(p["sym"])
-    if sp:
-        out.append(sp)
+    for s_ in (spread_satir(p["sym"]), float_satir(p["sym"]), sec_satir(p["sym"]), piyasa_satir()):
+        if s_:
+            out.append(s_)
     out.append("<i>Paper takip · yatırım tavsiyesi değildir</i>")
     return "\n".join(out)
 
@@ -8225,11 +8274,16 @@ def radar_gonder():
             neden.append("📰 " + (trk(x["kat"]) if x.get("kat") else "haberli"))
         if x.get("ab") is not None:
             neden.append(f"📊 alım %{x['ab']}")
+        fd_ = float_donus(x["sym"])
+        if fd_ and fd_ >= 0.5:
+            neden.append(f"🔄 float {str(fd_).replace('.', ',')}× döndü")
         if x.get("tur"):
             neden.append("📐 " + x["tur"])
         if neden:
             out.append("<i>" + _h(" · ".join(neden)) + "</i>")
         out.append("")
+    if piyasa_satir():
+        out.append(piyasa_satir())
     out += ["🚀 <b>EKRANDA OLUN!</b> Kırılım gelince grafikli mesaj gelecek.",
             "⏱ Kırılım gelmeden girmeyin; seviyenin üstünde mum kapanışı + hacim bekleyin.",
             "<i>Yatırım tavsiyesi değildir</i>"]
@@ -8310,6 +8364,7 @@ def saglik_satirlari():
             f"📋 Koşan {len(scanner.runners)} · kırılım izleme {len(IZLE)} · aktif plan {len(PLAN.planlar)} · TradingView: {scanner.tv_status}",
             (f"📐 Dün: {o['gonderilen']} plan kanala gitti · {o['kirilan']} kırıldı · K1+ %{o['wr']}" if o and o["wr"] is not None
              else f"📐 Dün: {o['gonderilen']} plan kanala gitti" if o else "📐 Dün: kayıt yok"),
+            f"⏸ Halt takibi: {HALT['durum']} · bugün {HALT['n']} · 🎬 video {VIDEO['n']}/{VIDEO_GUNLUK}",
             f"💾 Bellek {bellek_mb()}/512 MB · son 24 saatte {bas_bugun} kez başladı",
             f"🧪 Kural testi: " + (f"{datetime.fromtimestamp(KRT['t'], TR).strftime('%d.%m')} · {KRT['sonuc']['varyant'][0]['ad']}"
                                    f" K1+ %{KRT['sonuc']['varyant'][0]['wr']}" if KRT.get("sonuc") and KRT["sonuc"].get("varyant") else "henüz yok")]
@@ -8465,6 +8520,155 @@ async def krt_loop():
             await krt_run(10)
 
 
+VIDEO = {"gun": None, "n": 0, "plan": set()}
+VIDEO_GUNLUK = int(os.getenv("VIDEO_GUNLUK", "4"))
+
+
+async def video_gonder(p, etiket):
+    """Kırılım hedefe ulaşınca 9:16 kısa animasyon (GIF → Telegram'da video): kanala, plan mesajına yanıt."""
+    if not gorsel or not tg.ok or not hasattr(gorsel, "kirilim_video"):
+        return
+    gun = _gun_et()
+    if VIDEO["gun"] != gun:
+        VIDEO.update(gun=gun, n=0, plan=set())
+    if p["id"] in VIDEO["plan"] or VIDEO["n"] >= VIDEO_GUNLUK:
+        return
+    VIDEO["plan"].add(p["id"])
+    VIDEO["n"] += 1
+    sym = p["sym"]
+    t0 = (p.get("ot") or time.time()) - 50 * 60
+    bs = store.bars.get(sym) or {}
+    B = [(t, *bs[t][:5]) for t in sorted(bs) if t >= t0]
+    if len(B) > 60:                                   # 2 dk mumlar
+        B2 = []
+        for i in range(0, len(B) - 1, 2):
+            a_, b_ = B[i], B[i + 1]
+            B2.append((a_[0], a_[1], max(a_[2], b_[2]), min(a_[3], b_[3]), b_[4], a_[5] + b_[5]))
+        B = B2
+    e_ = p.get("e") or p["giris"]
+    px = fiyat(sym) or B[-1][4]
+    d_ = {"sym": sym, "giris": p["giris"], "stop": p["stop"], "hedefler": p["hedefler"], "etiket": etiket,
+          "sonuc_pct": round((px / e_ - 1) * 100, 1), "alt": f"Kırılım {fp_(p['giris'])} · {p.get('tf', 5)} dk kapanış"}
+    try:
+        gif = await asyncio.to_thread(gorsel.kirilim_video, B, d_)
+    except Exception as e:
+        log.warning("Kırılım videosu çizilemedi: %s", e)
+        return
+    if not gif:
+        return
+    cap = (f"🎬 <b>#{_h(sym)} {_h(etiket)}</b>\nKırılım <code>{fk(p['giris'])}</code> → şimdi <code>{fk(px)}</code>\n"
+           "<i>$ABDBOT · yatırım tavsiyesi değildir</i>")
+    data = {"chat_id": str(TG_CHAT), "caption": cap, "parse_mode": "HTML"}
+    mid = tg.msg.get(f"k:{p['id']}")
+    if mid:
+        data.update(reply_to_message_id=str(mid), allow_sending_without_reply="true")
+    try:
+        async with httpx.AsyncClient(timeout=60) as c:
+            r = await c.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendAnimation", data=data,
+                             files={"animation": ("kirilim.gif", gif, "image/gif")})
+        if r.status_code != 200:
+            log.warning("Video gönderilemedi: %s", r.text[:150])
+    except Exception as e:
+        log.warning("Video gönderilemedi: %s", e)
+    del gif
+    bellek_bosalt()
+
+
+HALT = {"gun": None, "aktif": {}, "n": 0, "durum": "—"}
+HALT_GUNLUK = 6
+
+
+async def halt_loop():
+    """Nasdaq işlem durdurma (halt) listesi: kanala plan giden ya da koşan hisselerde ⏸ HALT / ▶️ AÇILDI."""
+    await asyncio.sleep(90)
+    while True:
+        await asyncio.sleep(30)
+        try:
+            ses = cal.session(time.time())
+            if ses not in ("pre", "regular", "post") or not tg.ok:
+                continue
+            gun = _gun_et()
+            if HALT["gun"] != gun:
+                HALT.update(gun=gun, aktif={}, n=0)
+            async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "Mozilla/5.0"}) as c:
+                r = await c.get("https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts")
+            if r.status_code != 200:
+                HALT["durum"] = f"hata {r.status_code}"
+                continue
+            HALT["durum"] = "çalışıyor"
+            ilgili = {s for s, k in KK["tgplan"].items() if k.get("gun") == gun} | set(scanner.runners) | set(PLAN.planlar)
+            bugun_us = datetime.now(ET).strftime("%m/%d/%Y")
+            for it in re.findall(r"<item>(.*?)</item>", r.text, re.S):
+                g = lambda tag: (re.search(rf"<ndaq:{tag}>(.*?)</ndaq:{tag}>", it, re.S) or [None, ""])[1].strip()
+                sym, tarih = g("IssueSymbol"), g("HaltDate")
+                if not sym or sym not in ilgili or tarih != bugun_us:
+                    continue
+                anahtar = f"{sym}:{g('HaltTime')}"
+                h = HALT["aktif"].get(anahtar)
+                devam = g("ResumptionTradeTime")
+                if not h:
+                    if HALT["n"] >= HALT_GUNLUK:
+                        continue
+                    HALT["n"] += 1
+                    px = fiyat(sym)
+                    HALT["aktif"][anahtar] = h = {"px": px, "acildi": False, "t": time.time()}
+                    neden = {"LUDP": "volatilite (LULD) durdurması", "T1": "haber bekleniyor", "T12": "ek bilgi isteniyor",
+                             "H10": "SEC askıya aldı", "M": "volatilite durdurması"}.get(g("ReasonCode"), g("ReasonCode"))
+                    tgk = KK["tgplan"].get(sym) or {}
+                    tg.send(f"⏸ <b>HALT · #{_h(sym)}</b> {g('HaltTime')[:5]} (ABD)\n{_h(neden)}"
+                            + (f" · son fiyat <code>{fk(px)}</code>" if px else "")
+                            + "\n<i>İşlem durdu. Açılışta yön önemli: açılış mumunu bekleyin.</i>",
+                            sym=sym, reply=tgk.get("key") if tgk.get("gun") == gun else None, konu="plan", quiet=False)
+                    if tgk.get("gun") == gun:
+                        zincir(tgk.get("key"), "⏸ halt")
+                elif devam and not h["acildi"] and time.time() - h["t"] > 120:
+                    px2 = fiyat(sym)
+                    if not px2:
+                        continue
+                    h["acildi"] = True
+                    yon = (px2 / h["px"] - 1) * 100 if h.get("px") else None
+                    tgk = KK["tgplan"].get(sym) or {}
+                    tg.send(f"▶️ <b>AÇILDI · #{_h(sym)}</b> {devam[:5]} (ABD)\nŞimdi <code>{fk(px2)}</code>"
+                            + (f" · halt öncesine göre <b>{fy(yon)}</b> " + ("🚀 yukarı açıldı" if yon > 1 else "🔻 aşağı açıldı" if yon < -1 else "yatay")
+                               if yon is not None else ""),
+                            sym=sym, reply=tgk.get("key") if tgk.get("gun") == gun else None, konu="plan", quiet=True)
+                    if tgk.get("gun") == gun:
+                        zincir(tgk.get("key"), f"▶️ açıldı {fy(yon) if yon is not None else ''}")
+        except Exception as e:
+            HALT["durum"] = f"hata: {str(e)[:50]}"
+
+
+def canli_listesi():
+    """Canlı kırılım ekranı: aktif planlar + bugün kanala giden planlar, canlı fiyat ve durumla."""
+    gun = _gun_et()
+    out = {}
+    for sym, p in list(PLAN.planlar.items()):
+        px = fiyat(sym)
+        uz = round((p["giris"] / px - 1) * 100, 2) if px else None
+        st = "kırıldı" if p.get("st") in ("onaylı", "kaçtı") else ("yaklaşıyor" if uz is not None and 0 < uz <= 1.5 else "bekliyor")
+        out[sym] = {"sym": sym, "giris": p["giris"], "stop": p["stop"], "hed": p["hedefler"][:2], "px": px, "uzak": uz, "st": st,
+                    "ab": (akis_ozet(sym) or {}).get("pct"), "kanal": sym in KK["tgplan"] and KK["tgplan"][sym].get("gun") == gun}
+    for r in KK["kayit"]:
+        if r["gun"] != gun or r["sym"] in out and out[r["sym"]]["st"] != "bekliyor":
+            continue
+        if r["st"] in ("kırıldı", "stop", "K3", "sahte", "bitti"):
+            px = fiyat(r["sym"])
+            out[r["sym"]] = {"sym": r["sym"], "giris": r["giris"], "stop": r["stop"], "hed": r["hed"][:2], "px": px,
+                             "uzak": round((r["giris"] / px - 1) * 100, 2) if px else None,
+                             "st": {"sahte": "sahte", "stop": "stop"}.get(r["st"], "kırıldı"), "k": r["k"],
+                             "pct": round((px / r["giris"] - 1) * 100, 1) if px else None,
+                             "ab": (akis_ozet(r["sym"]) or {}).get("pct"), "kanal": True}
+    sira = {"kırıldı": 0, "yaklaşıyor": 1, "bekliyor": 2, "sahte": 3, "stop": 4}
+    return sorted(out.values(), key=lambda x: (sira.get(x["st"], 5), x["uzak"] if x["uzak"] is not None else 99))[:20]
+
+
+def hisse_gecmis(sym):
+    K = [r for r in KK["kayit"] if r["sym"] == sym][-10:]
+    satir = [{"gun": r["gun"], "giris": r["giris"], "sonuc": _kk_sonuc(r)[0], "renk": _kk_sonuc(r)[1], "tepe": _tepe_pct(r)} for r in reversed(K)]
+    kir = [r for r in K if r["st"] not in ("bekliyor", "kırılmadı")]
+    return {"n": len(K), "kirilan": len(kir), "kazanan": sum(1 for r in kir if _kk_sonuc(r)[2] is True),
+            "sahte": sum(1 for r in K if r["st"] == "sahte"), "liste": satir}
+
 PIN_MAX = int(os.getenv("PIN_MAX", "4"))        # aynı anda sabit kalabilecek plan mesajı
 
 
@@ -8589,7 +8793,9 @@ def plan_olaylari():
             tk_ = KK["tgplan"].get(sym) or {}
             if tk_.get("gun") == _gun_et():                 # yeniden başlasa da bugünkü gönderimler sayılır
                 hs[0], hs[1] = max(hs[0], tk_.get("n", 0)), max(hs[1], tk_.get("t", 0))
-            _neden_tg = ("Telegram kapalı" if not tg.ok else "plan bildirimi kapalı" if not PUSH_PREF.get("tg_plan", 1)
+            _sec_ = ((scanner.runners.get(sym) or {}).get("sec") or {}).get("kind")
+            _neden_tg = ("SEC: son 3 günde hisse satışı (offering) bildirimi var" if _sec_ == "seyreltme"
+                         else "Telegram kapalı" if not tg.ok else "plan bildirimi kapalı" if not PUSH_PREF.get("tg_plan", 1)
                          else f"puan {p['puan']} (ana listedeki hisse için en az 3,5)" if not (kucuk or p["puan"] >= 3.5)
                          else f"günlük plan sınırı doldu ({PLAN_TG_GUNLUK})" if _PLAN_TG["n"] >= PLAN_TG_GUNLUK
                          else f"spread %{spread_yuzde(sym)} > %{SPREAD_MAX}" if (spread_yuzde(sym) or 0) > SPREAD_MAX
@@ -8598,7 +8804,7 @@ def plan_olaylari():
                          else "aynı hisseye 30 dk içinde ikinci plan" if time.time() - hs[1] < PLAN_TG_ARA else "")
             if _neden_tg:
                 PLAN_TG_RED[sym] = (time.time(), f"{fp_(p['giris'])} planı: {_neden_tg}")
-            if tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK \
+            if _sec_ != "seyreltme" and tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK \
                     and (spread_yuzde(sym) or 0) <= SPREAD_MAX \
                     and not sustur_mu(sym) and hs[0] < PLAN_TG_HISSE and time.time() - hs[1] >= PLAN_TG_ARA:
                 hs[0] += 1
@@ -8702,6 +8908,8 @@ def plan_olaylari():
                             plan_grafik_ch(p, durum="k1" if i == 0 else "k2"),
                             sym=p["sym"], reply=f"k:{p['id']}", konu="plan", quiet=False)
                     zincir(f"k:{p['id']}", f"🎯 K{i + 1} geldi {fk(h_[i])}")
+                    if i == 1:
+                        _gorev(video_gonder(p, f"K2 ✓ {fy((h_[1] / (p.get('e') or p['giris']) - 1) * 100)}"))
     try:
         plan_takip()
     except Exception as e:
@@ -8794,6 +9002,8 @@ def plan_takip():
                 pass
             tg.send(html, ch, sym=p["sym"], reply=key, konu="plan", quiet=durum != "bozuldu")
             zincir(key, "⚠️ kırılım bozuldu" if durum == "bozuldu" else f"🚀 kırılımdan {fy(tepe_pct)}")
+            if durum != "bozuldu" and tepe_pct >= 15:
+                _gorev(video_gonder(p, f"KIRILDI ✓ {fy(tepe_pct)}"))
 
         # kırılım bozuldu: onaydan sonra fiyat seviyenin %1 altına döndü
         if px < lvl * 0.99:
@@ -9248,7 +9458,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop)]
+                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop, halt_loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -9401,7 +9611,13 @@ def api_tape(sym: str):
     return {"sym": sym, "son": list(reversed((a.get("son") or [])[-20:])),
             "bid": k[0] if k else None, "ask": k[1] if k else None, "spr": spread_yuzde(sym), "ab": akis_ozet(sym),
             "prof": hacim_profili(sym), "float": (KK["float"].get(sym) or [None, None])[1],
-            "alarm": [x for x in KK["alarm"] if x["sym"] == sym]}
+            "alarm": [x for x in KK["alarm"] if x["sym"] == sym], "gecmis": hisse_gecmis(sym),
+            "fd": float_donus(sym)}
+
+
+@app.get("/api/canli")
+def api_canli():
+    return {"liste": canli_listesi(), "piyasa": piyasa_satir(), "t": int(time.time())}
 
 
 @app.get("/api/kk")

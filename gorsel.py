@@ -739,3 +739,78 @@ def liste_kart(K):
     nt = T(K.get("not_", "Paper takip · yatırım tavsiyesi değildir"))
     d.text(((W * S - d.textlength(nt, font=f(17, "m"))) / 2, (Hh - 56) * S), nt, fill=DIM, font=f(17, "m"))
     return _png(img.resize((W, Hh), Image.LANCZOS))
+
+
+def kirilim_video(bars, d_, n_kare=34):
+    """Dikey (9:16) kısa kırılım animasyonu, GIF. bars: [(t,o,h,l,c,v)] ; d_: sym, giris, stop, hedefler, sonuc_pct, etiket
+    Mumlar soldan akar, kırılım çizgisi çizilir, kırılım mumunda 'KIRILDI', sonda sonuç. Bellek için küçük boyut."""
+    if not bars or len(bars) < 12:
+        return None
+    W, H = 480, 854
+    B = bars[-60:]
+    n = len(B)
+    e = d_.get("giris")
+    hed = [h for h in (d_.get("hedefler") or []) if h]
+    hi = max([b[2] for b in B] + ([hed[0]] if hed else []))
+    lo = min([b[3] for b in B] + ([d_["stop"]] if d_.get("stop") else []))
+    rng = (hi - lo) or hi * 0.02
+    hi += rng * 0.08
+    lo -= rng * 0.05
+    x0, x1, y0, y1 = 24, W - 92, 210, 690
+    cw = (x1 - x0) / n
+    X = lambda i: x0 + (i + 0.5) * cw
+    Y = lambda v: y0 + (hi - v) / (hi - lo) * (y1 - y0)
+    ki = next((i for i, b in enumerate(B) if e and b[4] >= e and i > n * 0.3), int(n * 0.7))
+    kareler = []
+    f = lambda sz, w="r": F(sz, w)
+    for kno in range(n_kare):
+        oran = min(1.0, (kno + 1) / (n_kare * 0.78))
+        m = max(3, int(n * oran))
+        img = Image.new("RGB", (W, H), BG)
+        d = ImageDraw.Draw(img, "RGBA")
+        d.text((24, 28), "$ABDBOT", fill=MUT, font=f(20, "xb"))
+        d.text((24, 62), "#" + d_.get("sym", ""), fill=TXT, font=f(58, "xb"))
+        d.text((26, 134), T(d_.get("alt", "Kırılım planı")), fill=MUT, font=f(18, "m"))
+        for gy in range(5):
+            yy = y0 + gy * (y1 - y0) / 4
+            d.line([(x0, yy), (x1, yy)], fill=GRID, width=1)
+        if e and m > n * 0.15:                      # kırılım çizgisi soldan sağa çizilir
+            uz = x0 + (x1 - x0) * min(1, (m - n * 0.15) / (n * 0.3))
+            d.line([(x0, Y(e)), (uz, Y(e))], fill=ACC, width=4)
+            d.text((x1 + 6, Y(e) - 10), fp(e), fill=ACC, font=f(16, "b"))
+        if d_.get("stop") and m > n * 0.4:
+            _dash(d, x0, Y(d_["stop"]), x1, DN + (200,), 2, 8, 6)
+            d.text((x1 + 6, Y(d_["stop"]) - 10), fp(d_["stop"]), fill=DN, font=f(14, "b"))
+        if hed and m > n * 0.4:
+            for i_, h_ in enumerate(hed[:2]):
+                _dash(d, x0, Y(h_), x1, UP + (170,), 2, 8, 6)
+                d.text((x1 + 6, Y(h_) - 10), f"K{i_ + 1} " + fp(h_), fill=UP, font=f(13, "b"))
+        vmax = max(b[5] for b in B) or 1
+        for i in range(m):
+            o, h_, l_, c = B[i][1], B[i][2], B[i][3], B[i][4]
+            col = UP if c >= o else DN
+            d.line([(X(i), Y(h_)), (X(i), Y(l_))], fill=col, width=2)
+            t_, b_ = Y(max(o, c)), Y(min(o, c))
+            d.rectangle([X(i) - cw * 0.36, t_, X(i) + cw * 0.36, max(b_, t_ + 2)], fill=col)
+            hv = B[i][5] / vmax * 90
+            d.rectangle([X(i) - cw * 0.34, 780 - hv, X(i) + cw * 0.34, 780], fill=col + (150 if B[i][5] > vmax * 0.4 else 70,))
+        if m > ki:                                   # kırılım anı
+            d.ellipse([X(ki) - 14, Y(B[ki][4]) - 14, X(ki) + 14, Y(B[ki][4]) + 14], outline=GOLD, width=4)
+            _pill(d, 24, 160, T("KIRILDI ✓" if m < n else d_.get("etiket", "KIRILDI")), UP, (255, 255, 255), f(22, "xb"), px=14, py=7, r=10)
+        if m >= n:                                   # son kareler: sonuç
+            sp = d_.get("sonuc_pct")
+            if sp is not None:
+                txt = T(fpct(sp, 1))
+                tw = d.textlength(txt, font=f(76, "xb"))
+                d.rounded_rectangle([(W - tw) / 2 - 24, 694, (W + tw) / 2 + 24, 800], radius=24, fill=(0, 0, 0, 215))
+                d.text(((W - tw) / 2, 704), txt, fill=UP if sp > 0 else DN, font=f(76, "xb"))
+        nt = T("Kırılım = direnç üstünde mum kapanışı + hacim · yatırım tavsiyesi değildir")
+        d.text(((W - d.textlength(nt, font=f(11, "m"))) / 2, H - 34), nt, fill=DIM, font=f(11, "m"))
+        kareler.append(img.convert("P", palette=Image.ADAPTIVE, colors=64))
+        del img, d
+    for _ in range(8):
+        kareler.append(kareler[-1])
+    out = io.BytesIO()
+    kareler[0].save(out, format="GIF", save_all=True, append_images=kareler[1:], duration=[110] * (len(kareler) - 9) + [1600] + [200] * 8,
+                    loop=0, optimize=True)
+    return out.getvalue()
