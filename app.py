@@ -98,7 +98,8 @@ GH_TOKEN = os.getenv("GH_TOKEN", "")
 GH_REPO = os.getenv("GH_REPO", "")            # ör. kullaniciadi/abdbot-veri
 GH_PATH = os.getenv("GH_PATH", "durum/state.json")
 SIG_DIR = "sinyaller"
-SIG_GUN = int(os.getenv("SIG_GUN", "7"))      # açılışta yüklenen sinyal geçmişi (gün): fazlası 512 MB'ı taşırıyordu
+SADECE_PLAN = os.getenv("SADECE_PLAN", "0" if os.getenv("BOT_ENABLED", "0") == "1" else "1") == "1"   # sadece kırılım planı motoru
+SIG_GUN = int(os.getenv("SIG_GUN", "2" if SADECE_PLAN else "7"))      # açılışta yüklenen sinyal geçmişi (gün): fazlası 512 MB'ı taşırıyordu
 BT_YUKLE = os.getenv("BT_YUKLE", "0") == "1"  # geçmiş test sinyalleri (7,7 MB) belleğe alınsın mı (işlem botu kapalıyken gerek yok)
 BOT_DIR = "bot"
 
@@ -787,7 +788,19 @@ YZM = yzmod.YZ(scanner, log)          # Gemini + Google arama (anahtar: Render E
 PLAN = planmod.Planci()               # kanallar gibi: seviyeyi önceden çizer, "X kırılırsa giriş"
 PLAN.kote_fn = lambda s: KOTE.get(s)
 engine.plan = PLAN
-engine.sadece_plan = set()
+class _Hepsi:
+    """Her hisse 'sadece plan' modunda: diğer kurgular (koşu, VWAP …) çalışmaz — işlem botu kapalıyken bellek/CPU tasarrufu."""
+    def __contains__(self, x):
+        return True
+
+    def __iter__(self):
+        return iter(())
+
+    def discard(self, x):
+        pass
+
+
+engine.sadece_plan = _Hepsi() if SADECE_PLAN else set()
 PLAN.uygun = lambda s_: s_ not in SYMBOLS        # büyük hisselerde sadece kanalın verdiği seviye
 IZLE = {}                             # kırılım planı için izlenen (henüz koşan listesinde olmayan) hisseler
 
@@ -1509,6 +1522,7 @@ PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
 TG_TOKEN = os.getenv("TG_TOKEN", "")
 TG_SADECE_PLAN = os.getenv("TG_SADECE_PLAN", "1") == "1"   # 1: kanala sadece kırılım planları + K1/K2/ilerleme/bozuldu
 TG_CHAT = os.getenv("TG_CHAT", "")
+BILDIRIM = []        # kanala giden mesajların kısa hali (uygulama Bildirimler sekmesi)
 
 
 TG_ADMIN = os.getenv("TG_ADMIN", "")
@@ -1576,6 +1590,15 @@ class Telegram:
              durum=None, konu=None, thread=None, mk=None):
         if TG_SADECE_PLAN and not chat and konu != "plan":
             return                       # kanal sadece kırılım planlarını (ve takiplerini) alır; komut cevapları (chat) gider
+        if not chat and konu == "plan":   # uygulamanın Bildirimler sekmesi: kanala giden her mesajın kısa hali
+            try:
+                düz = re.sub(r"<[^>]+>", "", html).replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+                sat_ = [x.strip() for x in düz.split("\n") if x.strip()]
+                BILDIRIM.append({"t": int(time.time()), "sym": sym or "", "b": (sat_[0] if sat_ else "")[:90],
+                                 "a": " · ".join(sat_[1:3])[:160]})
+                del BILDIRIM[:-80]
+            except Exception:
+                pass
         if self.ok:
             self.queue.append({"html": html[:3600], "chart": chart, "key": key, "reply": reply, "sym": sym,
                                "chat": chat, "quiet": quiet, "haber": haber, "durum": durum, "konu": konu,
@@ -3416,6 +3439,9 @@ async def broadcaster():
                 clients.discard(cl)
 
 
+_OGR_T = [0.0]
+
+
 async def signal_loop():
     """Her 5 sn: yeni kapanan mumlarda sinyal ara, açık sinyalleri gölgede takip et."""
     while True:
@@ -3424,7 +3450,9 @@ async def signal_loop():
         cu = state.yahoo_t0
         engine.runners = scanner.runners
         try:
-            await asyncio.to_thread(learner.rebuild, list(engine.signals) + BT["sigs"] + dis.as_signals())
+            if not SADECE_PLAN or now - _OGR_T[0] > 1800:
+                _OGR_T[0] = now
+                await asyncio.to_thread(learner.rebuild, list(engine.signals) + BT["sigs"] + dis.as_signals())
         except Exception as e:
             log.warning("Öğrenme hatası: %s", e)
         syms = all_syms()
@@ -6438,6 +6466,17 @@ async def tg_komut(text, chat, thread=None):
     elif cmd in ("ekran", "takip"):
         if not radar_gonder():
             send("👀 Şu an kırılım seviyesine %4'ten yakın, alıcısı güçlü en az 2 hisse yok.")
+    elif cmd == "bellek":
+        bar_n = sum(len(v) for v in store.bars.values())
+        send("💾 <b>BELLEK</b>\n" + "\n".join([
+            f"Toplam {bellek_mb()} MB",
+            f"Mum: {len(store.bars)} hisse · {bar_n:,} mum".replace(",", "."),
+            f"Sinyal: {len(engine.signals)} · test {len(BT.get('sigs') or [])} · koşan testi {len(KT.get('sigs') or [])}",
+            f"Plan: aktif {len(PLAN.planlar)} · geçmiş {len(PLAN.gecmis)} · karne {len(KK['kayit'])}",
+            f"Akış: {len(AKIS)} hisse · kote {len(KOTE)}",
+            f"Telegram: meta {len(tg.meta)} · msg {len(tg.msg)} · kuyruk {len(tg.queue)}",
+            f"Bot günlüğü: {len(bot.journal)} · pozisyon {len(bot.positions)}",
+            f"Sadece plan modu: {'açık' if SADECE_PLAN else 'kapalı'} · sinyal geçmişi {SIG_GUN} gün"]))
     elif cmd in ("saglik", "sağlık"):
         send("🩺 <b>SAĞLIK</b>\n" + "\n".join(saglik_satirlari()))
     elif cmd in ("kuraltest", "kural"):
@@ -7726,7 +7765,7 @@ def izle_guncelle():
     for s_ in IZLE:
         VIEWED[s_] = now
         ensure_sym(s_)
-    engine.sadece_plan = {s_ for s_ in IZLE if s_ not in scanner.runners and s_ not in SYMBOLS}
+    engine.sadece_plan = _Hepsi() if SADECE_PLAN else {s_ for s_ in IZLE if s_ not in scanner.runners and s_ not in SYMBOLS}
 
 
 # ----------------------------------------------------------------- Telegram v4: seviye merdiveni şablonları
@@ -8089,6 +8128,10 @@ def kk_guncelle():
             elif pst in ("iptal", "süre"):
                 r["st"] = "kırılmadı"
                 deg = True
+            elif p is None and px >= r["giris"]:
+                # plan bellekte yok (yeniden başlama) ama fiyat seviyeyi geçti: karne kırılmış sayar
+                r.update(st="kırıldı", kt=now, tepe=px, dip=px, kacti=1 if px > r["giris"] * 1.04 else 0)
+                deg = True
             continue
         r["tepe"], r["dip"] = max(r["tepe"] or px, px), min(r["dip"] or px, px)
         while r["k"] < len(r["hed"]) and px >= r["hed"][r["k"]]:
@@ -8109,8 +8152,54 @@ def kk_guncelle():
             KK["alarm"].remove(al)
             deg = True
             alarm_gonder(al, px)
+    try:
+        ilerleme_kontrol()
+    except Exception as e:
+        log.warning("İlerleme mesajı hatası: %s", e)
     if deg:
         kk_kaydet()
+
+
+ILR_ESIK = (10, 25, 50, 100, 200, 300, 500)
+
+
+def ilerleme_kontrol():
+    """Kırılımdan sonra yükseliş: '1. giriş 7,05 → +%121 · 2. giriş 13,75 → +%13 · 250$ ile +302$' (eşik başına bir kez)."""
+    if not tg.ok:
+        return
+    gun = _gun_et()
+    gruplar = {}
+    for r in KK["kayit"][-120:]:
+        if r["gun"] == gun and r["st"] in ("kırıldı", "K3", "bitti") or (r["gun"] == gun and r["st"] == "stop" and r.get("k")):
+            gruplar.setdefault(r["sym"], []).append(r)
+    for sym, L in gruplar.items():
+        px = fiyat(sym)
+        if not px:
+            continue
+        ilk = L[0]
+        pct = (px / ilk["giris"] - 1) * 100
+        es = [e for e in ILR_ESIK if pct >= e and e > (ilk.get("ilr") or 0)]
+        if not es:
+            continue
+        ilk["ilr"] = max(es)
+        tk = KK["tgplan"].get(sym) or {}
+        key = tk.get("key") if tk.get("gun") == gun else None
+        sat = [f"🚀 <b>#{_h(sym)} KIRILIMDAN {fy(pct)}</b>  <code>{fk(px)}</code>", ""]
+        for i, r in enumerate(L[:3], 1):
+            p_ = (px / r["giris"] - 1) * 100
+            kar = planmod.LOT_USD * p_ / 100
+            sat.append(f"{i}. giriş <code>{fk(r['giris'])}</code> → <b>{fy(p_)}</b> · 250$ ile <b>{kar:+.0f}$</b>"
+                       + (" <i>(kaçtı, kovalanmadı)</i>" if r.get("kacti") else ""))
+        sat.append("")
+        sat.append("💡 Kârın bir kısmını alıp stopu yukarı taşımak mantıklı." if pct >= 25 else "💡 Stopu girişe çekmek mantıklı.")
+        sat.append("<i>Paper takip · yatırım tavsiyesi değildir</i>")
+        tg.send("\n".join(sat), None, sym=sym, reply=key, konu="plan", quiet=pct < 50)
+        if key:
+            zincir(key, f"🚀 kırılımdan {fy(pct)}")
+        if pct >= 25:
+            p_obj = _plan_bul(ilk["id"], sym) or {"id": ilk["id"], "sym": sym, "giris": ilk["giris"], "stop": ilk["stop"],
+                                                   "hedefler": ilk["hed"], "e": ilk["giris"], "ot": ilk.get("kt")}
+            _gorev(video_gonder(p_obj, f"KIRILDI ✓ {fy(pct)}"))
 
 
 def _kk_sonuc(r):
@@ -8683,7 +8772,14 @@ def canli_listesi():
                              "pct": round((px / r["giris"] - 1) * 100, 1) if px else None,
                              "ab": (akis_ozet(r["sym"]) or {}).get("pct"), "kanal": True}
     sira = {"kırıldı": 0, "yaklaşıyor": 1, "bekliyor": 2, "sahte": 3, "stop": 4}
-    return sorted(out.values(), key=lambda x: (sira.get(x["st"], 5), x["uzak"] if x["uzak"] is not None else 99))[:20]
+    L = sorted(out.values(), key=lambda x: (sira.get(x["st"], 5), x["uzak"] if x["uzak"] is not None else 99))[:20]
+    for x in L:                                       # mini grafik: son ~60 dk, 20 nokta
+        bs = store.bars.get(x["sym"]) or {}
+        ts = sorted(bs)[-60:]
+        x["sp"] = [round(bs[t][3], 4) for t in ts[::3]][-20:]
+        r_ = scanner.runners.get(x["sym"]) or {}
+        x["gun"] = r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct")
+    return L
 
 
 def hisse_gecmis(sym):
@@ -9061,7 +9157,7 @@ def plan_takip():
                    "bozuldu")
             continue
         # ilerleme: seviyeden +%10, +%20 … (her eşik bir kez)
-        es = [e for e in TAKIP_ESIK if tepe_pct >= e and e > (p.get("takip_es") or 0)]
+        es = []          # ilerleme mesajları artık karne kayıtlarından (ilerleme_kontrol): yeniden başlamada da sürer
         if es:
             p["takip_es"] = max(es)
             gonder(f"🚀 <b>#{_h(p['sym'])} KIRILIMDAN {fy(tepe_pct)}</b>\n"
@@ -9671,6 +9767,61 @@ def api_tape(sym: str):
             "fd": float_donus(sym)}
 
 
+@app.get("/api/hisse")
+async def api_hisse(request: Request, sym: str, bars: int = 0):
+    """Uygulamanın hisse sayfası: fiyat, plan, akış, kote, float, SEC, haber, geçmiş (+ bugünün 1 dk mumları)."""
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    sym = re.sub(r"[^A-Z.\-]", "", sym.upper())[:8]
+    if not sym:
+        return JSONResponse({"hata": "hisse yok"}, status_code=400)
+    VIEWED[sym] = time.time()
+    if sym not in store.bars:
+        ensure_sym(sym)
+        try:
+            rd = await asyncio.to_thread(yahoo_fetch, [sym], "5d")
+            if rd and rd.get(sym):
+                store.merge_yahoo(sym, rd[sym])
+        except Exception as e:
+            log.debug("Hisse verisi alınamadı %s: %s", sym, e)
+    sm = summary(sym) or {}
+    p = PLAN.planlar.get(sym)
+    kr = next((r for r in reversed(KK["kayit"]) if r["sym"] == sym and r["gun"] == _gun_et()), None)
+    plan = None
+    if p:
+        plan = {"giris": p["giris"], "stop": p["stop"], "hed": p["hedefler"][:3], "st": p.get("st"),
+                "tur": " + ".join(planmod.TUR_AD.get(t, t) for t in p.get("tur") or [])}
+    elif kr:
+        plan = {"giris": kr["giris"], "stop": kr["stop"], "hed": kr["hed"], "st": kr["st"], "sonuc": _kk_sonuc(kr)[0]}
+    r_ = scanner.runners.get(sym) or {}
+    n_ = r_.get("news") or {}
+    k = KOTE.get(sym)
+    out = {"sym": sym, "p": sm.get("p") or fiyat(sym), "ch": sm.get("ch"), "plan": plan, "ab": akis_ozet(sym),
+           "bid": k[0] if k else None, "ask": k[1] if k else None, "spr": spread_yuzde(sym),
+           "son": list(reversed(((AKIS.get(sym) or {}).get("son") or [])[-12:])),
+           "float": (KK["float"].get(sym) or [None, None])[1], "fd": float_donus(sym),
+           "sec": (r_.get("sec") or {}).get("kind"), "haber": tr_or(n_.get("headline")) if n_ else None,
+           "gun_pct": r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct"),
+           "poc": (hacim_profili(sym) or {}).get("poc"), "gecmis": hisse_gecmis(sym),
+           "zincir": PLAN_ZINCIR.get((KK["tgplan"].get(sym) or {}).get("key"), [])[-6:],
+           "alarm": [x for x in KK["alarm"] if x["sym"] == sym]}
+    if bars:
+        bs = store.bars.get(sym) or {}
+        t0 = datetime.now(ET).replace(hour=4, minute=0, second=0, microsecond=0).timestamp()
+        B = [[t, *[round(v, 4) for v in bs[t][:4]], int(bs[t][4] or 0)] for t in sorted(bs) if t >= t0]
+        if not B:
+            B = [[t, *[round(v, 4) for v in bs[t][:4]], int(bs[t][4] or 0)] for t in sorted(bs)[-390:]]
+        out["bars"] = B[-480:]
+    return out
+
+
+@app.get("/api/bildirim")
+def api_bildirim(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    return {"liste": list(reversed(BILDIRIM[-60:]))}
+
+
 @app.get("/api/canli")
 def api_canli():
     return {"liste": canli_listesi(), "piyasa": piyasa_satir(), "t": int(time.time())}
@@ -9726,6 +9877,11 @@ def api_alarm_sil(aid: str, request: Request):
     kk_kaydet()
     return {"ok": True}
 
+@app.get("/eski")
+async def index_eski(request: Request):
+    return await index(request)
+
+
 @app.get("/")
 async def index(request: Request):
     if not authorized(request):
@@ -9735,7 +9891,8 @@ async def index(request: Request):
             sayac("acilis", _anahtar(request))
         except Exception:
             pass
-    resp = HTMLResponse((BASE / "index.html").read_text(encoding="utf-8").replace("__SITE__", site_kok()),
+    sayfa = "yeni.html" if (BASE / "yeni.html").exists() and request.url.path != "/eski" else "index.html"
+    resp = HTMLResponse((BASE / sayfa).read_text(encoding="utf-8").replace("__SITE__", site_kok()),
                         headers={"Cache-Control": "no-store"})
     if SITE_PASSWORD:
         tgw = bool(request.cookies.get("tgw"))      # Telegram Web (iframe) içinde: çerez üçüncü taraf bağlamında da gitsin
