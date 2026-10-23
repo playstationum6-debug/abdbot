@@ -212,6 +212,27 @@ def plan_grafik(bars, p, max_bars=84):
             _dash(d, x0, Y(v), x1 + 8 * S, col + (220,), 2 * S, 12 * S, 7 * S)
         else:
             _dash(d, x0, Y(v), x1 + 8 * S, col + (150,), S + 1, 6 * S, 7 * S)
+    # hacim profili: fiyat bölgelerine düşen hacim (sağ kenarda yarı saydam), en yoğun bölge = POC
+    try:
+        NB = 28
+        st_ = (hi - lo) / NB or 1
+        prof = [0.0] * NB
+        for b in B:
+            tp = (b[2] + b[3] + b[4]) / 3
+            prof[min(NB - 1, max(0, int((tp - lo) / st_)))] += b[5]
+        pm = max(prof) or 1
+        pw = (x1 - x0) * 0.16
+        for i, v in enumerate(prof):
+            if v <= 0:
+                continue
+            ya, yb = Y(lo + (i + 1) * st_), Y(lo + i * st_)
+            d.rectangle([x1 - pw * v / pm, ya + S, x1, yb - S], fill=VIO + ((120,) if v == pm else (45,)))
+        poc = lo + (prof.index(pm) + 0.5) * st_
+        p["_poc"] = poc
+        _dash(d, x0, Y(poc), x1, VIO + (170,), S + 1, 4 * S, 6 * S)
+        _pill(d, x0 + 10 * S, Y(poc) + 6 * S, T("YOĞUN HACİM (POC) " + fp(poc)), _mix(VIO, 0.3, BG), VIO, f(12, "b"), px=8 * S, py=4 * S, r=6 * S)
+    except Exception:
+        pass
     # hacim
     vmax = max(b[5] for b in B) or 1
     avg = sum(b[5] for b in B[-21:-1]) / max(1, len(B[-21:-1]))
@@ -664,4 +685,55 @@ def haftalik_kart(H):
         _pill(d, x, y, T(f"En iyi girseydin #{g['sym']} {fpk(g['en'])}"), _mix(GOLD, 0.18), GOLD, f(19, "b"), px=16 * S, py=10 * S)
     nt = T("Kazanan da kaybeden de sayıldı · paper trade · yatırım tavsiyesi değildir")
     d.text(((W * S - d.textlength(nt, font=f(17, "m"))) / 2, (Hh - 54) * S), nt, fill=DIM, font=f(17, "m"))
+    return _png(img.resize((W, Hh), Image.LANCZOS))
+
+
+def liste_kart(K):
+    """Genel kanal kartı. K: baslik, rozet, renk('acc'|'up'|'dn'|'gold'), alt, kutular:[(etiket, değer, renk)],
+    satirlar:[{sym, alt, sag, renk, cubuk(0-1)}], not_"""
+    S = 2
+    W = 1080
+    sat = K.get("satirlar") or []
+    Hh = 300 + (190 if K.get("kutular") else 0) + 82 * max(1, len(sat)) + 110
+    renk = {"up": UP, "dn": DN, "gold": GOLD, "vio": VIO}.get(K.get("renk"), ACC)
+    img = Image.blend(Image.new("RGB", (W * S, Hh * S), BG), _parilti(W, Hh, S, renk, (-80, -100, 300, 160), 0.3), 0.9)
+    d = ImageDraw.Draw(img, "RGBA")
+    f = lambda sz, w="r": F(sz * S, w)
+    x0 = 64 * S
+    d.text((x0, 54 * S), "$ABDBOT", fill=TXT, font=f(30, "xb"))
+    if K.get("rozet"):
+        _pill(d, x0 + d.textlength("$ABDBOT", font=f(30, "xb")) + 16 * S, 57 * S, T(K["rozet"]), _mix(renk, 0.25), renk,
+              f(15, "xb"), px=12 * S, py=7 * S)
+    sa = T(K.get("saat", ""))
+    d.text(((W - 64) * S - d.textlength(sa, font=f(19, "sb")), 60 * S), sa, fill=MUT, font=f(19, "sb"))
+    d.text((x0, 120 * S), T(K.get("baslik", "")), fill=TXT, font=f(60, "xb"))
+    d.text((x0 + 3 * S, 200 * S), T(K.get("alt", "")), fill=MUT, font=f(21, "m"))
+    y = 262
+    kut = K.get("kutular") or []
+    if kut:
+        n = len(kut)
+        bw = (W - 128 - 16 * (n - 1)) / n
+        for i, (lab, val, col) in enumerate(kut):
+            bx = (64 + i * (bw + 16)) * S
+            d.rounded_rectangle([bx, y * S, bx + bw * S, (y + 160) * S], radius=24 * S, fill=PANEL + (235,), outline=GRID, width=S)
+            d.text((bx + 22 * S, (y + 22) * S), T(lab), fill=MUT, font=f(18, "sb"))
+            c_ = {"up": UP, "dn": DN, "gold": GOLD}.get(col, TXT) if isinstance(col, str) else col
+            d.text((bx + 20 * S, (y + 58) * S), T(val), fill=c_, font=f(50 if n <= 3 else 42, "xb"))
+        y += 190
+    if not sat:
+        d.text((x0, y * S), T(K.get("bos", "Kayıt yok.")), fill=MUT, font=f(22, "m"))
+    for r in sat[:12]:
+        c_ = {"up": UP, "dn": DN, "gold": GOLD, "acc": ACC}.get(r.get("renk"), TXT)
+        d.rounded_rectangle([x0, y * S, (W - 64) * S, (y + 68) * S], radius=18 * S, fill=PANEL + (220,))
+        if r.get("cubuk") is not None:
+            cw_ = max(0.0, min(1.0, r["cubuk"])) * ((W - 128) * S)
+            d.rounded_rectangle([x0, (y + 62) * S, x0 + cw_, (y + 68) * S], radius=3 * S, fill=c_ + (200,))
+        d.text((x0 + 22 * S, (y + 15) * S), T("#" + r["sym"]), fill=TXT, font=f(27, "xb"))
+        sw = d.textlength(T("#" + r["sym"]), font=f(27, "xb"))
+        d.text((x0 + 36 * S + sw, (y + 22) * S), T((r.get("alt") or "")[:44]), fill=MUT, font=f(18, "m"))
+        pt = T(r.get("sag", ""))
+        d.text(((W - 86) * S - d.textlength(pt, font=f(27, "xb")), (y + 15) * S), pt, fill=c_, font=f(27, "xb"))
+        y += 82
+    nt = T(K.get("not_", "Paper takip · yatırım tavsiyesi değildir"))
+    d.text(((W * S - d.textlength(nt, font=f(17, "m"))) / 2, (Hh - 56) * S), nt, fill=DIM, font=f(17, "m"))
     return _png(img.resize((W, Hh), Image.LANCZOS))
