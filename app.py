@@ -1175,10 +1175,30 @@ async def get_daily(sym):
     return bars
 
 
+YAHOO_PARCA = int(os.getenv("YAHOO_PARCA", "10"))   # tek seferde indirilen hisse (bellek tepesini düşürür)
+
+
 def yahoo_fetch(symbols, period):
+    """Yahoo 1 dk mumları. Çok hisse tek DataFrame'e inince bellek fırlıyordu: 10'arlı parçalarla indirilir."""
+    symbols = list(symbols)
+    if len(symbols) <= YAHOO_PARCA:
+        return _yahoo_fetch1(symbols, period)
+    out, hata = {}, None
+    for i in range(0, len(symbols), YAHOO_PARCA):
+        try:
+            out.update(_yahoo_fetch1(symbols[i:i + YAHOO_PARCA], period))
+        except Exception as e:
+            hata = e
+        bellek_bosalt()
+    if not out and hata:
+        raise hata
+    return out
+
+
+def _yahoo_fetch1(symbols, period):
     df = yf.download(
         tickers=" ".join(symbols), period=period, interval="1m", prepost=True,
-        group_by="ticker", auto_adjust=False, threads=True, progress=False,
+        group_by="ticker", auto_adjust=False, threads=min(4, len(symbols)), progress=False,
     )
     if df is None or df.empty:
         raise RuntimeError("Yahoo boş veri döndürdü")
@@ -1215,6 +1235,7 @@ def yahoo_fetch(symbols, period):
             d[ts] = (float(oi), float(hi), float(li), float(ci), 0.0 if vi != vi else float(vi))
         if d:
             out[s] = d
+    del df
     return out
 
 
@@ -8104,6 +8125,11 @@ def kk_guncelle():
     now = time.time()
     deg = False
     for r in KK["kayit"][-80:]:
+        if r.get("kt") and r["gun"] == gun and r["st"] not in ("sahte", "kırılmadı", "onaysız"):
+            z = _zirve_since(r["sym"], r["kt"])                # kırılımdan sonraki en yüksek mum (gün içinde kalıcı)
+            if z and z > (r.get("zirve") or 0):
+                r["zirve"] = z
+                deg = True
         if r["st"] in ("stop", "K3", "sahte", "kırılmadı", "bitti", "onaysız"):
             continue
         if r["gun"] != gun:                                    # gün bitti
@@ -8220,8 +8246,20 @@ def _kk_sonuc(r):
     return "açık", "gold", None
 
 
+def _zirve_since(sym, t0):
+    """t0 dakikasından itibaren 1 dk mumların en yükseği + anlık fiyat."""
+    b = store.bars.get(sym) or {}
+    t0 = int(t0 // 60 * 60)
+    hs = [v[1] for t, v in b.items() if t >= t0]
+    px = fiyat(sym)
+    if px:
+        hs.append(px)
+    return max(hs) if hs else None
+
+
 def _tepe_pct(r):
-    return round((r["tepe"] / r["giris"] - 1) * 100, 1) if r.get("tepe") and r.get("giris") else None
+    t = max(r.get("tepe") or 0, r.get("zirve") or 0)
+    return round((t / r["giris"] - 1) * 100, 1) if t and r.get("giris") else None
 
 
 def karne_ozet(gun=None, n=30):
@@ -8791,10 +8829,13 @@ def girseydin_listesi(sym, px):
     for r in [r for r in KK["kayit"] if r["sym"] == sym and r["gun"] == _gun_et()][-4:]:
         et, renk, _ = _kk_sonuc(r)
         x = {"giris": r["giris"], "stop": r["stop"], "hed": r.get("hed"), "st": r["st"], "etiket": et, "renk": renk,
-             "t": r.get("t"), "kt": r.get("kt"), "tepe": _tepe_pct(r), "k": r.get("k", 0)}
+             "t": r.get("t"), "kt": r.get("kt"), "tepe": _tepe_pct(r), "k": r.get("k", 0),
+             "zirve": max(r.get("tepe") or 0, r.get("zirve") or 0) or None}
         if px and r["st"] not in ("bekliyor", "kırılmadı"):
-            x["pct"] = round((px / r["giris"] - 1) * 100, 1)
+            x["pct"] = round((px / r["giris"] - 1) * 100, 1)            # şimdi
             x["usd"] = round(planmod.LOT_USD * x["pct"] / 100)
+            if x["tepe"] is not None:                                  # kırılımdan zirveye (kalıcı)
+                x["tepe_usd"] = round(planmod.LOT_USD * x["tepe"] / 100)
         elif px:
             x["kalan"] = round((r["giris"] / px - 1) * 100, 1)
         out.append(x)
@@ -9843,7 +9884,17 @@ def api_bildirim(request: Request):
 
 @app.get("/api/canli")
 def api_canli():
-    return {"liste": canli_listesi(), "piyasa": piyasa_satir(), "t": int(time.time())}
+    L = canli_listesi()
+    tp, gun = {}, _gun_et()                                     # bugün kırılan planların kalıcı zirve yüzdesi
+    for r in KK["kayit"][-80:]:
+        if r["gun"] == gun and r.get("kt"):
+            z = _tepe_pct(r)
+            if z is not None:
+                tp[r["sym"]] = max(z, tp.get(r["sym"], -99))
+    for x in L:
+        if x.get("sym") in tp:
+            x["tepe"] = tp[x["sym"]]
+    return {"liste": L, "piyasa": piyasa_satir(), "t": int(time.time())}
 
 
 @app.get("/api/kk")
