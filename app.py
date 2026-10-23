@@ -102,7 +102,7 @@ BOT_DIR = "bot"
 
 # Bot ayarları (Render → Environment'tan değiştirilebilir)
 BOT_CFG = {
-    "enabled": os.getenv("BOT_ENABLED", "1") == "1",
+    "enabled": os.getenv("BOT_ENABLED", "0") == "1",       # 0: işlem yapan bot kapalı (kod duruyor), sinyal/plan devam
     "capital": float(os.getenv("BOT_CAPITAL", "250")),       # botun toplam parası ($); bağlıysa yeni işlem yok
     "notional": float(os.getenv("BOT_NOTIONAL", "250")),     # işlem başı pozisyon büyüklüğü ($)
     "max_open": int(os.getenv("BOT_MAX_OPEN", "15")),        # aynı anda en fazla açık pozisyon
@@ -1470,6 +1470,7 @@ PUSH_PREF = {"push_islem": 1, "push_plan": 1, "push_haber": 0, "push_rapor": 1,
              "push_super": 1, "tg_super": 1, "tg_sessiz": 1, "tg_kart": 1}
 
 TG_TOKEN = os.getenv("TG_TOKEN", "")
+TG_SADECE_PLAN = os.getenv("TG_SADECE_PLAN", "1") == "1"   # 1: kanala sadece kırılım planları + K1/K2/ilerleme/bozuldu
 TG_CHAT = os.getenv("TG_CHAT", "")
 
 
@@ -1536,6 +1537,8 @@ class Telegram:
 
     def send(self, html, chart=None, key=None, reply=None, sym=None, chat=None, quiet=False, haber=None,
              durum=None, konu=None, thread=None, mk=None):
+        if TG_SADECE_PLAN and not chat and konu != "plan":
+            return                       # kanal sadece kırılım planlarını (ve takiplerini) alır; komut cevapları (chat) gider
         if self.ok:
             self.queue.append({"html": html[:3600], "chart": chart, "key": key, "reply": reply, "sym": sym,
                                "chat": chat, "quiet": quiet, "haber": haber, "durum": durum, "konu": konu,
@@ -6005,30 +6008,24 @@ async def gunun_listesi():
 
 
 def liste_tg(L):
-    sa = datetime.now(TR).strftime("%H:%M")
+    """Kanal formatı: 👀 BUGÜNÜN HİSSE İZLEME LİSTESİ · LONG X üzeri / SHORT Y altı."""
     if not L:
-        return (f"☀️ <b>Günün Listesi</b> · {sa}\n<i>Bugün ölçütleri geçen hisse yok (haber + hacim + seyreltmesiz). "
-                "Bot kendi planlarıyla devam ediyor.</i>")
-    out = [f"☀️ <b>Günün Listesi</b> · {sa}", f"<i>Haberli · hacimli · seyreltmesiz {len(L)} hisse</i>", ""]
-    for i, x in enumerate(L, 1):
-        out.append(f"{i}. <b>{_h(x['sym'])}</b> <code>{fk(x['giris'])}</code> üstü · {_h(trk(x.get('kat') or 'hareket'))}"
-                   f" <i>({fy(x['uzak'])})</i>")
-    det = []
+        return ("👀 <b>BUGÜNÜN HİSSE İZLEME LİSTESİ</b>\n\n<i>Bugün ölçütleri geçen hisse yok (haber + hacim + seyreltmesiz). "
+                "Kırılım gelirse ayrıca görselli mesaj atılacak.</i>")
+    out = ["👀 <b>BUGÜNÜN HİSSE İZLEME LİSTESİ</b>", ""]
     for x in L:
-        y = x.get("yz") or {}
-        parca = [f"öncesi seans {fy(x['pct'], 0)}"]
-        if x.get("dv"):
-            parca.append(f"{x['dv'] / 1e6:.1f} M$ hacim".replace(".", ","))
-        if y.get("float") and y["float"] != "bilinmiyor":
-            parca.append(f"float {y['float']}")
-        if y.get("seyreltme") == "yok":
-            parca.append("seyreltme yok")
-        if y.get("skor") is not None:
-            parca.append(f"YZ {y['skor']:+d}")
-        det.append(f"<b>{_h(x['sym'])}</b>: " + _h(", ".join(parca))
-                   + (f"\n{_h((y.get('katalizor') or tr_or(x.get('haber')) or '')[:110])}" if (y.get("katalizor") or x.get("haber")) else ""))
-    out.append("<blockquote expandable>Neden bunlar?\n" + "\n".join(det) + "</blockquote>")
-    out.append("<i>Her seviye kırılınca ayrı mesaj gelir. Bot sadece hacimli, mum kapanışlı kırılıma girer.</i>")
+        kat = trk(x.get("kat") or "")
+        out.append(f"✅ <b>{_h(x['sym'])}</b>" + (f"  <i>{_h(kat)}</i>" if kat and kat != "liste" else ""))
+        out.append(f"🟢 LONG: <code>{fk(x['giris'])}</code> üzeri")
+        if x.get("stop"):
+            out.append(f"🔴 SHORT: <code>{fk(x['stop'])}</code> altı")
+        out.append("")
+    out += ["🚀 <b>GÖZÜNÜZ BU SEVİYELERDE OLSUN!</b>",
+            "📊 Fiyat ve hacmi takip edin. Kırılım gelmeden acele etmeyin; güçlü hareketi hacimle teyit edin.",
+            "⏱ Giriş: seviyenin üstünde <b>1 dk mum kapanışı</b> sonrası. Kırılınca grafikli mesaj gelecek.",
+            "🔥 Disiplinli takip, doğru zamanlama!",
+            "⚠️ <b>HACİMSİZ ALIŞ YAPMAYIN · STOPSUZ İŞLEME GİRMEYİN</b>",
+            "<i>Yatırım tavsiyesi değildir.</i>"]
     return "\n".join(out)
 
 
@@ -7707,7 +7704,7 @@ def _plan_html(p):
         sey = {"var": "⚠️ seyreltme VAR", "yok": "seyreltme yok"}.get(yz.get("seyreltme"), "seyreltme bilinmiyor")
         ek.append(f"🧠 {_h(str(yz['katalizor'])[:90])} · {sey}")
     return (f"⏳ <b>PLAN · #{_h(p['sym'])}</b>  <code>{fk(px)}</code> → <code>{fk(p['giris'])}</code>\n"
-            f"<i>Kırılırsa giriş: {fk(p['giris'])} üstü kapanış + hacim</i>\n\n"
+            f"<i>Giriş: {fk(p['giris'])} üstünde 1 dk mum kapanırsa (hacimle) alış</i>\n\n"
             + tg_seviyeler(p["giris"], p["stop"], p["hedefler"], px) + "\n"
             f"<blockquote expandable>📌 {_h(tur)} · puan {str(p['puan']).replace('.', ',')}"
             + "".join("\n" + x for x in ek) +

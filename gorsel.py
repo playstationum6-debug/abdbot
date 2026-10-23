@@ -205,7 +205,9 @@ def plan_grafik(bars, p, max_bars=84):
         if not (lo <= v <= hi):
             continue
         if lab == "GİRİŞ":
-            d.line([(x0, Y(v)), (x1 + LAD * S, Y(v))], fill=col + (235,), width=3 * S)
+            d.line([(x0, Y(v)), (x1 + LAD * S, Y(v))], fill=col + (245,), width=4 * S)
+            _yazi = T(f"KIRILIM {fp(v)} · 1 dk mum üstünde kapanınca giriş")
+            _pill(d, x0 + 10 * S, Y(v) - 40 * S, _yazi, col, (255, 255, 255), f(15, "b"), px=10 * S, py=6 * S, r=7 * S)
         elif kal:
             _dash(d, x0, Y(v), x1 + 8 * S, col + (220,), 2 * S, 12 * S, 7 * S)
         else:
