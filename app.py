@@ -1328,7 +1328,8 @@ def parse_ts(s):
 AKIS = {}            # sembol -> {"p": son fiyat, "y": son yön, "dk": {dakika: [alım, satım, adet]}}
 AKIS_DK = 30         # tutulan dakika
 KOTE = {}            # sembol -> (alış, satış, ts)  IEX en iyi alış/satış
-KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}, "sahip": ""}   # kanal ekleri: kırılım karnesi, fiyat alarmı, float, gönderim izleri
+KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}, "sahip": "", "tgplan": {}}
+YEDEK_ACIL = [0]     # plan mesajı gitti: 2 dk içinde yedekle (yeniden başlamada aynı plan tekrar gitmesin)   # kanal ekleri: kırılım karnesi, fiyat alarmı, float, gönderim izleri
 SPREAD_MAX = float(os.getenv("SPREAD_MAX", "2.0"))   # % üstü: plan mesajı gönderilmez (kayma riski)
 
 
@@ -7671,7 +7672,7 @@ async def yz_gun_sonu():
 PLAN_DURUM = {}                # "k:<id>" -> güncel durum satırı
 _PLAN_TG = {"gun": None, "n": 0}
 PLAN_TG_GUNLUK = int(os.getenv("PLAN_TG_GUNLUK", "20"))
-PLAN_TG_HISSE = 3            # aynı hisse için günde en fazla 3 plan mesajı (koşan hissede seviye sürekli kayıyor)
+PLAN_TG_HISSE = 2            # aynı hisse için günde en fazla 2 farklı seviye (yeniden başlamada da korunur)
 PLAN_TG_ARA = 30 * 60        # aynı hisseye iki plan mesajı arasında en az 30 dk
 
 
@@ -7904,7 +7905,8 @@ def _gun_et():
 
 def kk_kaydet():
     backup.data["kk"] = {"kayit": KK["kayit"][-300:], "alarm": KK["alarm"][-40:],
-                         "float": dict(list(KK["float"].items())[-300:]), "gon": KK["gon"], "sahip": KK["sahip"]}
+                         "float": dict(list(KK["float"].items())[-300:]), "gon": KK["gon"], "sahip": KK["sahip"],
+                         "tgplan": KK["tgplan"]}
     backup.dirty = True
 
 
@@ -8463,10 +8465,80 @@ async def krt_loop():
             await krt_run(10)
 
 
+PIN_MAX = int(os.getenv("PIN_MAX", "4"))        # aynı anda sabit kalabilecek plan mesajı
+
+
+def tg_plan_ayni(p, key):
+    """Bugün bu hisseye aynı seviyeden (%2) plan zaten gittiyse yeni mesaj atma: yeni planı eski mesaja bağla
+    (onay, yaklaşma, K1 mesajları eski mesaja yanıt olarak gider; tek fiyat korunur)."""
+    k = KK["tgplan"].get(p["sym"])
+    if not k or k.get("gun") != _gun_et() or k.get("bitti") or not k.get("giris"):
+        return False
+    if abs(p["giris"] / k["giris"] - 1) > 0.02:
+        return False
+    mid = tg.msg.get(k["key"]) or k.get("mid")
+    if not mid:
+        return False
+    p["giris"] = k["giris"]                           # tek fiyat: kanala verilen seviye değişmez
+    tg.msg[key] = mid
+    tg.meta[key] = dict(tg.meta.get(k["key"]) or {"base": _plan_html(p), "durum": None, "photo": True, "sym": p["sym"]})
+    PLAN_DURUM.setdefault(key, DURUM_AD["yeni"])
+    if k["key"] in PLAN_ZINCIR and key not in PLAN_ZINCIR:
+        PLAN_ZINCIR[key] = PLAN_ZINCIR[k["key"]]
+    for r in reversed(KK["kayit"]):                  # karne kaydı yeni plana bağlanır
+        if r["id"] == k.get("id"):
+            r["id"] = p["id"]
+            break
+    k.update(key=key, id=p["id"])
+    return True
+
+
+async def pin_yonet():
+    """Bekleyen plan mesajını sabitle; kırılım mesajı gittikten 15 dk sonra (ya da sahte / iptal olunca) sabitlemeyi kaldır."""
+    if not tg.ok or not TG_CHAT:
+        return
+    gun = _gun_et()
+    now = time.time()
+    degisti = False
+    sabit = sum(1 for k in KK["tgplan"].values() if k.get("pin"))
+    for sym, k in list(KK["tgplan"].items()):
+        if not k.get("mid") and tg.msg.get(k["key"]):
+            k["mid"] = tg.msg[k["key"]]
+            degisti = True
+        if k.get("eski_mid"):
+            await tg.api("unpinChatMessage", chat_id=TG_CHAT, message_id=k["eski_mid"])
+            k["eski_mid"] = None
+            sabit -= 1
+            degisti = True
+        if not k.get("mid"):
+            continue
+        aktif = k.get("gun") == gun and (not k.get("bitti") or (k["bitti"] == "onaylı" and now - (k.get("bitti_t") or 0) < 900))
+        if aktif and not k.get("pin") and not k.get("bitti") and sabit < PIN_MAX:
+            js = await tg.api("pinChatMessage", chat_id=TG_CHAT, message_id=k["mid"], disable_notification=True)
+            if js.get("ok"):
+                k["pin"] = 1
+                sabit += 1
+                degisti = True
+        elif not aktif and k.get("pin"):
+            await tg.api("unpinChatMessage", chat_id=TG_CHAT, message_id=k["mid"])
+            k["pin"] = 0
+            sabit -= 1
+            degisti = True
+        if k.get("gun") != gun and not k.get("pin") and now - (k.get("t") or 0) > 2 * 86400:
+            KK["tgplan"].pop(sym, None)
+            degisti = True
+    if degisti:
+        kk_kaydet()
+
+
 async def kanal_loop():
     """Zamanlı kanal mesajları (ET): 'ekranda olun' 9:50, 11:00, 13:30 · karne 16:10 · ders Cuma 16:20. Her biri günde bir kez."""
     while True:
         await asyncio.sleep(30)
+        try:
+            await pin_yonet()
+        except Exception as e:
+            log.warning("Sabitleme hatası: %s", e)
         try:
             if not tg.ok or not PUSH_PREF.get("tg_plan", 1):
                 continue
@@ -8505,6 +8577,8 @@ def plan_olaylari():
         sym = p["sym"]
         if ev == "yeni":
             SAGLIK["plan"][_gun_et()] = SAGLIK["plan"].get(_gun_et(), 0) + 1
+            if tg_plan_ayni(p, key):
+                continue                                   # aynı hisse, aynı seviye: yeni mesaj yok, eski mesaj sürüyor
             kucuk = sym not in SYMBOLS
             feed_add("plan", sym, f"{fp_(p['giris'])} üstü kırılırsa giriş",
                      sub=f"stop {fp_(p['stop'])}   K1 {fp_(p['hedefler'][0])}   K2 {fp_(p['hedefler'][1])}   "
@@ -8512,6 +8586,9 @@ def plan_olaylari():
                      tone="bilgi", extra={"lvl": p["giris"], "stop": p["stop"], "tgt": p["hedefler"][1], "tg_skip_plan": 1,
                                           "plan": p["id"]})
             hs = _PLAN_TG.setdefault("sym", {}).setdefault(sym, [0, 0])
+            tk_ = KK["tgplan"].get(sym) or {}
+            if tk_.get("gun") == _gun_et():                 # yeniden başlasa da bugünkü gönderimler sayılır
+                hs[0], hs[1] = max(hs[0], tk_.get("n", 0)), max(hs[1], tk_.get("t", 0))
             _neden_tg = ("Telegram kapalı" if not tg.ok else "plan bildirimi kapalı" if not PUSH_PREF.get("tg_plan", 1)
                          else f"puan {p['puan']} (ana listedeki hisse için en az 3,5)" if not (kucuk or p["puan"] >= 3.5)
                          else f"günlük plan sınırı doldu ({PLAN_TG_GUNLUK})" if _PLAN_TG["n"] >= PLAN_TG_GUNLUK
@@ -8531,6 +8608,12 @@ def plan_olaylari():
                 tg.send(_plan_html(p), plan_grafik_ch(p), key=key, sym=sym, quiet=not p.get("liste"), konu="plan",
                         durum=DURUM_AD["yeni"], mk=plan_dugmeler(p))
                 kk_ekle(p)
+                tgp_ = KK["tgplan"].get(sym) or {}
+                KK["tgplan"][sym] = {"gun": _gun_et(), "giris": p["giris"], "key": key, "id": p["id"], "mid": None,
+                                     "pin": 0, "bitti": 0, "n": (tgp_.get("n", 0) + 1) if tgp_.get("gun") == _gun_et() else 1,
+                                     "t": int(time.time()), "eski_mid": tgp_.get("mid") if tgp_.get("pin") else None}
+                YEDEK_ACIL[0] = time.time()
+                kk_kaydet()
                 if sym not in KK["float"]:
                     _gorev(float_plan(p))
                 if kucuk and YZM.hazir and BOT_CFG.get("yz_yetki", 1) and YZM.kalan() > 60:
@@ -8554,6 +8637,11 @@ def plan_olaylari():
                         plan_grafik_ch(p, durum="sahte"), sym=sym, reply=key, konu="plan", quiet=True)
                 zincir(key, "⚠️ tükenme uyarısı · alım yok")
             continue
+        if ev in ("sahte", "iptal", "süre") or (ev == "onaylı" and not p.get("bitis")):
+            tgp_ = KK["tgplan"].get(sym)
+            if tgp_ and not tgp_.get("bitti"):
+                tgp_["bitti"], tgp_["bitti_t"] = ev, int(time.time())
+                YEDEK_ACIL[0] = YEDEK_ACIL[0] or time.time()
         if ev == "onaylı" and not p.get("bitis") and tg.ok and not p.get("onay_tg"):
             p["onay_tg"] = 1
             tg.send(kirilim_html(p), plan_grafik_ch(p, durum="onaylı"), sym=sym, reply=key, konu="plan", quiet=False)
@@ -9076,6 +9164,9 @@ async def housekeeping():
                 store.prune_xvol()
             if backup.enabled and (n * 15) % BACKUP_SEC < 15:
                 await backup.save(engine, bot)
+            elif backup.enabled and YEDEK_ACIL[0] and time.time() - YEDEK_ACIL[0] > 60:
+                YEDEK_ACIL[0] = 0
+                await backup.save(engine, bot)
             elif backup.enabled and bot.dirty_days and time.time() - (backup.last_ok or 0) > 300:
                 # İşlem açılıp kapandıkça dakikada bir yedekle: yeniden başlamada kayıt kaybolmasın
                 await backup.save(engine, bot)
@@ -9106,7 +9197,7 @@ async def lifespan(app):
     if isinstance(backup.data.get("krt"), dict) and backup.data["krt"].get("sonuc"):
         KRT.update(sonuc=backup.data["krt"]["sonuc"], t=backup.data["krt"].get("t") or 0)
     if isinstance(backup.data.get("kk"), dict):
-        for k_ in ("kayit", "alarm", "float", "gon", "sahip"):
+        for k_ in ("kayit", "alarm", "float", "gon", "sahip", "tgplan"):
             if isinstance(backup.data["kk"].get(k_), type(KK[k_])):
                 KK[k_] = backup.data["kk"][k_]
     if isinstance(backup.data.get("liste"), dict):
