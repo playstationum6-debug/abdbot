@@ -8370,7 +8370,8 @@ def karne_gonder():
     sat = []
     for r in o["liste"][:10]:
         sat.append({"sym": r["sym"], "alt": f"kırılım {fk(r['giris'])} · {r['sonuc'].replace(' ✅', '').replace(' ❌', '')}",
-                    "sag": _fy0(r["tepe_pct"]) if r["st"] not in ("kırılmadı", "bekliyor") else "—", "renk": r["renk"],
+                    "sag": (f"{_fy0(r['tepe_pct'])} · +{round(planmod.LOT_USD * r['tepe_pct'] / 100)}$" if (r.get("tepe_pct") or 0) > 0
+                            else _fy0(r["tepe_pct"])) if r["st"] not in ("kırılmadı", "bekliyor") else "—", "renk": r["renk"],
                     "cubuk": min(1, max(0, (r["tepe_pct"] or 0) / 30)) if r.get("tepe_pct") else None})
     png = _kart({"baslik": "Günün Kırılım Karnesi", "rozet": "KARNE", "renk": "up" if (o["wr"] or 0) >= 50 else "acc",
                  "saat": datetime.now(TR).strftime("%d.%m.%Y"), "alt": "Kanala giden her kırılım planının gerçek sonucu",
@@ -8379,10 +8380,22 @@ def karne_gonder():
                              ("Ort. tepe", _fy0(o["ort_tepe"]), "up" if (o["ort_tepe"] or 0) > 0 else None)],
                  "satirlar": sat})
     g = karne_ozet(None, 30)
+    kaz, top = [], 0                                        # her hisse: kırılımdan zirveye % ve 250$ ile kazanç
+    for r in o["liste"]:
+        if r["st"] in ("kırılmadı", "bekliyor", "onaysız") or r.get("tepe_pct") is None:
+            continue
+        usd = round(planmod.LOT_USD * r["tepe_pct"] / 100)
+        top += usd
+        zv = max(r.get("tepe") or 0, r.get("zirve") or 0)
+        kaz.append(f"{'🟢' if r['tepe_pct'] > 0 and r['st'] != 'sahte' else '🔴'} <b>#{_h(r['sym'])}</b> "
+                   f"<code>{fk(r['giris'])}</code> → <code>{fk(zv)}</code> · <b>{_fy0(r['tepe_pct'])}</b> · {'+' if usd >= 0 else ''}{usd}$")
     html = (f"📊 <b>GÜNÜN KIRILIM KARNESİ</b>\n"
             f"Gönderilen {o['gonderilen']} · kırılan {o['kirilan']} · ✅ {o['kazanan']} · ❌ {o['kaybeden']}\n"
-            + (f"Son 30 kırılım: K1+ oranı <b>%{g['wr']}</b> · ortalama tepe {_fy0(g['ort_tepe'])}\n" if g["wr"] is not None else "")
-            + "<i>Kazanan da kaybeden de sayıldı · yatırım tavsiyesi değildir</i>")
+            + (("\n<b>Kırılımdan zirveye</b> (her plana 250$)\n" + "\n".join(kaz[:8])
+                + (f"\n… ve {len(kaz) - 8} hisse daha (tamamı sitede, Karne sekmesinde)" if len(kaz) > 8 else "")
+                + f"\n💰 <b>Toplam: {'+' if top >= 0 else ''}{top}$</b>\n\n") if kaz else "")
+            + (f"Son 30 kırılım: K1+ oranı <b>%{g['wr']}</b> · ortalama zirve {_fy0(g['ort_tepe'])}\n" if g["wr"] is not None else "")
+            + "<i>Zirve = kırılımdan sonraki en yüksek fiyat · kazanan da kaybeden de sayıldı · yatırım tavsiyesi değildir</i>")
     tg.send(html, {"png": png} if png else None, konu="plan", quiet=True)
 
 
