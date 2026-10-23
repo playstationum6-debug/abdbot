@@ -153,7 +153,7 @@ BOT_CFG = {
 RUN_MIN_PRICE = float(os.getenv("RUN_MIN_PRICE", "0"))       # koşan hisselerde en düşük fiyat (0 = sınır yok)
 RUN_MIN_PCT = float(os.getenv("RUN_MIN_PCT", "10"))          # en az yükseliş yüzdesi
 RUN_MAX = int(os.getenv("RUN_MAX", "25"))                    # aynı anda izlenecek en fazla koşan hisse
-BACKUP_SEC = int(os.getenv("BACKUP_SEC", "1800"))
+BACKUP_SEC = int(os.getenv("BACKUP_SEC", "3600"))
 
 # İlk 30'u IEX ile anlık izlenir (ücretsiz planın sembol sınırı 30).
 DEFAULT_SYMBOLS = (
@@ -775,7 +775,7 @@ async def spread_loop():
         await asyncio.sleep(60)
 scanner = tarayici.Scanner(ALPACA_KEY, ALPACA_SECRET, SYMBOLS, min_price=RUN_MIN_PRICE, min_pct=RUN_MIN_PCT,
                            max_runners=RUN_MAX, log=log,
-                           ai_key=os.getenv("GEMINI_API_KEY", ""), ai_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
+                           ai_key=os.getenv("GEMINI_API_KEY", "") if os.getenv("GEMINI_AKTIF", "0") == "1" else "", ai_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
 scanner.sec_ua = os.getenv("SEC_UA", "abdbot paper-trading bot")
 HB = haberci.Haberci(os.getenv("SEC_UA", ""))
 scanner.keep = lambda sym: any(p["sym"] == sym for p in bot.open_positions())
@@ -922,7 +922,11 @@ def list_row(sym):
     s = summary(sym)
     if not s:
         return None
-    return {k: s[k] for k in ("p", "ch", "t", "src", "st", "wd", "sp")}
+    out = {k: s[k] for k in ("p", "ch", "t", "src", "st", "wd", "sp")}
+    o = akis_ozet(sym)
+    if o:
+        out["ab"] = o["pct"]
+    return out
 
 
 def bar_out(ts, b):
@@ -1312,6 +1316,74 @@ def parse_ts(s):
         return time.time()
 
 
+# ----------------------------------------------------------------- alım/satım akışı (tick kuralı, IEX işlemleri)
+AKIS = {}            # sembol -> {"p": son fiyat, "y": son yön, "dk": {dakika: [alım, satım, adet]}}
+AKIS_DK = 30         # tutulan dakika
+
+
+def akis_islem(sym, p, size, ts):
+    """Her işlem: fiyat bir öncekinden yüksekse alıcı, düşükse satıcı agresif; eşitse önceki yön (tick kuralı)."""
+    if not sym or p <= 0 or size <= 0:
+        return
+    a = AKIS.get(sym)
+    if a is None:
+        a = AKIS[sym] = {"p": p, "y": 0, "dk": {}}
+    y = 1 if p > a["p"] else -1 if p < a["p"] else a["y"]
+    a["p"], a["y"] = p, y
+    dk = int(ts // 60)
+    b = a["dk"].get(dk)
+    if b is None:
+        b = a["dk"][dk] = [0.0, 0.0, 0]
+        for k in [k for k in a["dk"] if k < dk - AKIS_DK]:
+            del a["dk"][k]
+    if y > 0:
+        b[0] += size
+    elif y < 0:
+        b[1] += size
+    b[2] += 1
+
+
+def akis_ozet(sym, dk=5):
+    """Son dk dakika: alım hacmi, satım hacmi, alım yüzdesi, etiket. Veri azsa None."""
+    a = AKIS.get(sym)
+    if not a:
+        return None
+    son = int(time.time() // 60)
+    al = sat = n = 0
+    for k, b in a["dk"].items():
+        if k > son - dk:
+            al += b[0]
+            sat += b[1]
+            n += b[2]
+    if n < 5 or al + sat <= 0:
+        return None
+    pct = round(100 * al / (al + sat))
+    et = "alıcılar baskın" if pct >= 60 else "satıcılar baskın" if pct <= 40 else "dengeli"
+    return {"al": int(al), "sat": int(sat), "pct": pct, "n": n, "et": et, "dk": dk}
+
+
+def akis_kova(o):
+    if not o:
+        return "veri yok"
+    return "alıcı baskın" if o["pct"] >= 60 else "satıcı baskın" if o["pct"] <= 40 else "dengeli"
+
+
+def akis_semboller():
+    """IEX akışına abone olunacaklar (en fazla IEX_MAX): ana liste + açık pozisyonlar + koşanlar (en çok yükselen önce)."""
+    s = list(SYMBOLS)
+    try:
+        s += [p["sym"] for p in bot.open_positions()]
+    except Exception:
+        pass
+    run = sorted(scanner.runners.items(), key=lambda kv: -((kv[1] or {}).get("pct") or 0))
+    s += [k for k, _ in run]
+    out = []
+    for x in s:
+        if x and x not in out:
+            out.append(x)
+    return out[:IEX_MAX]
+
+
 async def alpaca_loop():
     if not (ALPACA_KEY and ALPACA_SECRET):
         state.iex = "anahtar yok (.env)"
@@ -1333,17 +1405,40 @@ async def alpaca_loop():
                     if code in (401, 402):
                         raise RuntimeError(f"anahtar reddedildi ({code})")
                     raise RuntimeError(f"Alpaca hata {code}: {err.get('msg')}")
-                await ws.send(json.dumps({"action": "subscribe", "trades": IEX_SYMBOLS}))
+                abone = set(akis_semboller())
+                await ws.send(json.dumps({"action": "subscribe", "trades": sorted(abone)}))
                 state.iex = "bağlı"
                 backoff = 2
-                log.info("Alpaca IEX bağlandı, %d sembol", len(IEX_SYMBOLS))
-                async for raw in ws:
+                log.info("Alpaca IEX bağlandı, %d sembol", len(abone))
+
+                async def abone_guncelle():
+                    while True:
+                        await asyncio.sleep(60)
+                        yeni = set(akis_semboller())
+                        cik, gir = abone - yeni, yeni - abone
+                        if cik:
+                            await ws.send(json.dumps({"action": "unsubscribe", "trades": sorted(cik)}))
+                            for x in cik:
+                                AKIS.pop(x, None)
+                        if gir:
+                            await ws.send(json.dumps({"action": "subscribe", "trades": sorted(gir)}))
+                        abone.clear()
+                        abone.update(yeni)
+                gorev_ = asyncio.create_task(abone_guncelle())
+                try:
+                  async for raw in ws:
                     for m in json.loads(raw):
                         typ = m.get("T")
                         if typ == "t":
-                            store.on_trade(m.get("S"), float(m.get("p", 0)), parse_ts(m.get("t", "")))
+                            ts_ = parse_ts(m.get("t", ""))
+                            p_ = float(m.get("p", 0))
+                            if m.get("S") in IEX_SYMBOLS:
+                                store.on_trade(m.get("S"), p_, ts_)
+                            akis_islem(m.get("S"), p_, float(m.get("s", 0) or 0), ts_)
                         elif typ == "error":
                             log.warning("Alpaca akış hatası: %s", m)
+                finally:
+                    gorev_.cancel()
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -2238,6 +2333,14 @@ def tg_kalite_kaydet(sig):
 
 
 def feed_signal(sig):
+    try:
+        o_ = akis_ozet(sig["sym"])
+        if o_:
+            sig["akis"] = o_
+        if isinstance(sig.get("f"), dict):
+            sig["f"]["akis"] = akis_kova(o_)
+    except Exception:
+        pass
     d = "AL" if sig["dir"] > 0 else "SAT"
     ad = sinyal.SETUP_AD.get(sig["setup"], sig["setup"])
     try:
@@ -2308,6 +2411,9 @@ def sinyal_tg(sig, d, ad):
     out.append("")
     out.append(tg_seviyeler(sig["e"], sig["s"], hed))
     out.append(f"🔥 Güven <b>{sig['conf']}</b> · {derece(sig['conf'])}" + (f" · 🧭 Denetçi <b>{rozet}</b>" if rozet else ""))
+    ak_ = sig.get("akis")
+    if ak_:
+        out.append(f"📊 Alım baskısı <b>%{ak_['pct']}</b> · son {ak_['dk']} dk · {ak_['et']}")
     det = []
     if neden_:
         det.append("🧭 " + _h(neden_[:160]))
@@ -7329,6 +7435,12 @@ def yz_uygun(sig):
         return False
     if YZM.kalan() < 40:                       # analiz / soru için pay bırak
         return False
+    if not sig.get("super"):
+        try:
+            if secici_neden(sig):              # bot zaten girmeyecek (saat dışı, büyük hisse, kapalı kurgu): kota harcama
+                return False
+        except Exception:
+            pass
     den = (sig.get("den") or {}).get("karar")
     return bool(sig.get("super") or sig.get("setup") == "kirilim" or den in ("AL", "BEKLE"))
 
@@ -7383,7 +7495,7 @@ def yz_planla(sig):
         return
     now = time.time()
     _YZ_SAAT[:] = [t for t in _YZ_SAAT if now - t < 3600]
-    if len(_YZ_SAAT) >= 15 and not sig.get("super"):
+    if len(_YZ_SAAT) >= 8 and not sig.get("super"):
         return
     _YZ_SAAT.append(now)
     YZM.bekleyen.add(sig["id"])

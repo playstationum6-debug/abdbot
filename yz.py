@@ -24,7 +24,7 @@ import httpx
 TR = ZoneInfo("Europe/Istanbul")
 PT = ZoneInfo("America/Los_Angeles")          # Gemini günlük kotası Pasifik gece yarısı sıfırlanır
 URL = "https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
-GUNLUK = int(os.getenv("YZ_GUNLUK", "400"))
+GUNLUK = int(os.getenv("YZ_GUNLUK", "150"))
 ARASTIRMA_SN = 45 * 60
 KARNE_MIN = 40            # karar yetkisi için en az sonuç
 KARNE_GUC = 0.15          # AL dediklerinin ort. R'si PAS dediklerinden en az bu kadar iyi olmalı
