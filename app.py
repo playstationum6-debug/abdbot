@@ -98,6 +98,8 @@ GH_TOKEN = os.getenv("GH_TOKEN", "")
 GH_REPO = os.getenv("GH_REPO", "")            # ör. kullaniciadi/abdbot-veri
 GH_PATH = os.getenv("GH_PATH", "durum/state.json")
 SIG_DIR = "sinyaller"
+SIG_GUN = int(os.getenv("SIG_GUN", "7"))      # açılışta yüklenen sinyal geçmişi (gün): fazlası 512 MB'ı taşırıyordu
+BT_YUKLE = os.getenv("BT_YUKLE", "0") == "1"  # geçmiş test sinyalleri (7,7 MB) belleğe alınsın mı (işlem botu kapalıyken gerek yok)
 BOT_DIR = "bot"
 
 # Bot ayarları (Render → Environment'tan değiştirilebilir)
@@ -324,14 +326,15 @@ class Backup:
                 r = await c.get(self._url(SIG_DIR), headers=self._headers())
                 if r.status_code == 200:
                     files = sorted(x["path"] for x in r.json() if x.get("type") == "file" and x["path"].endswith(".json"))
-                    for p in files[-120:]:
+                    for p in files[-SIG_GUN:]:
                         part = await self._get(c, p)
                         if isinstance(part, list):
                             sigs.extend(part)
+                        del part
                 r = await c.get(self._url(BOT_DIR), headers=self._headers())
                 if r.status_code == 200:
                     files = sorted(x["path"] for x in r.json() if x.get("type") == "file" and x["path"].endswith(".json"))
-                    for p in files[-120:]:
+                    for p in files[-(120 if os.getenv("BOT_ENABLED", "0") == "1" else 7):]:
                         part = await self._get(c, p)
                         if isinstance(part, dict):
                             botdays.append(part)
@@ -3875,7 +3878,7 @@ BT_DEVAM = "gecmis/devam.json"
 
 
 async def bt_load():
-    if not backup.enabled:
+    if not backup.enabled or not BT_YUKLE:
         return
     try:
         async with httpx.AsyncClient(timeout=60) as c:
@@ -5437,7 +5440,8 @@ async def kt_load():
         async with httpx.AsyncClient(timeout=60) as c:
             d = await backup._get(c, KT_PATH)
         if isinstance(d, dict):
-            KT.update(sum=d.get("sum"), t=d.get("t") or 0, sigs=kt_ince(d.get("sigs")))
+            KT.update(sum=d.get("sum"), t=d.get("t") or 0, sigs=kt_ince(d.get("sigs")) if BT_YUKLE else [])
+            del d
     except Exception as e:
         log.info("Koşan testi yüklenemedi: %s", e)
 
@@ -5770,7 +5774,7 @@ async def kt_loop():
             continue
         if cal.session(time.time()) == "regular":
             continue
-        if KT["istek"] or time.time() - (KT["t"] or 0) > 3 * 86400:
+        if KT["istek"] or (BT_YUKLE and time.time() - (KT["t"] or 0) > 3 * 86400):
             await kt_run(20)
 
 
