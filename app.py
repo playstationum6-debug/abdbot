@@ -3456,6 +3456,10 @@ async def signal_loop():
         except Exception as e:
             log.warning("Karne takip hatası: %s", e)
         try:
+            yaklasma_kontrol()
+        except Exception as e:
+            log.warning("Yaklaşma kontrolü hatası: %s", e)
+        try:
             plan_gecmis_yedekle()
         except Exception as e:
             log.debug("Plan geçmişi yedeklenemedi: %s", e)
@@ -5815,6 +5819,14 @@ def neden_rapor(sym):
         son_ = next((q for q in reversed(PLAN.gecmis) if q["sym"] == sym), None)
         if son_:
             out.append(f"📐 Son plan {fp_(son_['giris'])}: {son_['st']} — {son_.get('neden', '')}")
+    nd = PLAN.neden.get(sym)
+    if nd and now - nd[0] < 6 * 3600:
+        out.append(f"🧩 Plan motoru ({_sa(nd[0])}): {nd[1]}")
+    tr_ = PLAN_TG_RED.get(sym)
+    if tr_ and now - tr_[0] < 6 * 3600:
+        out.append(f"📵 Telegram'a gitmedi ({_sa(tr_[0])}): {tr_[1]}")
+    if sym not in SYMBOLS and not info and sym not in IZLE:
+        out.append("💡 Bu hisse izlenmiyor: koşan listesine (TradingView/Alpaca yükselenler) ya da kırılım izleme listesine girmesi gerekiyor")
     red = getattr(engine, "red", {}) or {}
     for k, ad in (((sym, "mum"), "🚦 Son kapı"), ((sym, "hizli"), "🏃 Hızlı kırılım")):
         r = red.get(k)
@@ -7813,6 +7825,7 @@ DURUM_AD = {"yeni": "Durum: ⏳ <b>kırılım bekleniyor</b>",
             "süre": "Durum: ⌛ <b>süre doldu</b>"}
 PLAN_FOTO = {}          # key → durum: plan resmi yeni rozetle yeniden çizilecek
 TG_SUSTUR = {}          # sym → gün: o gün plan/sinyal mesajı gönderilmez
+PLAN_TG_RED = {}        # sym → (zaman, neden): plan kuruldu ama Telegram'a gitmedi
 
 
 def sustur_mu(sym):
@@ -8232,6 +8245,15 @@ def plan_olaylari():
                      tone="bilgi", extra={"lvl": p["giris"], "stop": p["stop"], "tgt": p["hedefler"][1], "tg_skip_plan": 1,
                                           "plan": p["id"]})
             hs = _PLAN_TG.setdefault("sym", {}).setdefault(sym, [0, 0])
+            _neden_tg = ("Telegram kapalı" if not tg.ok else "plan bildirimi kapalı" if not PUSH_PREF.get("tg_plan", 1)
+                         else f"puan {p['puan']} (ana listedeki hisse için en az 3,5)" if not (kucuk or p["puan"] >= 3.5)
+                         else f"günlük plan sınırı doldu ({PLAN_TG_GUNLUK})" if _PLAN_TG["n"] >= PLAN_TG_GUNLUK
+                         else f"spread %{spread_yuzde(sym)} > %{SPREAD_MAX}" if (spread_yuzde(sym) or 0) > SPREAD_MAX
+                         else "hisse bugün susturuldu" if sustur_mu(sym)
+                         else f"bu hisseye bugün {PLAN_TG_HISSE} plan gitti" if hs[0] >= PLAN_TG_HISSE
+                         else "aynı hisseye 30 dk içinde ikinci plan" if time.time() - hs[1] < PLAN_TG_ARA else "")
+            if _neden_tg:
+                PLAN_TG_RED[sym] = (time.time(), f"{fp_(p['giris'])} planı: {_neden_tg}")
             if tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK \
                     and (spread_yuzde(sym) or 0) <= SPREAD_MAX \
                     and not sustur_mu(sym) and hs[0] < PLAN_TG_HISSE and time.time() - hs[1] >= PLAN_TG_ARA:
@@ -8328,6 +8350,53 @@ def plan_olaylari():
 
 TAKIP_ESIK = (8, 15, 25, 50, 100)   # kırılım seviyesinden % yükseliş adımları
 TAKIP_HISSE_GUN = 3                   # hisse başına günde en fazla takip mesajı
+
+
+YAKLAS_YUZDE = float(os.getenv("YAKLAS_YUZDE", "1.0"))   # girişe bu kadar % kala "yaklaşıyor" mesajı
+YAKLAS_GUNLUK = 12
+
+
+def yaklasma_kontrol():
+    """Kanala giden plan kırılım seviyesine yaklaşınca (%1) planın altına bir kez 'hazır ol' mesajı."""
+    if not tg.ok or not PUSH_PREF.get("tg_plan", 1):
+        return
+    gun = _gun_et()
+    say = _PLAN_TG.setdefault("yaklas", {})
+    if say.get("gun") != gun:
+        say.clear()
+        say["gun"], say["n"] = gun, 0
+    for sym, p in list(PLAN.planlar.items()):
+        if p.get("st") != "bekliyor" or p.get("yaklas_tg") or say["n"] >= YAKLAS_GUNLUK:
+            continue
+        key = f"k:{p['id']}"
+        if key not in tg.meta or sustur_mu(sym):
+            continue
+        px = fiyat(sym)
+        if not px or not p.get("giris"):
+            continue
+        uz = (p["giris"] / px - 1) * 100
+        if not (0 < uz <= YAKLAS_YUZDE):
+            continue
+        o = akis_ozet(sym) or {}
+        if o.get("pct") is not None and o["pct"] < 45:      # satıcılar baskınsa "hazır ol" deme
+            continue
+        p["yaklas_tg"] = 1
+        say["n"] += 1
+        sat = [f"🎯 <b>KIRILIMA YAKLAŞIYOR · #{_h(sym)}</b>",
+               f"Şimdi <code>{fk(px)}</code> → kırılım <code>{fk(p['giris'])}</code> · <b>%{str(round(uz, 2)).replace('.', ',')} kaldı</b>"]
+        if o.get("pct") is not None:
+            sat.append(f"📊 Alım baskısı %{o['pct']} · son 5 dk")
+        sp = spread_satir(sym)
+        if sp:
+            sat.append(sp)
+        sat.append("⏱ Hazır olun: seviyenin üstünde 5 dk mum kapanışı (hızlı piyasada 1 dk) + 2× hacim gelirse "
+                   "<b>KIRILIM ONAYLANDI</b> mesajı gelecek. Önceden girmeyin.")
+        ch = plan_grafik_ch(p, durum="yaklasiyor")
+        try:
+            ch["v4"]["last"] = px
+        except Exception:
+            pass
+        tg.send("\n".join(sat), ch, sym=sym, reply=key, konu="plan", quiet=False)
 
 
 def plan_takip():

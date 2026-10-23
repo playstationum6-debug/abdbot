@@ -1144,7 +1144,7 @@ nav button[data-t="bot"],[data-go="bot"],[data-go="portfoy"],[data-go="gunluk"],
     <div class="seg" id="tf"><button class="chip3" data-m="1">1dk</button><button class="chip3" data-m="5">5dk</button><button class="chip3" data-m="15">15dk</button><button class="chip3" data-m="D">1G</button></div>
   </div>
   <div class="nedg"><button class="nedb yzb" id="yzB"><svg><use href="#i-brain"/></svg>Yapay zekâ analizi<i>›</i></button>
-  <button class="nedb" id="nedB"><svg><use href="#i-bot"/></svg>Bot neden girmedi?<i>›</i></button></div>
+  <button class="nedb" id="nedB"><svg><use href="#i-bot"/></svg>Neden mesaj gelmedi?<i>›</i></button></div>
   <div class="warn" id="warn"></div>
   <div class="cwrap" id="cwrap">
     <div class="tools" id="tools"><button class="chip3" data-k="line">Çizgi</button><button class="chip3" data-k="sr">Destek/Direnç</button><button class="chip3" data-k="fx">Formasyon</button><button class="chip3" data-k="zn">Alıcı bölgesi</button><button class="chip3" data-k="kn">Kanal</button><button class="chip3" data-k="fvg">FVG</button><button class="chip3" data-k="yp">Yapı</button><button class="chip3" data-k="fib">Fibonacci</button><button class="chip3" data-k="rsi">RSI</button><button class="chip3" data-k="macd">MACD</button><button class="chip3" data-k="vp">Hacim profili</button><button class="chip3" data-k="vol">Hacim ort.</button><button class="chip3" data-k="vwap">VWAP</button><button class="chip3" data-k="ema">EMA 9/21</button><button class="chip3" data-k="e50">EMA 20/50</button><button class="chip3" data-k="kl">Gün seviyeleri</button><button class="chip3" data-k="mk">Sinyaller</button><button class="chip3 fsb" data-k="fs">Tam ekran</button></div>
@@ -2152,7 +2152,7 @@ async function alarmSil(id){try{await fetch('/api/alarm/'+id,{method:'DELETE'});
 let _tpT=0,_tpS='';
 async function tapeAl(){const now=Date.now();if(cur===_tpS&&now-_tpT<4000)return;_tpT=now;_tpS=cur;try{const d=await (await fetch('/api/tape?sym='+encodeURIComponent(cur))).json();let e=$('qts');if(!e){e=document.createElement('div');e.id='qts';e.className='qts';($('qab')||$('qch')).after(e)}
 e.style.display='';const f=x=>x==null?'—':(+x).toFixed(x<1?4:2).replace('.',',');const sp=d.spr;
-e.innerHTML=`<div class="h"><b>Alış / Satış</b><span>IEX · canlı${d.float?` · float ${(d.float/1e6).toFixed(1).replace('.',',')}M${d.float<1e7?' 🔥':''}`:''}</span></div><div class="ba"><span class="up">Alış ${f(d.bid)}</span><span class="dn">Satış ${f(d.ask)}</span>${sp!=null?`<span class="${sp>2?'w':''}">Spread %${String(sp).replace('.',',')}${sp>2?' ⚠️ kayma riski':sp<=1?' ✅':''}</span>`:''}</div>`+
+e.innerHTML=`<div class="h"><b>Alış / Satış</b><span>IEX · canlı${d.float?` · float ${(d.float/1e6).toFixed(1).replace('.',',')}M${d.float<1e7?' 🔥':''}`:''}</span></div>${d.bid==null?'':`<div class="ba"><span class="up">Alış ${f(d.bid)}</span><span class="dn">Satış ${f(d.ask)}</span>${sp!=null?`<span class="${sp>2?'w':''}">Spread %${String(sp).replace('.',',')}${sp>2?' ⚠️ kayma riski':sp<=1?' ✅':''}</span>`:''}</div>`}`+
 (d.son.length?`<div class="h" style="margin-top:6px"><b>Time &amp; Sales</b><span>son işlemler</span></div><table>${d.son.slice(0,12).map(t=>`<tr><td class="${t[3]>0?'up':t[3]<0?'dn':''}">● ${t[3]>0?'BUY':t[3]<0?'SELL':'—'}</td><td>${new Date(t[0]*1000).toLocaleTimeString('tr-TR')}</td><td>${f(t[1])}</td><td>${t[2]}</td></tr>`).join('')}</table>`:'')+
 (d.prof?`<div class="h" style="margin-top:8px"><b>Hacim profili</b><span>bugün · POC ${f(d.prof.poc)}</span></div><div class="qpf">${d.prof.bins.slice().reverse().filter((b,i)=>i%3===1).map(b=>`<div class="${Math.abs(b[0]-d.prof.poc)<(d.prof.hi-d.prof.lo)/24?'poc':''}"><span>${f(b[0])}</span><i style="width:${Math.max(2,b[1]*100)}%"></i></div>`).join('')}</div>`:'')+
 `<div class="h" style="margin-top:8px"><b>🔔 Fiyat alarmı</b><span>Telegram + bildirim</span></div>${(d.alarm||[]).map(a=>`<div class="ba"><span>${a.yon==='ust'?'⬆️':'⬇️'} ${f(a.fiyat)}</span><span class="dn" style="cursor:pointer" onclick="alarmSil('${a.id}')">✕ sil</span></div>`).join('')}<div class="qal"><input id="qalI" inputmode="decimal" placeholder="Fiyat, örn. ${f(d.bid||0)}"><button onclick="alarmKur()">Alarm kur</button></div>`;}catch(err){}}
@@ -2950,7 +2950,7 @@ function superKarne(){const S=(learn&&learn.super)||{},k=(learn&&learn.den&&lear
 function renderSigSup(){const el=$('sigSup');if(el)el.innerHTML=(learn&&(learn.super||learn.den))?superKarne():''}
 
 // ---------------- bot neden girmedi?
-async function nedenAc(sym){$('nedT').textContent=`#${sym} · bot neden girmedi?`;$('nedL').innerHTML='<div class="meta" style="padding:14px 0">Bakılıyor…</div>';$('nedS').classList.add('on');
+async function nedenAc(sym){$('nedT').textContent=`#${sym} · neden mesaj gelmedi?`;$('nedL').innerHTML='<div class="meta" style="padding:14px 0">Bakılıyor…</div>';$('nedS').classList.add('on');
   try{const r=await fetch('/api/neden?s='+encodeURIComponent(sym),{credentials:'same-origin'});const j=await r.json();
     $('nedL').innerHTML=(j.satir||[]).map(x=>`<div class="nedr">${esc(x)}</div>`).join('')||empty('Bilgi yok.')}catch(e){$('nedL').innerHTML=empty('Alınamadı: '+esc(e.message))}}
 $('nedB').addEventListener('click',()=>nedenAc(cur));

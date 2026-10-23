@@ -146,6 +146,7 @@ class Planci:
         self.liste = {}              # sym -> sabah listesi seviyesi {"lvl","stop","hedefler","neden","t"} (gün boyu geçerli)
         self.kote_fn = None          # app.py: sym -> (alış, satış, ts, alış_adet, satış_adet)
         self.retest = {}             # sym -> kırılımı tutmuş plan (eski direnç destek olarak test edilecek)
+        self.neden = {}              # sym -> (zaman, metin): plan neden kurulmadı / kırılım neden onaylanmadı
 
     # ------------------------------------------------------------------ kanal seviyesi
     def kanal_ekle(self, sym, lvl, stop=None, hedefler=None, kanal="", t=None):
@@ -385,7 +386,15 @@ class Planci:
                 return "emir"
         return None
 
+    def _nd(self, sym, T, metin):
+        self.neden[sym] = (T, metin)
+        if len(self.neden) > 400:
+            for k_ in sorted(self.neden, key=lambda z: self.neden[z][0])[:100]:
+                self.neden.pop(k_, None)
+        return []
+
     def _red_kaydet(self, p, neden):
+        self._nd(p["sym"], p.get("son_T") or time.time(), f"{p['giris']} üstüne çıktı ama onay yok: {RED_AD.get(neden, neden)}")
         if p.get("red") != neden:
             p["red"] = neden
             p.setdefault("redler", []).append(neden)
@@ -524,9 +533,9 @@ class Planci:
         # yeni plan
         son = next((q for q in reversed(self.gecmis) if q["sym"] == sym), None)
         if son and T - (son.get("bitis") or son["t"]) < TEKRAR_SN:
-            return []
+            return self._nd(sym, T, "az önce bir plan bitti, 15 dk bekleniyor")
         if c < 0.5:
-            return []
+            return self._nd(sym, T, "fiyat 0,50$ altında")
         kn = self.kanal.get(sym)
         if kn and time.time() - kn["t"] < 6 * 3600 and kn["lvl"] * 0.85 < c < kn["lvl"] * 1.005:
             g = {"ust": kn["lvl"], "tur": {"kanal"}, "dip": None, "puan": AGIRLIK["kanal"]}
@@ -555,24 +564,26 @@ class Planci:
                 self.olay.append(("yeni", pl))
             return []
         if self.uygun and not self.uygun(sym):
-            return []
+            return self._nd(sym, T, "plan listesinde değil (koşan / izleme listesine girmedi)")
         ref = x.get("pc")
         if not ref:
-            return []
+            return self._nd(sym, T, "önceki kapanış bilinmiyor")
         hareket = (c / ref - 1) * 100
         sonen = bool(x.get("hod") and x["hod"] / ref >= 1.25)       # bugün koşup sönen hisse (WFF gibi)
         dv = x.get("ses_dv") or 0
         if (hareket < 2 and not sonen) or dv < (150_000 if x["ses"] != "regular" else 500_000):
-            return []
+            return self._nd(sym, T, f"hareket {hareket:+.1f}% / seans hacmi {dv / 1e3:.0f}K$ — en az +%2 ve "
+                                    f"{'150K' if x['ses'] != 'regular' else '500K'}$ gerekli")
         tum = self.seviyeler(sym, tss, bars, ds, k, x)
         kume = [g for g in tum if g["puan"] >= MIN_PUAN]
         if not kume:
-            return []
+            return self._nd(sym, T, "fiyatın %0,5–12 üstünde güçlü seviye yok: " +
+                            (", ".join(f"{g['ust']} (puan {g['puan']:g})" for g in tum[:4]) or "hiç seviye bulunamadı"))
         g = max(kume, key=lambda g: (g["puan"], -g["ust"]))
         if "kaybedilen" in g["tur"]:
             dip30 = min((bars[tss[i]][2] for i in range(max(ds, k - 30), k + 1)), default=c)
             if c < dip30 * 1.04:
-                return []                                  # düşüş sürüyor: dönüş başlamadan geri alma planı yok
+                return self._nd(sym, T, f"{g['ust']} geri alma seviyesi ama düşüş sürüyor")   # düşüş sürüyor: dönüş başlamadan geri alma planı yok
         pl = self._plan_kur(sym, x, g, T)
         if pl:
             # kural: bir sonraki dirence kadar risk/ödül en az 1:1,5 (yer yoksa plan yok)
@@ -581,7 +592,8 @@ class Planci:
             if ust and r_ > 0:
                 nx = min(ust)
                 if (nx - pl["giris"]) / r_ < RR_MIN:
-                    return []
+                    return self._nd(sym, T, f"{pl['giris']} planı: sonraki direnç {nx} çok yakın, risk/ödül "
+                                            f"1:{(nx - pl['giris']) / r_:.1f} (en az 1:{RR_MIN})")
                 if nx > pl["hedefler"][1]:
                     pl["hedefler"][2] = round(nx, 4)
                 pl["sonraki"] = round(nx, 4)
