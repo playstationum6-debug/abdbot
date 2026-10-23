@@ -20,6 +20,7 @@ import hashlib
 import hmac
 import json
 import math
+import random
 import logging
 import os
 import secrets
@@ -1362,7 +1363,7 @@ def parse_ts(s):
 AKIS = {}            # sembol -> {"p": son fiyat, "y": son yön, "dk": {dakika: [alım, satım, adet]}}
 AKIS_DK = 30         # tutulan dakika
 KOTE = {}            # sembol -> (alış, satış, ts)  IEX en iyi alış/satış
-KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}, "sahip": "", "tgplan": {}, "cizgi": []}
+KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}, "sahip": "", "tgplan": {}, "cizgi": [], "tahmin": []}
 KOMISYON = float(os.getenv("KOMISYON", "1.5"))     # satış başına broker komisyonu ($)
 YEDEK_ACIL = [0]     # plan mesajı gitti: 2 dk içinde yedekle (yeniden başlamada aynı plan tekrar gitmesin)   # kanal ekleri: kırılım karnesi, fiyat alarmı, float, gönderim izleri
 SPREAD_MAX = float(os.getenv("SPREAD_MAX", "2.0"))   # % üstü: plan mesajı gönderilmez (kayma riski)
@@ -7914,6 +7915,8 @@ def _plan_html(p):
         ek.append("📣 Seviye takip edilen bir kanaldan; onayı bot kendi kuralıyla verir")
     if p.get("liste"):
         ek.append("☀️ Günün Listesi'nde")
+    ih = p.get("ih") or {}
+    ih_satir = (f"🧠 Tutma ihtimali <b>%{ih['p']}</b> <i>(geçmiş {ih['n']} kırılımdan" + (" · " + _h(", ".join(ih["neden"])) if ih.get("neden") else "") + ")</i>\n") if ih.get("p") is not None else ""
     yz = p.get("yz") or {}
     if yz.get("katalizor"):
         sey = {"var": "⚠️ seyreltme VAR", "yok": "seyreltme yok"}.get(yz.get("seyreltme"), "seyreltme bilinmiyor")
@@ -7921,6 +7924,7 @@ def _plan_html(p):
     return (f"⏳ <b>PLAN · #{_h(p['sym'])}</b>  <code>{fk(px)}</code> → <code>{fk(p['giris'])}</code>\n"
             f"<i>Giriş: {fk(p['giris'])} üstünde 1 dk mum kapanırsa (2× hacimle) limit emirle alış</i>\n\n"
             + tg_seviyeler(p["giris"], p["stop"], p["hedefler"], px) + "\n"
+            + ih_satir
             + (spread_satir(p["sym"]) + "\n" if spread_satir(p["sym"]) else "")
             + (float_satir(p["sym"]) + "\n" if float_satir(p["sym"]) else "")
             + _poc_satir(p)
@@ -8033,7 +8037,7 @@ def _gun_et():
 def kk_kaydet():
     backup.data["kk"] = {"kayit": KK["kayit"][-300:], "alarm": KK["alarm"][-40:],
                          "float": dict(list(KK["float"].items())[-300:]), "gon": KK["gon"], "sahip": KK["sahip"],
-                         "tgplan": KK["tgplan"], "cizgi": KK["cizgi"][-120:]}
+                         "tgplan": KK["tgplan"], "cizgi": KK["cizgi"][-120:], "tahmin": KK["tahmin"][-200:]}
     backup.dirty = True
 
 
@@ -8101,7 +8105,62 @@ async def float_plan(p):
             m["durum"] = None
 
 
-def kk_ekle(p, kirildi=False):
+OGREN_ESIK = int(os.getenv("OGREN_ESIK", "40"))      # tutma ihtimali bunun altındaysa plan kanala gitmez
+OGREN_MIN = int(os.getenv("OGREN_MIN", "30"))        # filtre ancak bu kadar sonuçlanmış kırılım birikince devreye girer
+_OZ_AD = {"tur": "seviye", "fiyat": "fiyat", "saat": "saat", "spr": "spread", "puan": "puan"}
+
+
+def _oz(giris, tur, spr, puan, t):
+    """Plan gönderilirken bilinen özellikler (öğrenme bunlara göre gruplar)."""
+    m = (datetime.fromtimestamp(t, ET).hour * 60 + datetime.fromtimestamp(t, ET).minute) - 570
+    return {"tur": (tur or ["?"])[0],
+            "fiyat": "1$ altı" if giris < 1 else "1–5$" if giris < 5 else "5–20$" if giris < 20 else "20$ üstü",
+            "saat": "açılış öncesi" if m < 0 else "ilk saat" if m < 60 else "öğle" if m < 240 else "son saatler" if m < 390 else "kapanış sonrası",
+            "spr": "?" if spr is None else "dar" if spr <= 0.5 else "orta" if spr <= 1.5 else "geniş",
+            "puan": "?" if puan is None else "güçlü" if puan >= 5 else "orta" if puan >= 3.5 else "zayıf"}
+
+
+def _oz_r(r):
+    return r.get("oz") or _oz(r["giris"], r.get("tur"), r.get("spr"), r.get("puan"), r["t"])
+
+
+def _oz_etiket(f, v):
+    return planmod.TUR_AD.get(v, v) if f == "tur" else f"{_OZ_AD[f]} {v}"
+
+
+def tutma_ihtimali(oz):
+    """Geçmiş kırılımlardan öğrenilen 'K1+'ya ulaşma' ihtimali. Az örnekli gruplar genel orana çekilir (büzme),
+    böylece 2 işlemlik '%100' gibi sonuçlar tahmini bozamaz."""
+    Rs = [(r, _kk_sonuc(r)[2]) for r in KK["kayit"] if r.get("kt")]
+    Rs = [(r, ok) for r, ok in Rs if ok is not None]
+    n = len(Rs)
+    if n < 10:
+        return None
+    k = sum(1 for _, ok in Rs if ok)
+    p0 = (k + 3) / (n + 6)
+    lg = lambda x: math.log(x / (1 - x))
+    lo, katki = lg(p0), []
+    for f, v in oz.items():
+        if v == "?":
+            continue
+        G = [ok for r, ok in Rs if _oz_r(r).get(f) == v]
+        if not G:
+            continue
+        rate = (sum(G) + 8 * p0) / (len(G) + 8)
+        d = (lg(rate) - lg(p0)) * 0.6
+        lo += d
+        katki.append((d, f, v, sum(G), len(G)))
+    pr = 1 / (1 + math.exp(-lo))
+    katki.sort(key=lambda x: -abs(x[0]))
+    neden = [f"{_oz_etiket(f, v)} %{round(100 * a / b)} ({b})" for d, f, v, a, b in katki[:2] if abs(d) > 0.05]
+    return {"p": round(100 * pr), "n": n, "genel": round(100 * k / n), "neden": neden, "aktif": n >= OGREN_MIN}
+
+
+def _gorunur(r):
+    return not r.get("gizli")
+
+
+def kk_ekle(p, kirildi=False, gizli=False):
     e_ = p.get("e") or p["giris"]
     KK["kayit"].append({"id": p["id"], "sym": p["sym"], "giris": e_ if kirildi else p["giris"], "stop": p["stop"],
                         "hed": p["hedefler"][:3], "t": int(time.time()), "gun": _gun_et(),
@@ -8109,7 +8168,9 @@ def kk_ekle(p, kirildi=False):
                         "tepe": e_ if kirildi else None, "dip": e_ if kirildi else None, "k": 0, "tur": p.get("tur") or [],
                         "puan": p.get("puan"), "spr": spread_yuzde(p["sym"]),
                         "ab": (akis_ozet(p["sym"]) or {}).get("pct") if kirildi else None,
-                        "kural": list(p.get("kurallar") or [])})
+                        "kural": list(p.get("kurallar") or []), "vr": p.get("vr") if kirildi else None,
+                        "oz": _oz(p["giris"], p.get("tur"), spread_yuzde(p["sym"]), p.get("puan"), time.time()),
+                        "ih": (p.get("ih") or {}).get("p"), **({"gizli": 1} if gizli else {})})
     del KK["kayit"][:-300]
     kk_kaydet()
 
@@ -8158,7 +8219,8 @@ def kk_guncelle():
                 if p and p.get("kurallar"):
                     r["kural"] = list(dict.fromkeys((r.get("kural") or []) + p["kurallar"]))
                 o = akis_ozet(r["sym"])
-                r.update(st="kırıldı", kt=now, tepe=px, dip=px, ab=(o or {}).get("pct"), spr=spread_yuzde(r["sym"]) or r.get("spr"))
+                r.update(st="kırıldı", kt=now, tepe=px, dip=px, ab=(o or {}).get("pct"), spr=spread_yuzde(r["sym"]) or r.get("spr"),
+                         vr=(p or {}).get("vr"))
                 deg = True
             elif pst in ("iptal", "süre"):
                 r["st"] = "onaysız" if (r.get("ust_max") or 0) >= r["giris"] else "kırılmadı"
@@ -8228,6 +8290,8 @@ def ilerleme_kontrol():
     gun = _gun_et()
     gruplar = {}
     for r in KK["kayit"][-120:]:
+        if not _gorunur(r):
+            continue
         if r["gun"] == gun and r["st"] in ("kırıldı", "K3", "bitti") or (r["gun"] == gun and r["st"] == "stop" and r.get("k")):
             gruplar.setdefault(r["sym"], []).append(r)
     for sym, L in gruplar.items():
@@ -8299,7 +8363,7 @@ def _tepe_pct(r):
 
 
 def karne_ozet(gun=None, n=30):
-    K = [r for r in KK["kayit"] if (gun is None or r["gun"] == gun)]
+    K = [r for r in KK["kayit"] if (gun is None or r["gun"] == gun) and _gorunur(r)]
     kir = [r for r in K if r["st"] not in ("bekliyor", "kırılmadı", "onaysız")]
     son = kir[-n:] if gun is None else kir
     kaz = [r for r in son if _kk_sonuc(r)[2] is True]
@@ -8332,29 +8396,77 @@ def radar_listesi(n=8):
     return out[:n]
 
 
-def ders_metni(r, iyi):
+def _ort(L):
+    L = [x for x in L if x is not None]
+    return sum(L) / len(L) if L else None
+
+
+def ders_metni(r, iyi, grup=None):
+    """İşlemin kendi rakamları + kazananlarla kaybedenlerin farkı. Şablon değil: her işlemde rakamlar değişir."""
     neden = []
     tur = " + ".join(planmod.TUR_AD.get(t, t) for t in (r.get("tur") or []))
     if tur:
         neden.append(f"Seviye: {tur}")
+    oz = _oz_r(r)
+    bil = []
+    if r.get("vr") is not None:
+        bil.append(f"hacim {r['vr']:.1f}×".replace(".", ","))
     if r.get("ab") is not None:
-        neden.append(f"Kırılımda alım baskısı %{r['ab']}" + (" (alıcılar baskın)" if r["ab"] >= 60 else " (zayıf)" if r["ab"] <= 45 else ""))
+        bil.append(f"alım %{r['ab']}")
     if r.get("spr") is not None:
-        neden.append(f"Spread %{str(r['spr']).replace('.', ',')}" + (" (geniş, kayma)" if r["spr"] > 1.5 else " (dar)" if r["spr"] <= 0.5 else ""))
+        bil.append(f"spread %{str(r['spr']).replace('.', ',')}")
+    bil.append(oz["saat"])
+    neden.append("Kırılım anı: " + " · ".join(bil))
     tp = _tepe_pct(r)
     if iyi:
-        neden.append(f"Sonuç: K{r['k']} geldi, kırılımdan tepe {fy(tp)}")
-        ders = "Hacimli, alıcının baskın olduğu kırılımda seviyenin üstünde 1 dk kapanışı beklemek ve K1'de stopu girişe çekmek kazandırdı."
+        neden.append(f"Sonuç: K{r['k']} geldi, kırılımdan zirve {fy(tp)}")
     else:
-        neden.append("Sonuç: " + ("kırılım tutmadı, fiyat seviyenin altına döndü" if r["st"] == "sahte" else "stop oldu"))
-        zay = []
-        if r.get("ab") is not None and r["ab"] < 55:
-            zay.append("alım baskısı zayıfken")
-        if r.get("spr") and r["spr"] > 1.5:
-            zay.append("spread genişken")
-        ders = ("Kırılım " + " ve ".join(zay) + " geldi; böyle durumlarda girmemek daha iyi.") if zay else \
-            "Hacim desteği olmayan kırılım tutmadı; stop sayesinde zarar küçük kaldı. Stopsuz girme."
+        neden.append("Sonuç: " + ("sahte kırılım, fiyat hemen seviyenin altına döndü" if r["st"] == "sahte" else
+                                  f"önce zirve {fy(tp)} yaptı, sonra stop oldu" if (tp or 0) >= 1 else "stop oldu"))
+    kaz, kay = (grup or ([], []))
+    fark = []                                          # bu işlemi kazananlardan / kaybedenlerden ayıran rakamlar
+    for ad, f_, iyi_yon in (("hacim", "vr", 1), ("alım baskısı", "ab", 1), ("spread", "spr", -1)):
+        v, a_, b_ = r.get(f_), _ort([x.get(f_) for x in kaz]), _ort([x.get(f_) for x in kay])
+        if v is None or a_ is None or b_ is None or a_ == b_:
+            continue
+        ayri = (a_ - b_) * iyi_yon > 0                 # bu özellik kazananları gerçekten ayırıyor mu
+        if not ayri:
+            continue
+        bicim = (lambda x: f"{x:.1f}×".replace(".", ",")) if f_ == "vr" else (lambda x: f"%{x:.0f}") if f_ == "ab" else (lambda x: f"%{x:.1f}".replace(".", ","))
+        if iyi and (v - b_) * iyi_yon > 0:
+            fark.append((abs(v - b_) / (abs(b_) or 1), f"bu kırılımda {ad} {bicim(v)}, kaybedenlerin ortalaması {bicim(b_)}"))
+        if not iyi and (a_ - v) * iyi_yon > 0:
+            fark.append((abs(a_ - v) / (abs(a_) or 1), f"bu kırılımda {ad} {bicim(v)}, kazananların ortalaması {bicim(a_)}"))
+    fark.sort(key=lambda x: -x[0])
+    if fark:
+        ders = ("Fark: " if iyi else "Eksik olan: ") + "; ".join(x[1] for x in fark[:2]) + "."
+    elif iyi:
+        ders = f"Bu hafta {oz['saat']} ve {_oz_etiket('tur', oz['tur'])} kurulumu tuttu; ayırt edici rakam için daha çok örnek gerekiyor."
+    else:
+        ders = ("Kırılımdan sonra yükselip seviyenin altına döndü; böyle durumlarda +%2'de stopu girişe çekmek zararı önlerdi."
+                if (tp or 0) >= 1 else "Kırılım hiç ivme kazanmadı; stop zararı küçük tuttu. Stopsuz girilmemeli.")
     return neden, ders
+
+
+def ogrenme_ozet():
+    """Site için: öğrenme ne biliyor? En iyi / en kötü gruplar (yeterli örnekli)."""
+    Rs = [(r, _kk_sonuc(r)[2]) for r in KK["kayit"] if r.get("kt")]
+    Rs = [(r, ok) for r, ok in Rs if ok is not None]
+    if not Rs:
+        return {"n": 0}
+    d = {}
+    for r, ok in Rs:
+        for f, v in _oz_r(r).items():
+            if v == "?":
+                continue
+            x = d.setdefault((f, v), [0, 0])
+            x[0] += 1 if ok else 0
+            x[1] += 1
+    G = [{"ad": _oz_etiket(f, v), "wr": round(100 * a / b), "n": b} for (f, v), (a, b) in d.items() if b >= 4]
+    G.sort(key=lambda x: (-x["wr"], -x["n"]))
+    return {"n": len(Rs), "genel": round(100 * sum(1 for _, ok in Rs if ok) / len(Rs)), "esik": OGREN_ESIK, "min": OGREN_MIN,
+            "aktif": len(Rs) >= OGREN_MIN, "iyi": G[:3], "kotu": [x for x in G[::-1] if x["wr"] < 50][:3],
+            "gizli": sum(1 for r in KK["kayit"] if r.get("gizli") and r["gun"] == _gun_et())}
 
 
 def kural_karnesi(gun_sayi=7):
@@ -8362,7 +8474,7 @@ def kural_karnesi(gun_sayi=7):
     t0 = time.time() - gun_sayi * 86400
     d = {}
     for r in KK["kayit"]:
-        if r["t"] < t0:
+        if r["t"] < t0 or not _gorunur(r):
             continue
         ok = _kk_sonuc(r)[2]
         if ok is None:
@@ -8378,12 +8490,14 @@ def kural_karnesi(gun_sayi=7):
 
 def ders_listesi(gun_sayi=7):
     t0 = time.time() - gun_sayi * 86400
-    K = [r for r in KK["kayit"] if r["t"] >= t0 and r["st"] not in ("bekliyor", "kırılmadı")]
-    iyi = sorted([r for r in K if _kk_sonuc(r)[2] is True], key=lambda r: -(_tepe_pct(r) or 0))[:3]
-    kot = sorted([r for r in K if _kk_sonuc(r)[2] is False], key=lambda r: (r.get("dip") or r["giris"]) / r["giris"])[:3]
+    K = [r for r in KK["kayit"] if r["t"] >= t0 and r["st"] not in ("bekliyor", "kırılmadı") and _gorunur(r)]
+    tum_kaz = [r for r in K if _kk_sonuc(r)[2] is True]
+    tum_kay = [r for r in K if _kk_sonuc(r)[2] is False]
+    iyi = sorted(tum_kaz, key=lambda r: -(_tepe_pct(r) or 0))[:3]
+    kot = sorted(tum_kay, key=lambda r: (r.get("dip") or r["giris"]) / r["giris"])[:3]
     out = []
     for r, ok in [(x, True) for x in iyi] + [(x, False) for x in kot]:
-        ne, de = ders_metni(r, ok)
+        ne, de = ders_metni(r, ok, (tum_kaz, tum_kay))
         out.append({"sym": r["sym"], "id": r["id"], "iyi": ok, "gun": r["gun"], "giris": r["giris"], "tepe_pct": _tepe_pct(r),
                     "sonuc": _kk_sonuc(r)[0], "neden": ne, "ders": de})
     return out
@@ -8922,12 +9036,12 @@ def canli_listesi():
 def girseydin_listesi(sym, px):
     """Bugün bu hissede kanala verilen her seviye: durum + 'buradan girseydin şimdi %X · 250$ ile ±Y$'."""
     out = []
-    for r in [r for r in KK["kayit"] if r["sym"] == sym and r["gun"] == _gun_et()][-4:]:
+    for r in [r for r in KK["kayit"] if r["sym"] == sym and r["gun"] == _gun_et() and _gorunur(r)][-4:]:
         et, renk, _ = _kk_sonuc(r)
         x = {"giris": r["giris"], "stop": r["stop"], "hed": r.get("hed"), "st": r["st"], "etiket": et, "renk": renk,
              "t": r.get("t"), "kt": r.get("kt"), "tepe": _tepe_pct(r), "k": r.get("k", 0),
              "zirve": max(r.get("tepe") or 0, r.get("zirve") or 0) or None, "geri": _geri(r),
-             "plan_pct": (_plan_sonuc(r) or (None, None))[0], "plan_usd": (_plan_sonuc(r) or (None, None))[1]}
+             "plan_pct": (_plan_sonuc(r) or (None, None))[0], "plan_usd": (_plan_sonuc(r) or (None, None))[1], "ih": r.get("ih")}
         if px and r["st"] not in ("bekliyor", "kırılmadı"):
             x["pct"] = round((px / r["giris"] - 1) * 100, 1)            # şimdi
             x["usd"] = round(planmod.LOT_USD * x["pct"] / 100)
@@ -9023,7 +9137,7 @@ def kurulum_gecmisi(tur):
 
 
 def hisse_gecmis(sym):
-    K = [r for r in KK["kayit"] if r["sym"] == sym][-10:]
+    K = [r for r in KK["kayit"] if r["sym"] == sym and _gorunur(r)][-10:]
     satir = [{"gun": r["gun"], "giris": r["giris"], "sonuc": _kk_sonuc(r)[0], "renk": _kk_sonuc(r)[1], "tepe": _tepe_pct(r)} for r in reversed(K)]
     kir = [r for r in K if r["st"] not in ("bekliyor", "kırılmadı")]
     return {"n": len(K), "kirilan": len(kir), "kazanan": sum(1 for r in kir if _kk_sonuc(r)[2] is True),
@@ -9162,9 +9276,20 @@ def plan_olaylari():
                          else "hisse bugün susturuldu" if sustur_mu(sym)
                          else f"bu hisseye bugün {PLAN_TG_HISSE} plan gitti" if hs[0] >= PLAN_TG_HISSE
                          else "aynı hisseye 30 dk içinde ikinci plan" if time.time() - hs[1] < PLAN_TG_ARA else "")
+            try:
+                p["ih"] = tutma_ihtimali(_oz(p["giris"], p.get("tur"), spread_yuzde(sym), p.get("puan"), time.time()))
+            except Exception as e:
+                p["ih"] = None
+                log.debug("Öğrenme tahmini hatası: %s", e)
+            _ih = p.get("ih") or {}
+            _ogren_red = bool(_ih.get("aktif") and _ih["p"] < OGREN_ESIK and not p.get("liste"))
+            if _ogren_red and not _neden_tg:
+                _neden_tg = f"öğrenme: tutma ihtimali %{_ih['p']} (< %{OGREN_ESIK})"
             if _neden_tg:
                 PLAN_TG_RED[sym] = (time.time(), f"{fp_(p['giris'])} planı: {_neden_tg}")
-            if _sec_ != "seyreltme" and tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK \
+            if _ogren_red and _sec_ != "seyreltme" and not any(r_["id"] == p["id"] for r_ in KK["kayit"][-60:]):
+                kk_ekle(p, gizli=True)                       # kanala gitmez ama sonucu ölçülür: öğrenme kör kalmaz
+            if not _ogren_red and _sec_ != "seyreltme" and tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK \
                     and (spread_yuzde(sym) or 0) <= SPREAD_MAX \
                     and not sustur_mu(sym) and hs[0] < PLAN_TG_HISSE and time.time() - hs[1] >= PLAN_TG_ARA:
                 hs[0] += 1
@@ -9788,7 +9913,7 @@ async def lifespan(app):
     if isinstance(backup.data.get("krt"), dict) and backup.data["krt"].get("sonuc"):
         KRT.update(sonuc=backup.data["krt"]["sonuc"], t=backup.data["krt"].get("t") or 0)
     if isinstance(backup.data.get("kk"), dict):
-        for k_ in ("kayit", "alarm", "float", "gon", "sahip", "tgplan", "cizgi"):
+        for k_ in ("kayit", "alarm", "float", "gon", "sahip", "tgplan", "cizgi", "tahmin"):
             if isinstance(backup.data["kk"].get(k_), type(KK[k_])):
                 KK[k_] = backup.data["kk"][k_]
     if isinstance(backup.data.get("liste"), dict):
@@ -10048,6 +10173,11 @@ async def api_hisse(request: Request, sym: str, bars: int = 0):
            "cizgi": [c for c in KK["cizgi"] if c["sym"] == sym and c["gun"] == _gun_et()], "komisyon": KOMISYON}
     tur_ = (p or {}).get("tur") or (kr or {}).get("tur") or []
     try:
+        if p:
+            out["ih"] = tutma_ihtimali(_oz(p["giris"], p.get("tur"), spread_yuzde(sym), p.get("puan"), time.time()))
+    except Exception:
+        pass
+    try:
         out["kurulum"] = kurulum_gecmisi(tur_)
         g0 = next((g for g in out["girseydin"] if g.get("kt")), None) or (out["girseydin"][0] if out["girseydin"] else None)
         gir_ = (g0 or {}).get("giris") or (plan or {}).get("giris")
@@ -10083,7 +10213,7 @@ def api_canli():
     L = canli_listesi()
     tp, gun = {}, _gun_et()                                     # bugün kırılan planların kalıcı zirve yüzdesi
     for r in KK["kayit"][-80:]:
-        if r["gun"] == gun and r.get("kt"):
+        if r["gun"] == gun and r.get("kt") and _gorunur(r):
             z = _tepe_pct(r)
             if z is not None:
                 tp[r["sym"]] = max(z, tp.get(r["sym"], -99))
@@ -10098,7 +10228,7 @@ def api_kk():
     """Kırılım karnesi + radar + haftanın dersleri + kural testi + sağlık."""
     return {"karne": karne_ozet(None, 30), "bugun": karne_ozet(_gun_et()), "radar": radar_listesi(), "ders": ders_listesi(7),
             "kural": kural_karnesi(7), "test": KRT.get("sonuc"), "test_t": KRT.get("t"), "test_run": KRT["running"],
-            "test_prog": KRT.get("prog"), "saglik": saglik_satirlari(), "cizgi": cizgi_karne()}
+            "test_prog": KRT.get("prog"), "saglik": saglik_satirlari(), "cizgi": cizgi_karne(), "ogrenme": ogrenme_ozet()}
 
 
 @app.post("/api/kuraltest")
@@ -10160,6 +10290,112 @@ async def api_cizgi(req: Request):
     izle_guncelle()
     kk_kaydet()
     return {"ok": True, "cizgi": c_}
+
+
+def _mum_aralik(sym, t0, t1):
+    """t0..t1 arası 1 dk OHLCV: önce bellek, yoksa veritabanı."""
+    b = store.bars.get(sym) or {}
+    L = [[t, *b[t][:5]] for t in sorted(b) if t0 <= t <= t1]
+    if len(L) < 10:
+        try:
+            L = [list(x) for x in store.db.execute("SELECT ts, o, h, l, c, v FROM bars WHERE symbol=? AND ts BETWEEN ? AND ? ORDER BY ts",
+                                                     (sym, t0, t1)).fetchall()]
+        except Exception:
+            L = []
+    return [[int(x[0]), *[round(v or 0, 4) for v in x[1:5]], int(x[5] or 0)] for x in L]
+
+
+_OYUN_C = {}
+
+
+@app.get("/api/oyun/grafik")
+def api_oyun_grafik(request: Request):
+    """Grafik okuma / çizgi avcısı: geçmiş gerçek bir kırılım (öncesi 40 dk + sonrası 60 dk) ve sonucu."""
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    A = [r for r in KK["kayit"] if r.get("kt") and _kk_sonuc(r)[2] is not None and r["gun"] != _gun_et()]
+    random.shuffle(A)
+    for r in A[:12]:
+        kt = int(r["kt"] // 60 * 60)
+        B = _OYUN_C.get(r["id"]) or _mum_aralik(r["sym"], kt - 40 * 60, kt + 60 * 60)
+        if len(B) < 50:
+            continue
+        _OYUN_C[r["id"]] = B
+        if len(_OYUN_C) > 30:
+            _OYUN_C.pop(next(iter(_OYUN_C)))
+        ok = _kk_sonuc(r)[2]
+        return {"ok": True, "id": r["id"], "sym": r["sym"], "gun": r["gun"], "bars": B, "kt": kt, "giris": r["giris"],
+                "stop": r.get("stop"), "hed": r.get("hed"), "tuttu": ok, "sonuc": _kk_sonuc(r)[0], "tepe": _tepe_pct(r),
+                "tur": " + ".join(planmod.TUR_AD.get(t, t) for t in (r.get("tur") or []))}
+    return {"ok": False, "hata": "Henüz oyun için yeterli geçmiş kırılım yok. Birkaç gün sonra tekrar dene."}
+
+
+def _tahmin_sonuc():
+    """Canlı tahminleri sonuçlandır: plan kırıldı mı (fiyat girişi geçti mi) ve K1'e gitti mi."""
+    deg = False
+    for t_ in KK["tahmin"][-120:]:
+        if t_.get("dogru") is not None:
+            continue
+        r = next((x for x in reversed(KK["kayit"]) if x["sym"] == t_["sym"] and x["gun"] == t_["gun"]
+                  and abs(x["giris"] - t_["giris"]) / t_["giris"] < 0.005), None)
+        kirdi = None
+        if r is not None and r.get("kt"):
+            kirdi = r["st"] != "sahte"                     # sahte kırılım = kırmadı sayılır
+        elif r is None and t_["gun"] == _gun_et():
+            z = _zirve_since(t_["sym"], t_["t"])
+            kirdi = True if z and z >= t_["giris"] * 1.002 else None
+        elif t_["gun"] != _gun_et():                       # gün bitti, kırılım kaydı yok
+            B = _mum_aralik(t_["sym"], t_["t"], t_["t"] + 8 * 3600)
+            kirdi = bool(B and max(b[2] for b in B) >= t_["giris"] * 1.002) if r is None else False
+        if kirdi is None:
+            continue
+        t_["kirdi"] = kirdi
+        t_["dogru"] = (t_["tahmin"] == "kirar") == kirdi
+        deg = True
+    if deg:
+        kk_kaydet()
+
+
+@app.get("/api/oyun")
+def api_oyun(request: Request):
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    _tahmin_sonuc()
+    T = KK["tahmin"]
+    S = [t for t in T if t.get("dogru") is not None]
+    seri = 0
+    for t in reversed(S):
+        if not t["dogru"]:
+            break
+        seri += 1
+    bek = [x for x in canli_listesi() if x.get("st") in ("bekliyor", "yaklasiyor", "yaklaşıyor")]
+    return {"bugun": [t for t in T if t["gun"] == _gun_et()], "bekleyen": bek[:12],
+            "puan": sum(10 for t in S if t["dogru"]), "dogru": sum(1 for t in S if t["dogru"]), "n": len(S), "seri": seri,
+            "son": list(reversed(S[-10:]))}
+
+
+@app.post("/api/oyun/tahmin")
+async def api_oyun_tahmin(req: Request):
+    if not authorized(req):
+        return JSONResponse({"ok": False}, status_code=401)
+    d = await req.json()
+    sym = str(d.get("sym", "")).upper()[:8]
+    try:
+        g = float(d.get("giris"))
+    except Exception:
+        return {"ok": False, "hata": "giriş"}
+    th = "kirar" if d.get("tahmin") == "kirar" else "kirmaz"
+    gun = _gun_et()
+    eski = next((t for t in KK["tahmin"] if t["sym"] == sym and t["gun"] == gun and abs(t["giris"] - g) < 1e-6), None)
+    if eski:
+        if eski.get("dogru") is not None:
+            return {"ok": False, "hata": "bu planın sonucu belli oldu"}
+        eski["tahmin"] = th
+    else:
+        KK["tahmin"].append({"sym": sym, "giris": g, "tahmin": th, "gun": gun, "t": int(time.time()), "px": fiyat(sym)})
+        del KK["tahmin"][:-200]
+    kk_kaydet()
+    return {"ok": True}
 
 
 @app.delete("/api/cizgi/{cid}")

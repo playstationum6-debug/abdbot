@@ -198,6 +198,25 @@ h3{font-size:20px;font-weight:900;padding:18px 18px 10px;letter-spacing:-.5px}
 #hkO{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.88);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:calc(var(--safe-t) + 16px) 20px calc(var(--safe-b) + 16px)}
 #hkO.on{display:flex;animation:gir .35s var(--bo)}#hkO img{max-height:72vh;max-width:100%;border-radius:18px;box-shadow:0 20px 60px #000}
 #hkO .mu{font-size:13px;text-align:center}
+.og{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px}
+.oc{padding:16px 14px;min-height:150px;display:flex;flex-direction:column;justify-content:space-between;animation:pop .55s var(--bo) both}
+.oc .e{font-size:34px;display:inline-block;animation:yz 3s ease-in-out infinite}.oc b{font-size:16px;font-weight:900;display:block;margin-top:6px}.oc small{color:var(--mu);font-size:12px;line-height:1.35;display:block;margin-top:3px}
+.oc .rk{font-size:11.5px;font-weight:800;color:var(--li);margin-top:8px}
+.lvl{margin:0 16px 14px;padding:16px 18px;display:flex;align-items:center;gap:14px;background:linear-gradient(160deg,#241b3d,var(--c1) 70%);border-color:#3a2d63}
+.lvl .bd{width:58px;height:58px;border-radius:18px;background:linear-gradient(135deg,#8b7bff,#ff7ad9);display:grid;place-items:center;font-size:28px;flex:none;animation:yz 3s ease-in-out infinite}
+#oyP{position:fixed;inset:0;z-index:60;background:var(--bg);transform:translate3d(0,100%,0);visibility:hidden;transition:transform .5s var(--sp),visibility 0s .5s;overflow-y:auto;overflow-x:hidden;padding:calc(var(--safe-t) + 4px) 0 calc(var(--safe-b) + 30px)}
+#oyP.on{transform:none;visibility:visible;transition:transform .5s var(--sp),visibility 0s}
+.ob{display:flex;gap:10px;padding:0 16px;margin-top:12px}.ob button{flex:1;padding:17px;border-radius:18px;font-weight:900;font-size:17px;transition:transform .2s var(--bo)}.ob button:active{transform:scale(.93)}
+.ob .y{background:var(--li);color:#0b1200}.ob .h{background:#2d1217;color:var(--dn);border:1px solid #5a2430}.ob .n{background:var(--c2);color:#fff;border:1px solid var(--ln)}
+.sk{animation:sk .45s}@keyframes sk{20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
+.skr{display:flex;gap:8px;padding:0 16px;margin:8px 0}.skr div{flex:1;background:var(--c1);border:1px solid var(--ln);border-radius:14px;padding:9px 10px;text-align:center}.skr span{display:block;font-size:10.5px;color:var(--mu);font-weight:800;letter-spacing:.4px}.skr b{font-size:19px;font-weight:900}
+.sonuc{margin:12px 16px 0;padding:16px 18px;animation:pop .5s var(--bo)}
+.tm{height:6px;margin:10px 16px 0;border-radius:99px;background:var(--c3);overflow:hidden}.tm i{display:block;height:100%;background:linear-gradient(90deg,#ff7ad9,#8b7bff);width:100%}
+.th{display:flex;align-items:center;gap:10px;padding:11px 0;animation:gir .4s var(--bo) both}.th+.th{border-top:1px solid var(--ln)}
+.th .n{flex:1;min-width:0}.th .n b{font-size:15.5px;font-weight:900}.th .n small{display:block;color:var(--mu);font-size:12px}
+.th button{padding:9px 11px;border-radius:12px;font-weight:900;font-size:12.5px;background:var(--c2);border:1px solid var(--ln);color:var(--mu);transition:all .25s var(--bo)}
+.th button.sec.k{background:var(--li);color:#0b1200;border-color:var(--li);transform:scale(1.06)}.th button.sec.m{background:var(--dn);color:#fff;border-color:var(--dn);transform:scale(1.06)}
+#mk{display:block;width:100%;border-radius:22px;touch-action:none}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style>
 </head>
@@ -240,6 +259,19 @@ h3{font-size:20px;font-weight:900;padding:18px 18px 10px;letter-spacing:-.5px}
   <div id="kA"><div class="isk" style="height:150px"></div><div class="isk"></div></div>
 </section>
 
+<section class="scr gizli" id="s-oyun">
+  <div class="lt"><h1>Oyun<em>.</em></h1></div>
+  <div class="sub">Oynayarak grafik okumayı öğren</div>
+  <div class="gl lvl in" id="lvl"></div>
+  <div class="og">
+    <div class="gl oc tap" onclick="oyunAc('gr')"><div><span class="e">🔮</span><b>Tutar mı?</b><small>Gerçek bir geçmiş kırılım. Sonu gizli, sen tahmin et.</small></div><div class="rk" id="rk-gr"></div></div>
+    <div class="gl oc tap" onclick="oyunAc('km')" style="animation-delay:.06s"><div><span class="e">🎯</span><b>Kırar mı? · canlı</b><small>Bugünün bekleyen planlarına tahmin yap, gün sonu puanlanır.</small></div><div class="rk" id="rk-km"></div></div>
+    <div class="gl oc tap" onclick="oyunAc('mk')" style="animation-delay:.12s"><div><span class="e">🏃</span><b>Mum koşusu</b><small>Kırmızı mumlardan zıpla, yeşilleri topla.</small></div><div class="rk" id="rk-mk"></div></div>
+    <div class="gl oc tap" onclick="oyunAc('ca')" style="animation-delay:.18s"><div><span class="e">✏️</span><b>Çizgi avcısı</b><small>10 saniyede direnci bul, botla yarış.</small></div><div class="rk" id="rk-ca"></div></div>
+  </div>
+</section>
+<div id="oyP"></div>
+
 <section class="scr gizli" id="s-ara">
   <div class="lt"><h1>Ara</h1></div>
   <div class="sub">Hisse kodunu yaz</div>
@@ -255,6 +287,7 @@ h3{font-size:20px;font-weight:900;padding:18px 18px 10px;letter-spacing:-.5px}
   <button data-t="canli"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3" fill="currentColor"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7"/></svg>Canlı</button>
   <button data-t="bil"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 22a2.5 2.5 0 0 0 2.5-2.5h-5A2.5 2.5 0 0 0 12 22zm7-6V11a7 7 0 0 0-5-6.7V3.5a2 2 0 0 0-4 0v.8A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg>Bildirim<span class="rozet" id="bR"></span></button>
   <button data-t="karne"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="12" width="4" height="9" rx="1.2"/><rect x="10" y="7" width="4" height="14" rx="1.2"/><rect x="17" y="3" width="4" height="18" rx="1.2"/></svg>Karne</button>
+  <button data-t="oyun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="2" y="7" width="20" height="11" rx="5"/><path d="M7 11v3M5.5 12.5h3"/><circle cx="16" cy="11.5" r="1" fill="currentColor"/><circle cx="18" cy="13.5" r="1" fill="currentColor"/></svg>Oyun</button>
   <button data-t="ara"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Ara</button>
 </nav>
 
@@ -289,7 +322,7 @@ function indAyarla(){const b=$('tab').querySelector('button.on');if(!b)return;$(
 function sekmeAc(t){if(t===sekme){$('s-'+t).scrollTo({top:0,behavior:'smooth'});return}titre();sekme=t;
   for(const b of $('tab').querySelectorAll('button'))b.classList.toggle('on',b.dataset.t===t);indAyarla();
   for(const s of document.querySelectorAll('.scr'))s.classList.toggle('gizli',s.id!=='s-'+t);
-  $('mini').textContent={ana:'Kırılımlar',canli:'Canlı',bil:'Bildirimler',karne:'Karne',ara:'Ara'}[t];$('mini').classList.remove('on');
+  $('mini').textContent={ana:'Kırılımlar',canli:'Canlı',bil:'Bildirimler',karne:'Karne',oyun:'Oyun',ara:'Ara'}[t];if(t==='oyun')oyunHub();$('mini').classList.remove('on');
   if(t==='canli')canliYukle();if(t==='bil'){bilYukle();okundu()}if(t==='karne')karneYukle();if(t==='ara')setTimeout(()=>$('araI').focus(),350)}
 $('tab').onclick=e=>{const b=e.target.closest('button');if(b)sekmeAc(b.dataset.t)};
 for(const s of document.querySelectorAll('.scr'))s.addEventListener('scroll',()=>{$('mini').classList.toggle('on',s.scrollTop>44);},{passive:true});
@@ -416,13 +449,14 @@ async function detayYukle(ilk){if(!DS)return;const sym=DS;try{const d=await gJ('
   if(ilk||!once){detayCiz(d)}else{const pe=$('dP');if(pe&&once.p!==d.p&&!(MG&&MG.hx!=null)){pe.textContent='$'+fp(d.p);pe.classList.remove('flU','flD');void pe.offsetWidth;pe.classList.add(d.p>once.p?'flU':'flD')}akisCiz(d);gpCiz(d,false);if(d.bars!==once.bars)grafikKur(d,false)}}catch(e){}}
 /* giriş planı kartları */
 function bilet(cls,ust,alt,gec){return `<div class="gp ${cls}" style="animation-delay:${gec}ms"><div class="ust">${ust}</div><div class="alt"><i class="cn l"></i><i class="cn s"></i>${alt}</div></div>`}
-function bekleyen(ad,px,gir,stop,hed,kalan,gec){const ust_=px&&px>=gir;const k=ust_?`<div class="kal">Seviyede</div><div class="cap">${fp(gir)} üstünde · 1 dk kapanış onayı bekleniyor</div>`:`<div class="kal">%${Math.max(0,kalan??(gir/px-1)*100).toFixed(1).replace('.',',')} kaldı</div><div class="cap">${fp(gir)} üstünde 1 dk kapanış</div>`;
-  return bilet('',`<div class="gph"><b>${ad}</b><span class="tag ta">${ust_?'onay bekliyor':'bekliyor'}</span></div><div class="bk">${halka(px,gir)}<div>${k}</div></div>`,dort(gir,stop,hed),gec)}
+function bekleyen(ad,px,gir,stop,hed,kalan,gec,ih){const ust_=px&&px>=gir;const ihS=ih&&ih.p!=null?`<div class="pl" style="margin-top:12px"><span>🧠 Tutma ihtimali<br><span class="mu" style="font-size:11px;font-weight:600">${esc((ih.neden||[]).join(' · ')||'geçmiş '+ih.n+' kırılımdan')}</span></span><b class="${ih.p>=55?'up':ih.p>=OGE?'am':'dn'}">%${ih.p}</b></div>`:'';const k=ust_?`<div class="kal">Seviyede</div><div class="cap">${fp(gir)} üstünde · 1 dk kapanış onayı bekleniyor</div>`:`<div class="kal">%${Math.max(0,kalan??(gir/px-1)*100).toFixed(1).replace('.',',')} kaldı</div><div class="cap">${fp(gir)} üstünde 1 dk kapanış</div>`;
+  return bilet('',`<div class="gph"><b>${ad}</b><span class="tag ta">${ust_?'onay bekliyor':'bekliyor'}</span></div><div class="bk">${halka(px,gir)}<div>${k}</div></div>${ihS}`,dort(gir,stop,hed),gec)}
+let OGE=40;
 function gpCiz(d,ilk){const e=$('gp');if(!e)return;const G=d.girseydin||[];
-  if(!G.length){e.innerHTML=d.plan?bekleyen('1. giriş planı',d.p,d.plan.giris,d.plan.stop,d.plan.hed,null,0):bilet('',`<div class="gph"><b>Giriş planı</b><span class="tag ta">yok</span></div><div class="cap" style="margin-top:8px">Bugün bu hisse için kanala giriş planı gitmedi.</div>`,`<div class="cap">Kırılım yaklaşınca plan burada görünür.</div>`,0);gpAnim(e);return}
+  if(!G.length){e.innerHTML=d.plan?bekleyen('1. giriş planı',d.p,d.plan.giris,d.plan.stop,d.plan.hed,null,0,d.ih):bilet('',`<div class="gph"><b>Giriş planı</b><span class="tag ta">yok</span></div><div class="cap" style="margin-top:8px">Bugün bu hisse için kanala giriş planı gitmedi.</div>`,`<div class="cap">Kırılım yaklaşınca plan burada görünür.</div>`,0);gpAnim(e);return}
   const eski=e.dataset.k;e.dataset.k=G.map(g=>g.giris+g.st+(g.tepe||'')).join();if(!ilk&&eski===e.dataset.k){for(const g of G){const s=$('gs-'+g.giris);if(s&&g.pct!=null)s.textContent=fy(g.pct)}return}
   e.innerHTML=G.map((g,i)=>{const kir=g.pct!=null,sah=g.st==='sahte'||g.st==='stop',ad=`${i+1}. giriş planı`,hed=(g.hed||[]).filter(Boolean),zv=g.zirve||(g.tepe!=null?g.giris*(1+g.tepe/100):null);
-    if(!kir)return bekleyen(ad,d.p,g.giris,g.stop,hed,g.kalan,i*90);
+    if(!kir)return bekleyen(ad,d.p,g.giris,g.stop,hed,g.kalan,i*90,d.ih||(g.ih!=null?{p:g.ih}:null));
     const tag=g.geri&&g.st!=='sahte'?`<span class="tag ta">↩ altına döndü</span>`:sah?`<span class="tag tr">${g.st==='stop'?'stop oldu':'sahte kırılım'}</span>`:`<span class="tag tg">kırıldı${g.kt?' · '+new Date(g.kt*1000).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'}):''}</span>`;
     const top=hed.length?hed[hed.length-1]:g.giris*1.1,ilr=Math.max(3,Math.min(100,((zv||g.giris)-g.giris)/(top-g.giris)*100)),usd=g.tepe_usd??Math.round(2.5*(g.tepe||0));
     return bilet('k',`<div class="gph"><b>${ad}</b>${tag}</div>
@@ -509,6 +543,13 @@ $('pushBtn').onclick=async()=>{titre();try{if(!('serviceWorker' in navigator)||!
   let sub=await reg.pushManager.getSubscription();if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64u(k.key)});const r=await pJ('/push/sub',sub.toJSON());if(!r.ok)throw new Error('kaydedilemedi');
   konfeti();toast('🔔 Bildirimler açıldı');$('pushBtn').textContent='✓ Bildirimler açık'}catch(e){toast('Bildirim açılamadı: '+esc(e.message||e))}};
 /* ---------------- karne */
+function ogrenKart(o){if(!o||!o.n)return '';OGE=o.esik||40;const sat=(x,c)=>`<div class="kb"><span style="font-size:14px">${esc(x.ad)} <span class="mu" style="font-size:12px">(${x.n})</span></span><b class="${c}">%${x.wr}</b><div class="bar"><i data-w="${x.wr}" style="width:0;background:${c==='up'?'var(--grad)':'var(--dn)'}"></i></div></div>`;
+  return `<h3>Bot ne öğrendi</h3><div class="gl cd"><div class="cap" style="margin:-2px 0 8px">${o.n} sonuçlanmış kırılımdan · genel K1+ oranı %${o.genel}</div>
+   <div class="pl" style="margin:0 0 10px"><span>🧠 Öğrenen filtre</span><b class="${o.aktif?'up':'am'}" style="font-size:13px">${o.aktif?`AÇIK · %${o.esik} altı kanala gitmez`:`${o.n}/${o.min} örnek · birikiyor`}</b></div>
+   ${o.iyi&&o.iyi.length?`<div class="mu" style="font-size:11.5px;font-weight:800;letter-spacing:1px;margin:6px 0 2px">EN ÇOK TUTANLAR</div>${o.iyi.map(x=>sat(x,'up')).join('')}`:''}
+   ${o.kotu&&o.kotu.length?`<div class="mu" style="font-size:11.5px;font-weight:800;letter-spacing:1px;margin:10px 0 2px">EN ÇOK TUTMAYANLAR</div>${o.kotu.map(x=>sat(x,'dn')).join('')}`:''}
+   ${o.gizli?`<div class="cap" style="margin-top:8px">Bugün ${o.gizli} zayıf plan kanala gönderilmedi; sonuçları yine ölçülüyor.</div>`:''}
+   <div class="cap" style="margin-top:8px">En az 4 örnekli gruplar · az örnekli sonuçlar genel orana çekilerek hesaplanır</div></div>`}
 function cizKarne(c){if(!c||!c.n)return '';return `<h3>Senin çizgilerin</h3><div class="gl cd"><div class="kg" style="margin-top:0"><div><span>ÇİZGİ</span><b>${c.n}</b></div><div><span>KIRILAN</span><b class="li">${c.kirilan}</b></div><div><span>ORT. PUAN</span><b class="am">${c.puan??'—'}</b></div></div>
   <div class="kg"><div><span>TUTTU (+%2)</span><b class="up">${c.tuttu}</b></div><div><span>ALTINA DÖNEN</span><b class="am">${c.geri}</b></div><div><span>ORT. ZİRVE</span><b class="li">${fy(c.ort_tepe)}</b></div></div>
   ${(c.liste||[]).slice(0,6).map(x=>`<div class="r" onclick="detayAc('${x.sym}')"><span><b>${esc(x.sym)}</b> <span class="mu" style="font-size:13px">${esc(x.gun.slice(5).split('-').reverse().join('.'))} · ${fp(x.fiyat)}${x.puan!=null?' · '+x.puan+' puan':''}</span></span><span class="${x.tepe>0?'li':'mu'}" style="font-size:14px;font-weight:800">${x.tepe!=null?fy(x.tepe):x.st==='kırılmadı'?'kırılmadı':'bekliyor'}</span></div>`).join('')}</div>`}
@@ -529,7 +570,7 @@ async function karneYukle(){try{const d=await gJ('/api/kk');KK=d;KK._t=Date.now(
   $('kA').innerHTML=`<div class="gl kr in"><div class="bg2"><svg width="116" height="116"><circle cx="58" cy="58" r="50" stroke="rgba(255,255,255,.07)"/><circle class="fg" id="kRing" cx="58" cy="58" r="50" stroke="${rk}" style="color:${rk}" stroke-dasharray="${C}" stroke-dashoffset="${C}"/></svg><b class="num"><span id="kW">0</span><small>%</small></b></div>
    <div><div style="font-size:12px;color:var(--mu);font-weight:800;letter-spacing:1px">K1+ ORANI</div><div style="font-size:15px;margin-top:6px;line-height:1.45">Son <b>${K.kirilan||0}</b> kırılımın<br><b class="up">${K.kazanan||0}</b> tanesi hedefe ulaştı</div></div></div>
   <div class="kv"><div class="gl"><small>ORT. ZİRVE</small><b class="${(K.ort_tepe||0)>0?'up':''} num" id="kZ">—</b></div><div class="gl" style="animation-delay:.06s"><small>BUGÜN</small><b class="num">${B.kirilan||0}/${B.gonderilen||0}</b></div><div class="gl" style="animation-delay:.12s"><small>KAZANAN</small><b class="up num" id="kK">0</b></div><div class="gl" style="animation-delay:.18s"><small>KAYBEDEN</small><b class="dn num" id="kY">0</b></div></div>
-  ${gunKazanc(B)}${cizKarne(d.cizgi)}
+  ${gunKazanc(B)}${ogrenKart(d.ogrenme)}${cizKarne(d.cizgi)}
   ${(d.kural||[]).length?`<h3>Hangi kural kazandırdı</h3><div class="gl cd">${d.kural.slice(0,8).map(x=>`<div class="kb"><span style="font-size:14px">${esc(x.kural)}</span><b class="${x.wr>=50?'up':'dn'}">%${x.wr}</b><div class="bar"><i data-w="${x.wr}" style="width:0;background:${x.wr>=50?'var(--grad)':'var(--dn)'}"></i></div></div>`).join('')}</div>`:''}
   <h3>Son kırılımlar</h3><div class="gl cd" style="padding:6px 8px">${(K.liste||[]).slice(0,15).map((r,i)=>`<div class="row" onclick="detayAc('${r.sym}')" style="animation-delay:${i*40}ms;padding:9px 8px"><div class="lg ${r.renk==='up'?'g':r.renk==='dn'?'r':'n'}" style="width:40px;height:40px">${esc(r.sym.slice(0,5))}</div><div class="n"><b>${esc(r.sym)}</b><small>${esc(r.gun.slice(5).split('-').reverse().join('.'))} · giriş ${fp(r.giris)}</small></div><div class="pr"><b class="${r.tepe_pct>0?'up':''}" style="font-size:15px">${r.tepe_pct!=null?fy(r.tepe_pct):''}</b><small class="${r.renk==='up'?'up':r.renk==='dn'?'dn':'mu'}">${esc(r.sonuc)}</small></div></div>`).join('')||'<div class="mu" style="padding:10px">Henüz kayıt yok.</div>'}</div>
   ${(d.ders||[]).length?`<h3>Haftanın dersleri</h3>${d.ders.map((x,i)=>`<div class="gl cd" style="animation-delay:${i*60}ms"><div style="font-weight:800;margin-bottom:6px">${x.iyi?'✅':'❌'} ${esc(x.sym)} <span class="mu" style="font-weight:500">${esc(x.sonuc)}</span></div><div class="mu" style="font-size:14px;line-height:1.5">${x.neden.map(esc).join('<br>')}</div><div style="margin-top:8px;font-size:14px">💡 ${esc(x.ders)}</div></div>`).join('')}`:''}
@@ -554,6 +595,75 @@ async function hikayeKart(){const B=(KK&&KK.bugun)||{},L=(B.liste||[]).filter(r=
   const url=c.toDataURL('image/png');let o=$('hkO');if(!o){document.body.insertAdjacentHTML('beforeend','<div id="hkO"><img id="hkI" alt="Hikâye kartı"><div class="mu">Kaydetmek için görsele basılı tut ya da Paylaş\'a bas</div><div style="display:flex;gap:10px;width:100%;max-width:420px"><button class="btn" style="margin:0" id="hkP">Paylaş</button><button class="btn" style="margin:0;background:#1a1d25;color:#fff" onclick="$(\'hkO\').classList.remove(\'on\')">Kapat</button></div></div>');o=$('hkO')}
   $('hkI').src=url;o.classList.add('on');konfeti(20);
   $('hkP').onclick=async()=>{try{const bl=await (await fetch(url)).blob(),f=new File([bl],`kirilim-${en.sym}.png`,{type:'image/png'});if(navigator.canShare&&navigator.canShare({files:[f]}))await navigator.share({files:[f],title:'Günün kırılımı'});else{const a=document.createElement('a');a.href=url;a.download=f.name;a.click()}}catch(e){}}}
+/* ---------------- oyunlar */
+const OY=()=>yerel('oyun')||{gr:{p:0,s:0,r:0,n:0,d:0},ca:{p:0,r:0,n:0},mk:{r:0,n:0}},OYK=o=>yerel('oyun',o);let KMP=0;
+const SEV=[[0,'🐣','Çaylak'],[100,'📈','Grafik okuyucu'],[300,'🕯️','Mum ustası'],[700,'🐺','Kırılım kurdu'],[1500,'👑','Wall Street efsanesi']];
+function oyunHub(){const o=OY(),top=o.gr.p+o.ca.p+Math.floor(o.mk.r/10)+KMP;let i=0;for(let j=0;j<SEV.length;j++)if(top>=SEV[j][0])i=j;const nx=SEV[i+1];
+  $('lvl').innerHTML=`<div class="bd">${SEV[i][1]}</div><div style="flex:1"><div style="font-size:11.5px;color:var(--mu);font-weight:800;letter-spacing:1px">SEVİYEN</div><div style="font-size:20px;font-weight:900">${SEV[i][2]}</div>
+   <div class="bar" style="margin:8px 0 4px"><div class="fill" style="width:${nx?Math.min(100,(top-SEV[i][0])/(nx[0]-SEV[i][0])*100):100}%;background:linear-gradient(90deg,#8b7bff,#ff7ad9)"></div></div><div class="cap">${top} puan${nx?` · ${nx[2]} için ${nx[0]-top} puan`:' · en üst seviye'}</div></div>`;
+  $('rk-gr').textContent=o.gr.n?`%${Math.round(100*o.gr.d/o.gr.n)} doğru · rekor seri ${o.gr.r}`:'Henüz oynanmadı';$('rk-ca').textContent=o.ca.n?`${o.ca.n} tur · rekor ${o.ca.r}`:'Henüz oynanmadı';$('rk-mk').textContent=o.mk.r?`Rekor ${o.mk.r}`:'Henüz oynanmadı';
+  gJ('/api/oyun').then(d=>{KMP=d.puan||0;$('rk-km').textContent=d.n?`${d.dogru}/${d.n} doğru · seri ${d.seri}`:`${(d.bekleyen||[]).length} plan bekliyor`}).catch(()=>{})}
+function oyunAc(k){titre(12,'medium');const P=$('oyP');P.innerHTML=`<div class="nb"><button onclick="oyunKapat()" aria-label="Kapat">✕</button><b id="oyB"></b><span style="width:38px"></span></div><div id="oyI"></div>`;P.classList.add('on');P.scrollTop=0;
+  if(TG&&TG.BackButton){TG.BackButton.show();TG.BackButton.onClick(oyunKapat)}({gr:grafikOyun,km:kirarOyun,mk:mumKosu,ca:cizgiAvci})[k]()}
+function oyunKapat(){titre();OMG&&OMG.sil();OMG=null;MK.dur&&MK.dur();clearInterval(CAt);$('oyP').classList.remove('on');if(TG&&TG.BackButton&&!DS)TG.BackButton.hide();oyunHub()}
+let OMG=null,OGV=null,CAt=null;
+function oyunGrafik(d,kesik){const B=d.bars,ki=B.findIndex(b=>b[0]>=d.kt),k=kesik?ki:B.length;$('oyC').innerHTML='';OMG&&OMG.sil();OMG=new Mum($('oyC'));
+  const L=kesik==='gizli'?[]:[{p:d.giris,r:'#ffbe3d',e:'Giriş planı',k:1}];OMG.veri(B.slice(0,Math.max(5,k)),L,[],null,true);return ki}
+async function oyunVeri(){const d=await gJ('/api/oyun/grafik');if(!d.ok){$('oyI').innerHTML=`<div class="bos"><div class="e">⏳</div><br>${esc(d.hata)}</div>`;return null}return d}
+/* 1) Tutar mı? */
+async function grafikOyun(){$('oyB').textContent='🔮 Tutar mı?';$('oyI').innerHTML='<div class="isk" style="height:300px;margin-top:14px"></div>';const d=await oyunVeri();if(!d)return;OGV=d;const o=OY();
+  $('oyI').innerHTML=`<div class="skr"><div><span>PUAN</span><b class="li">${o.gr.p}</b></div><div><span>SERİ</span><b class="am">${o.gr.s}🔥</b></div><div><span>DOĞRULUK</span><b>${o.gr.n?Math.round(100*o.gr.d/o.gr.n)+'%':'—'}</b></div></div>
+   <div class="dh" style="padding-top:4px"><div class="dlg" style="background:linear-gradient(135deg,#8b7bff,#ff7ad9)">?</div><div><div class="s">??? <span class="mu" style="font-size:14px;font-weight:700">gizli hisse</span></div><div class="hb">${esc(d.tur||'kırılım seviyesi')}</div></div></div>
+   <div class="gl cw" id="oyC"></div><div class="cap" style="padding:0 18px">Fiyat ${fp(d.giris)} giriş planına geldi ve kırdı. Sence kırılım <b>tutar mı</b> (K1'e gider), yoksa stop mu olur?</div>
+   <div class="ob" id="oyBt"><button class="y" onclick="grSec(true)">✅ Tutar</button><button class="h" onclick="grSec(false)">❌ Tutmaz</button></div><div id="oyS"></div>`;
+  oyunGrafik(d,true)}
+function grSec(t){const d=OGV;if(!d||!OMG)return;titre(15,'medium');$('oyBt').innerHTML='<div class="cap" style="text-align:center;width:100%">Mumlar oynuyor…</div>';const ki=d.bars.findIndex(b=>b[0]>=d.kt);
+  OMG.L=[{p:d.giris,r:'#ffbe3d',e:'Giriş planı',k:1},...(d.stop?[{p:d.stop,r:CD,e:'Stop'}]:[]),...(d.hed||[]).filter(Boolean).map((h,i)=>({p:h,r:CU,e:'K'+(i+1)}))];
+  OMG.onOyBit=()=>{const dog=t===d.tuttu,o=OY();o.gr.n++;if(dog){o.gr.d++;o.gr.s++;o.gr.p+=10+Math.min(20,(o.gr.s-1)*2);o.gr.r=Math.max(o.gr.r,o.gr.s);konfeti(30);titre(20,'ok')}else{o.gr.s=0;$('oyC').classList.add('sk');titre(30,'heavy')}OYK(o);const sk=$('oyI').querySelectorAll('.skr b');if(sk.length>2){sk[0].textContent=o.gr.p;sk[1].textContent=o.gr.s+'🔥';sk[2].textContent=Math.round(100*o.gr.d/o.gr.n)+'%'}
+    $('oyS').innerHTML=`<div class="gl sonuc"><div style="font-size:26px;font-weight:900" class="${dog?'li':'dn'}">${dog?'Doğru bildin! +'+(10+Math.min(20,(o.gr.s-1)*2)):'Yanlış tahmin'}</div><div style="margin-top:6px;font-size:15px">Hisse: <b>${esc(d.sym)}</b> · ${esc(d.gun.slice(5).split('-').reverse().join('.'))}</div><div class="cap">Sonuç: ${esc(d.sonuc)} · kırılımdan zirve ${fy(d.tepe)}</div></div>
+     <div class="ob"><button class="y" onclick="grafikOyun()">Sonraki →</button></div>`;$('oyBt').innerHTML=''};
+  OMG.oynat(d.bars,ki,55)}
+/* 2) Kırar mı? canlı */
+async function kirarOyun(){$('oyB').textContent='🎯 Kırar mı?';$('oyI').innerHTML='<div class="isk" style="margin-top:14px"></div><div class="isk"></div>';let d;try{d=await gJ('/api/oyun')}catch(e){return}KMP=d.puan||0;
+  const sec={};for(const t of d.bugun||[])sec[t.sym+'|'+t.giris]=t;
+  $('oyI').innerHTML=`<div class="skr"><div><span>PUAN</span><b class="li">${d.puan}</b></div><div><span>DOĞRU</span><b>${d.dogru}/${d.n}</b></div><div><span>SERİ</span><b class="am">${d.seri}🔥</b></div></div>
+   <div class="gl cd"><h4>BUGÜNÜN BEKLEYEN PLANLARI</h4>${(d.bekleyen||[]).map((x,i)=>{const t=sec[x.sym+'|'+x.giris];return `<div class="th" style="animation-delay:${i*50}ms"><div class="lg ${x.st==='bekliyor'?'n':'y'}" style="width:42px;height:42px">${esc(x.sym.slice(0,5))}</div><div class="n"><b>${esc(x.sym)}</b><small>giriş ${fp(x.giris)} · %${Math.max(0,x.uzak||0).toFixed(1).replace('.',',')} kaldı</small></div>
+     ${t&&t.dogru!=null?`<b class="${t.dogru?'li':'dn'}">${t.dogru?'✓ +10':'✗'}</b>`:`<button class="${t&&t.tahmin==='kirar'?'sec k':''}" onclick="kmSec(this,'${x.sym}',${x.giris},'kirar')">Kırar</button><button class="${t&&t.tahmin==='kirmaz'?'sec m':''}" onclick="kmSec(this,'${x.sym}',${x.giris},'kirmaz')">Kırmaz</button>`}</div>`}).join('')||'<div class="cap">Şu an bekleyen plan yok. Piyasa açıkken tekrar bak.</div>'}</div>
+   ${(d.son||[]).length?`<div class="gl cd"><h4>SON TAHMİNLERİN</h4>${d.son.map(t=>`<div class="r"><span><b>${esc(t.sym)}</b> <span class="mu" style="font-size:13px">${esc(t.gun.slice(5).split('-').reverse().join('.'))} · ${t.tahmin==='kirar'?'kırar':'kırmaz'} dedin</span></span><b class="${t.dogru?'li':'dn'}">${t.dogru?'✓':'✗'}</b></div>`).join('')}</div>`:''}
+   <div class="cap" style="padding:0 18px">Plan kırılıp sahte çıkmazsa "kırdı" sayılır. Doğru tahmin 10 puan.</div>`}
+async function kmSec(b,sym,g,t){titre(12,'medium');const r=await pJ('/api/oyun/tahmin',{sym,giris:g,tahmin:t});if(!r.ok){toast(esc(r.hata||'Kaydedilemedi'));return}for(const x of b.parentElement.querySelectorAll('button'))x.className='';b.className='sec '+(t==='kirar'?'k':'m');toast(`${sym}: ${t==='kirar'?'kırar':'kırmaz'} dedin`)}
+/* 3) Mum koşusu */
+const MK={};
+function mumKosu(){$('oyB').textContent='🏃 Mum koşusu';const o=OY();$('oyI').innerHTML=`<div class="skr"><div><span>SKOR</span><b class="li" id="mkS">0</b></div><div><span>REKOR</span><b class="am" id="mkR">${o.mk.r}</b></div></div><div style="padding:0 12px"><canvas id="mk" height="420"></canvas></div>
+  <div class="cap" style="text-align:center;margin-top:8px">Zıplamak için ekrana dokun · havadayken bir kez daha zıplayabilirsin</div><div class="ob"><button class="y" id="mkB" onclick="mkBasla()">▶ Başla</button></div>`;
+  const c=$('mk'),dp=devicePixelRatio||1;c.width=c.clientWidth*dp;c.height=420*dp;MK.c=c;MK.x=c.getContext('2d');MK.x.setTransform(dp,0,0,dp,0,0);MK.W=c.clientWidth;MK.H=420;MK.cal=false;
+  c.onpointerdown=e=>{e.preventDefault();if(!MK.cal){mkBasla();return}if(MK.j<2){MK.vy=-12.5;MK.j++;titre(6)}};mkCiz()}
+function mkBasla(){Object.assign(MK,{cal:true,py:MK.H-80,vy:0,j:0,t:0,hz:5,sk:0,ob:[],al:[],son:0});$('mkB').style.display='none';MK.dur=()=>{MK.cal=false;cancelAnimationFrame(MK.raf)};let lt=performance.now();
+  const f=n=>{if(!MK.cal)return;const dt=Math.min(2,(n-lt)/16.7);lt=n;mkAdim(dt);mkCiz();if(MK.cal)MK.raf=requestAnimationFrame(f)};MK.raf=requestAnimationFrame(f)}
+function mkAdim(dt){const z=MK.H-80;MK.t+=dt;MK.hz=5+MK.t/900;MK.vy+=0.7*dt;MK.py=Math.min(z,MK.py+MK.vy*dt);if(MK.py>=z){MK.vy=0;MK.j=0}MK.sk+=MK.hz*dt/10;
+  if(MK.t-MK.son>Math.max(38,85-MK.t/60)&&Math.random()<.06*dt){MK.son=MK.t;const h=30+Math.random()*60;MK.ob.push({x:MK.W+20,h,w:16});if(Math.random()<.6)MK.al.push({x:MK.W+20+60+Math.random()*80,y:z-60-Math.random()*90})}
+  for(const o of MK.ob)o.x-=MK.hz*dt;for(const a of MK.al)a.x-=MK.hz*dt;MK.ob=MK.ob.filter(o=>o.x>-30);MK.al=MK.al.filter(a=>a.x>-30&&!a.y0);
+  const px=60,py=MK.py;for(const o of MK.ob){if(px+18>o.x&&px-18<o.x+o.w&&py>z-o.h-2){mkBitti();return}}
+  for(const a of MK.al){if(Math.abs(a.x-px)<26&&Math.abs(a.y-(py-16))<30){a.y0=1;MK.sk+=25;titre(5)}}
+  $('mkS').textContent=Math.floor(MK.sk)}
+function mkCiz(){const x=MK.x,W=MK.W,H=MK.H,z=H-80;if(!x)return;x.fillStyle='#101218';x.fillRect(0,0,W,H);x.strokeStyle='rgba(255,255,255,.05)';for(let i=0;i<6;i++){x.beginPath();x.moveTo(0,i*70);x.lineTo(W,i*70);x.stroke()}
+  x.strokeStyle='#2a2f3b';x.lineWidth=2;x.beginPath();x.moveTo(0,z+1);x.lineTo(W,z+1);x.stroke();
+  for(const o of MK.ob||[]){x.fillStyle=CD;x.fillRect(o.x+7,z-o.h-14,2,o.h+14);x.beginPath();x.roundRect?x.roundRect(o.x,z-o.h,o.w,o.h,4):x.rect(o.x,z-o.h,o.w,o.h);x.fill()}
+  for(const a of MK.al||[]){x.fillStyle=CU;x.fillRect(a.x-1,a.y-22,2,44);x.beginPath();x.roundRect?x.roundRect(a.x-7,a.y-14,14,28,4):x.rect(a.x-7,a.y-14,14,28);x.fill()}
+  const py=MK.py??z;x.fillStyle='#c6ff3d';x.beginPath();x.roundRect?x.roundRect(42,py-36,36,36,10):x.rect(42,py-36,36,36);x.fill();x.fillStyle='#0b1200';x.fillRect(62,py-27,5,7);x.fillRect(70,py-27,5,7);x.fillRect(60,py-14,16,3);
+  if(!MK.cal){x.fillStyle='rgba(10,11,15,.55)';x.fillRect(0,0,W,H);x.fillStyle='#fff';x.font='900 26px -apple-system';x.textAlign='center';x.fillText(MK.sk?'Oyun bitti':'Mum koşusu',W/2,H/2-20);x.font='700 15px -apple-system';x.fillStyle='#868b99';x.fillText(MK.sk?`Skor ${Math.floor(MK.sk)} · tekrar için dokun`:'Başlamak için dokun',W/2,H/2+10);x.textAlign='left'}}
+function mkBitti(){MK.cal=false;cancelAnimationFrame(MK.raf);titre(40,'heavy');$('mk').classList.add('sk');setTimeout(()=>$('mk')&&$('mk').classList.remove('sk'),500);const o=OY(),sk=Math.floor(MK.sk);o.mk.n++;if(sk>o.mk.r){o.mk.r=sk;konfeti(30);toast('🏆 Yeni rekor: '+sk)}OYK(o);$('mkR').textContent=o.mk.r;mkCiz()}
+/* 4) Çizgi avcısı */
+async function cizgiAvci(){$('oyB').textContent='✏️ Çizgi avcısı';clearInterval(CAt);$('oyI').innerHTML='<div class="isk" style="height:300px;margin-top:14px"></div>';const d=await oyunVeri();if(!d)return;OGV=d;const o=OY();
+  $('oyI').innerHTML=`<div class="skr"><div><span>PUAN</span><b class="li">${o.ca.p}</b></div><div><span>REKOR TUR</span><b class="am">${o.ca.r}</b></div><div><span>SÜRE</span><b id="caT">10</b></div></div><div class="tm"><i id="caB"></i></div>
+   <div class="gl cw" id="oyC" style="margin-top:10px"></div><div class="cap" style="padding:0 18px">Fiyat birazdan bir direnci kıracak. <b>Direnç nerede?</b> Grafikte o fiyata dokun.</div><div id="oyS"></div>`;
+  oyunGrafik(d,'gizli');const B=d.bars,ki=B.findIndex(b=>b[0]>=d.kt);OMG.veri(B.slice(0,Math.max(5,ki-3)),[],[],null,true);OMG.cizMod=true;let kal=10,bitti=false;
+  const sonuc=p=>{if(bitti)return;bitti=true;clearInterval(CAt);OMG.cizMod=false;const dm=p==null?99:Math.abs(p-d.giris)/d.giris*100,pu=p==null?0:Math.max(0,Math.round(100-dm*40)),o=OY();o.ca.n++;o.ca.p+=Math.round(pu/5);o.ca.r=Math.max(o.ca.r,pu);OYK(o);
+    OMG.L=[{p:d.giris,r:'#ffbe3d',e:'Bot',k:1},...(p!=null?[{p,r:'#ff7ad9',e:'Sen',k:1}]:[])];OMG.ciz();if(pu>=85){konfeti(30);titre(20,'ok')}else titre(25,'heavy');
+    $('oyS').innerHTML=`<div class="gl sonuc"><div style="font-size:26px;font-weight:900" class="${pu>=85?'li':pu>=50?'am':'dn'}">${p==null?'Süre doldu':pu+' puan'}</div><div class="cap" style="margin-top:4px">${p==null?'':`Senin çizgin ${fp(p)} · botun seviyesi ${fp(d.giris)} · fark %${dm.toFixed(1).replace('.',',')}`}</div><div style="margin-top:6px;font-size:14px">${esc(d.sym)} · ${esc(d.tur||'')} · kırılımdan zirve ${fy(d.tepe)}</div></div>
+     <div class="ob"><button class="n" onclick="OMG.oynat(OGV.bars,${ki},45)">▶ Sonrasını oynat</button><button class="y" onclick="cizgiAvci()">Sonraki →</button></div>`};
+  OMG.onCiz=p=>sonuc(+p.toFixed(p<1?4:2));$('caB').style.transition='width 10s linear';requestAnimationFrame(()=>requestAnimationFrame(()=>$('caB').style.width='0%'));
+  CAt=setInterval(()=>{kal--;if($('caT'))$('caT').textContent=kal;if(kal<=3)titre(5);if(kal<=0)sonuc(null)},1000)}
 /* ---------------- ara */
 $('araI').addEventListener('input',()=>{const q=$('araI').value.toUpperCase().replace(/[^A-Z.]/g,'');$('araI').value=q;const L=CANLI.filter(x=>x.sym.startsWith(q));
   $('araL').innerHTML='<div style="padding:0 10px">'+(q?`<div class="row" data-s="${q}"><div class="lg n">${esc(q.slice(0,5))}</div><div class="n"><b>${esc(q)}</b><small>hisse sayfasını aç</small></div><div class="pr"><b>›</b></div></div>`:'')+L.filter(x=>x.sym!==q).map((x,i)=>`<div class="row" data-s="${x.sym}" style="animation-delay:${i*40}ms"><div class="lg ${durum(x)}">${esc(x.sym.slice(0,5))}</div><div class="n"><b>${esc(x.sym)}</b><small>giriş ${fp(x.giris)}</small></div><div class="pr"><b class="num">${fp(x.px)}</b></div></div>`).join('')+'</div>'});
