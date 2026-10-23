@@ -374,9 +374,9 @@ def kosan_test(key, secret, n_days, et, progress=None, should_stop=None, ekle=No
     return out, summ
 
 
-KURAL_VARYANT = [("Şu anki kurallar (uyarlanır · 2× hacim)", {}),
-                 ("Hep 5 dk kapanış", {"tf": "5"}),
-                 ("Hep 1 dk kapanış", {"tf": "1"}),
+KURAL_VARYANT = [("Şu anki kurallar (1 dk kapanış · 2× hacim)", {}),
+                 ("5 dk kapanış", {"tf": "5"}),
+                 ("Uyarlanır (hızlı piyasada 1 dk)", {"tf": "uyarlanir"}),
                  ("Hacim 1,5× yeter", {"hacim_k": 1.5}),
                  ("Hacim 3× şart", {"hacim_k": 3.0}),
                  ("Tükenme / düşen tepe filtresi kapalı", {"filtre": 0})]

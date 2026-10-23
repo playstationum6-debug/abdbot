@@ -473,7 +473,7 @@ class Planci:
             p["son_T"] = T
             rng = (x["h"] - x["l"]) or 1e-9
             guclu = max(x.get("volr", 0), x["_volr2"]) >= 1.5 and (c - x["l"]) / rng >= 0.6
-            tfm = self.ayar.get("tf", "uyarlanir")
+            tfm = self.ayar.get("tf", "1")                  # kırılım/yaklaşma 1 dk mumla; seviyeler 5 ve 15 dk mumlardan
             hz = hizli_piyasa(tss, bars, k) if tfm == "uyarlanir" else tfm == "1"
             B5 = bes_dk(tss, bars, ds, k) if (blok_sonu(T) or hz) else None
             if p["st"] == "bekliyor":
@@ -497,7 +497,7 @@ class Planci:
                         p["vr"] = round(vr5, 1)
                         p["ust"] = round(100 * (b5[2] - c5) / ((b5[2] - b5[3]) or 1e-9))
                         p["tf"] = 1 if hz else 5
-                        p["kurallar"] = (p.get("kurallar") or []) + ["1 dk kapanış (hızlı piyasa) + 2x hacim" if hz else "5 dk kapanış + 2x hacim"]
+                        p["kurallar"] = (p.get("kurallar") or []) + ["1 dk kapanış + 2x hacim" if hz else "5 dk kapanış + 2x hacim"]
                         if c5 <= p["giris"] * 1.04:
                             a = self._aday(eng, p, c5, T, "kırılım", dip10)
                             if a:

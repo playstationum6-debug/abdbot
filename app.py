@@ -6076,7 +6076,7 @@ def liste_tg(L):
         out.append("")
     out += ["🚀 <b>GÖZÜNÜZ BU SEVİYELERDE OLSUN!</b>",
             "📊 Fiyat ve hacmi takip edin. Kırılım gelmeden acele etmeyin; güçlü hareketi hacimle teyit edin.",
-            "⏱ Giriş: direncin üstünde <b>5 dk mum kapanışı</b> (hızlı piyasada 1 dk) + 2× hacim, <b>limit emirle</b>. Kırılınca grafikli mesaj gelecek.",
+            "⏱ Giriş: direncin üstünde <b>1 dk mum kapanışı</b> + 2× hacim, <b>limit emirle</b>. Kırılınca grafikli mesaj gelecek.",
             "🔥 Disiplinli takip, doğru zamanlama!",
             "⚠️ <b>HACİMSİZ ALIŞ YAPMAYIN · STOPSUZ İŞLEME GİRMEYİN</b>",
             "<i>Yatırım tavsiyesi değildir.</i>"]
@@ -7840,8 +7840,7 @@ def _plan_html(p):
         sey = {"var": "⚠️ seyreltme VAR", "yok": "seyreltme yok"}.get(yz.get("seyreltme"), "seyreltme bilinmiyor")
         ek.append(f"🧠 {_h(str(yz['katalizor'])[:90])} · {sey}")
     return (f"⏳ <b>PLAN · #{_h(p['sym'])}</b>  <code>{fk(px)}</code> → <code>{fk(p['giris'])}</code>\n"
-            f"<i>Giriş: {fk(p['giris'])} üstünde 5 dk mum kapanırsa (2× hacimle) limit emirle alış · "
-            f"hacim ve oynaklık artarsa 1 dk kapanış yeter</i>\n\n"
+            f"<i>Giriş: {fk(p['giris'])} üstünde 1 dk mum kapanırsa (2× hacimle) limit emirle alış</i>\n\n"
             + tg_seviyeler(p["giris"], p["stop"], p["hedefler"], px) + "\n"
             + (spread_satir(p["sym"]) + "\n" if spread_satir(p["sym"]) else "")
             + (float_satir(p["sym"]) + "\n" if float_satir(p["sym"]) else "")
@@ -7850,8 +7849,8 @@ def _plan_html(p):
             + (piyasa_satir() + "\n" if piyasa_satir() else "") +
             f"<blockquote expandable>📌 {_h(tur)} · puan {str(p['puan']).replace('.', ',')}"
             + "".join("\n" + x for x in ek) +
-            "\nSeviyeler 5 ve 15 dk mumlardan. Onay: 5 dk mum direncin üstünde kapanmalı (hacim ve oynaklık artınca 1 dk), hacmi son 20 mumun ≥2 katı. Açılışın ilk 15 dk'sı, tükenme, "
-            "3 düşen tepe, satış emri baskısı (5×) ya da spread > %2 varsa sinyal yok. Sonraki 5 dk mum seviyenin altına "
+            "\nDestek/direnç 5 ve 15 dk mumlardan. Onay: 1 dk mum direncin üstünde kapanmalı, hacmi son 20 mumun ≥2 katı. Açılışın ilk 15 dk'sı, tükenme, "
+            "3 düşen tepe, satış emri baskısı (5×) ya da spread > %2 varsa sinyal yok. Sonraki 1 dk mum seviyenin altına "
             "kapanırsa sahte sayılır. Kırılım tutarsa eski direncin destek testi (en güçlü giriş) ayrıca bildirilir."
             "</blockquote>")
 
@@ -7863,7 +7862,7 @@ def kirilim_html(p, retest=False):
     adet = int(lot // e_) if e_ else 0
     bas = ("🔁 <b>TEKRAR TEST · EN GÜÇLÜ GİRİŞ · #{s}</b>\nDirenç <code>{l}</code> kırıldı, geri çekildi, eski direnç destek olarak "
            "tuttu; yeşil 5 dk mum yüksek hacimle kapandı ({v}×)") if retest else \
-        ("🟢 <b>KIRILIM ONAYLANDI · #{s}</b>\n" + ("1 dk mum (hızlı piyasa: hacim + oynaklık yüksek)" if p.get("tf") == 1 else "5 dk mum")
+        ("🟢 <b>KIRILIM ONAYLANDI · #{s}</b>\n" + ("1 dk mum" if p.get("tf", 1) == 1 else "5 dk mum")
          + " <code>{e}</code> ile direncin (<code>{l}</code>) üstünde kapandı · hacim {v}×")
     out = [bas.format(s=_h(p["sym"]), e=fk(e_), l=fk(p["giris"] if not retest else (p.get("lvl") or p["giris"])),
                       v=str(p.get("vr") or "—").replace(".", ",")),
@@ -8159,7 +8158,7 @@ def ders_metni(r, iyi):
     tp = _tepe_pct(r)
     if iyi:
         neden.append(f"Sonuç: K{r['k']} geldi, kırılımdan tepe {fy(tp)}")
-        ders = "Hacimli, alıcının baskın olduğu kırılımda seviyenin üstünde 5 dk kapanışı beklemek ve K1'de stopu girişe çekmek kazandırdı."
+        ders = "Hacimli, alıcının baskın olduğu kırılımda seviyenin üstünde 1 dk kapanışı beklemek ve K1'de stopu girişe çekmek kazandırdı."
     else:
         neden.append("Sonuç: " + ("kırılım tutmadı, fiyat seviyenin altına döndü" if r["st"] == "sahte" else "stop oldu"))
         zay = []
@@ -8322,7 +8321,7 @@ def alarm_gonder(al, px):
     ok = "⬆️ üstüne çıktı" if al["yon"] == "ust" else "⬇️ altına indi"
     html = (f"🔔 <b>FİYAT ALARMI · #{_h(al['sym'])}</b>\n<code>{fk(al['fiyat'])}</code> {ok} · şimdi <code>{fk(px)}</code>\n"
             + (f"{spread_satir(al['sym'])}\n" if spread_satir(al["sym"]) else "")
-            + "<i>Giriş için seviyenin üstünde 5 dk mum kapanışını ve 2× hacmi bekleyin.</i>")
+            + "<i>Giriş için seviyenin üstünde 1 dk mum kapanışını ve 2× hacmi bekleyin.</i>")
     v = {"sym": al["sym"], "giris": al["fiyat"], "stop": None, "hedefler": [], "durum": "ilerleme" if al["yon"] == "ust" else "bozuldu",
          "baslik": f"Fiyat alarmı · {fp_(al['fiyat'])}", "alt": "alarm", "neden": None, "haber": None, "t_sig": None, "tf": "5 dk"}
     if tg.ok:
@@ -8491,7 +8490,7 @@ def krt_gonder():
     if not V:
         return
     en = max(V, key=lambda v: (v["avg"] or -9, v["n"]))
-    kisa = {"Şu anki kurallar (uyarlanır · 2× hacim)": "Şu anki kurallar", "Tükenme / düşen tepe filtresi kapalı": "Filtreler kapalı"}
+    kisa = {"Şu anki kurallar (1 dk kapanış · 2× hacim)": "Şu anki kurallar", "Uyarlanır (hızlı piyasada 1 dk)": "Uyarlanır", "Tükenme / düşen tepe filtresi kapalı": "Filtreler kapalı"}
     sat = [{"sym": kisa.get(v["ad"], v["ad"])[:22], "hash": False, "alt": f"{v['n']} kırılım · K1+ %{v['wr']}", "sag": f"{(v['avg'] or 0):+.2f}R".replace(".", ","),
             "renk": "up" if (v["avg"] or 0) > 0 else "dn", "cubuk": (v["wr"] or 0) / 100} for v in V]
     png = _kart({"baslik": "Kural Testi", "rozet": "GEÇMİŞ TEST", "renk": "vio", "saat": datetime.now(TR).strftime("%d.%m.%Y"),
@@ -8548,7 +8547,7 @@ async def video_gonder(p, etiket):
     e_ = p.get("e") or p["giris"]
     px = fiyat(sym) or B[-1][4]
     d_ = {"sym": sym, "giris": p["giris"], "stop": p["stop"], "hedefler": p["hedefler"], "etiket": etiket,
-          "sonuc_pct": round((px / e_ - 1) * 100, 1), "alt": f"Kırılım {fp_(p['giris'])} · {p.get('tf', 5)} dk kapanış"}
+          "sonuc_pct": round((px / e_ - 1) * 100, 1), "alt": f"Kırılım {fp_(p['giris'])} · {p.get('tf', 1)} dk kapanış"}
     try:
         gif = await asyncio.to_thread(gorsel.kirilim_video, B, d_)
     except Exception as e:
@@ -8607,7 +8606,15 @@ async def halt_loop():
                 h = HALT["aktif"].get(anahtar)
                 devam = g("ResumptionTradeTime")
                 if not h:
-                    if HALT["n"] >= HALT_GUNLUK:
+                    try:                                          # halt kaç dakika önce oldu (ABD saati)
+                        hh, mm, ss = [float(x) for x in g("HaltTime").split(":")[:3]]
+                        n_ = datetime.now(ET)
+                        yas = (n_.hour * 3600 + n_.minute * 60 + n_.second) - (hh * 3600 + mm * 60 + ss)
+                    except Exception:
+                        yas = 9999
+                    if devam or yas > 600 or HALT["n"] >= HALT_GUNLUK:
+                        # çoktan açılmış / eski halt (ör. yeniden başlamada listede görülen): sessizce not et
+                        HALT["aktif"][anahtar] = {"px": None, "acildi": True, "t": time.time(), "sessiz": True}
                         continue
                     HALT["n"] += 1
                     px = fiyat(sym)
@@ -8851,7 +8858,7 @@ def plan_olaylari():
         if ev == "onaylı" and not p.get("bitis") and tg.ok and not p.get("onay_tg"):
             p["onay_tg"] = 1
             tg.send(kirilim_html(p), plan_grafik_ch(p, durum="onaylı"), sym=sym, reply=key, konu="plan", quiet=False)
-            zincir(key, f"🟢 onaylandı {fk(p.get('e') or p['giris'])} ({p.get('tf', 5)} dk)")
+            zincir(key, f"🟢 onaylandı {fk(p.get('e') or p['giris'])} ({p.get('tf', 1)} dk)")
         sa = datetime.fromtimestamp(p.get("ot") or p.get("bitis") or time.time(), TR).strftime("%H:%M")
         if ev == "onaylı" and BOT_CFG.get("secici", 1):
             sg_ = engine.by_id.get(p.get("sig") or "")
@@ -8934,9 +8941,20 @@ def yaklasma_kontrol():
         say.clear()
         say["gun"], say["n"] = gun, 0
     for sym, p in list(PLAN.planlar.items()):
+        key = f"k:{p['id']}"
+        if p.get("st") == "bekliyor" and key in tg.meta:
+            # seviye geçildi ama onay yok: yeni mesaj atmadan plan mesajının altına yaz (kapanış saati / neden)
+            px_ = fiyat(sym)
+            if px_ and px_ >= p["giris"] and not p.get("ustte_z"):
+                p["ustte_z"] = 1
+                n_ = datetime.now(TR)
+                zincir(key, f"⏳ {fk(px_)} ile seviye üstünde · 1 dk kapanışı bekleniyor")
+            nd_ = PLAN.neden.get(sym)
+            if nd_ and "onay yok" in nd_[1] and p.get("red_z") != nd_[1]:
+                p["red_z"] = nd_[1]
+                zincir(key, "🚫 " + nd_[1].split("onay yok: ")[-1])
         if p.get("st") != "bekliyor" or p.get("yaklas_tg") or say["n"] >= YAKLAS_GUNLUK:
             continue
-        key = f"k:{p['id']}"
         if key not in tg.meta or sustur_mu(sym):
             continue
         px = fiyat(sym)
@@ -8957,7 +8975,7 @@ def yaklasma_kontrol():
         sp = spread_satir(sym)
         if sp:
             sat.append(sp)
-        sat.append("⏱ Hazır olun: seviyenin üstünde 5 dk mum kapanışı (hızlı piyasada 1 dk) + 2× hacim gelirse "
+        sat.append("⏱ Hazır olun: seviyenin üstünde 1 dk mum kapanışı + 2× hacim gelirse "
                    "<b>KIRILIM ONAYLANDI</b> mesajı gelecek. Önceden girmeyin.")
         ch = plan_grafik_ch(p, durum="yaklasiyor")
         try:
