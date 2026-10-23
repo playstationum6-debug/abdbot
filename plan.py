@@ -134,8 +134,9 @@ def yuvarlaklar(c):
 
 
 class Planci:
-    def __init__(self, bt=False):
+    def __init__(self, bt=False, ayar=None):
         self.bt = bt
+        self.ayar = ayar or {}       # kural testi: {"hacim_k": 2.0, "tf": "uyarlanir"|"5"|"1", "filtre": 1}
         self.planlar = {}            # sym -> aktif plan
         self.gecmis = []             # biten planlar (son 300)
         self.olay = []               # (tür, plan) — app.py bildirir
@@ -374,9 +375,9 @@ class Planci:
                 return "acilis"
         except Exception:
             pass
-        if tukenme(B5):
+        if self.ayar.get("filtre", 1) and tukenme(B5):
             return "tukenme"
-        if dusen_tepeler(B5[:-1]):
+        if self.ayar.get("filtre", 1) and dusen_tepeler(B5[:-1]):
             return "dusen"
         k_ = self.kote_fn(sym) if self.kote_fn else None
         if k_ and time.time() - k_[2] < 180:
@@ -472,7 +473,8 @@ class Planci:
             p["son_T"] = T
             rng = (x["h"] - x["l"]) or 1e-9
             guclu = max(x.get("volr", 0), x["_volr2"]) >= 1.5 and (c - x["l"]) / rng >= 0.6
-            hz = hizli_piyasa(tss, bars, k)
+            tfm = self.ayar.get("tf", "uyarlanir")
+            hz = hizli_piyasa(tss, bars, k) if tfm == "uyarlanir" else tfm == "1"
             B5 = bes_dk(tss, bars, ds, k) if (blok_sonu(T) or hz) else None
             if p["st"] == "bekliyor":
                 if hz:                                               # hacim + oynaklık yüksek: 1 dk kapanış
@@ -483,7 +485,7 @@ class Planci:
                     ort5 = (sum(q[5] for q in B5[-21:-1]) / max(1, len(B5[-21:-1]))) if b5 else 0
                 if b5 and b5[4] >= p["giris"]:                       # kural: direncin üstünde mum kapanışı
                     vr5 = b5[5] / ort5 if ort5 > 0 else 0
-                    red = self._red(sym, B5, x) or (None if vr5 >= HACIM_K else "hacim")
+                    red = self._red(sym, B5, x) or (None if vr5 >= self.ayar.get("hacim_k", HACIM_K) else "hacim")
                     if red:
                         self._red_kaydet(p, red)
                         if red == "hacim":

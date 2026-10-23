@@ -728,8 +728,10 @@ def liste_kart(K):
         if r.get("cubuk") is not None:
             cw_ = max(0.0, min(1.0, r["cubuk"])) * ((W - 128) * S)
             d.rounded_rectangle([x0, (y + 62) * S, x0 + cw_, (y + 68) * S], radius=3 * S, fill=c_ + (200,))
-        d.text((x0 + 22 * S, (y + 15) * S), T("#" + r["sym"]), fill=TXT, font=f(27, "xb"))
-        sw = d.textlength(T("#" + r["sym"]), font=f(27, "xb"))
+        ad_ = T(("#" if r.get("hash", True) else "") + r["sym"])
+        fn_ = f(27, "xb") if r.get("hash", True) else f(23, "b")
+        d.text((x0 + 22 * S, (y + 15 + (0 if r.get("hash", True) else 3)) * S), ad_, fill=TXT, font=fn_)
+        sw = d.textlength(ad_, font=fn_)
         d.text((x0 + 36 * S + sw, (y + 22) * S), T((r.get("alt") or "")[:44]), fill=MUT, font=f(18, "m"))
         pt = T(r.get("sag", ""))
         d.text(((W - 86) * S - d.textlength(pt, font=f(27, "xb")), (y + 15) * S), pt, fill=c_, font=f(27, "xb"))

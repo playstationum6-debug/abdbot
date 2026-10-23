@@ -1325,7 +1325,7 @@ def parse_ts(s):
 AKIS = {}            # sembol -> {"p": son fiyat, "y": son yön, "dk": {dakika: [alım, satım, adet]}}
 AKIS_DK = 30         # tutulan dakika
 KOTE = {}            # sembol -> (alış, satış, ts)  IEX en iyi alış/satış
-KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}}   # kanal ekleri: kırılım karnesi, fiyat alarmı, float, gönderim izleri
+KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}, "sahip": ""}   # kanal ekleri: kırılım karnesi, fiyat alarmı, float, gönderim izleri
 SPREAD_MAX = float(os.getenv("SPREAD_MAX", "2.0"))   # % üstü: plan mesajı gönderilmez (kayma riski)
 
 
@@ -1395,20 +1395,22 @@ def akis_kova(o):
     return "alıcı baskın" if o["pct"] >= 60 else "satıcı baskın" if o["pct"] <= 40 else "dengeli"
 
 
-def akis_semboller():
-    """IEX akışına abone olunacaklar (en fazla IEX_MAX): ana liste + açık pozisyonlar + koşanlar (en çok yükselen önce)."""
+def akis_semboller(tum=False):
+    """Canlı akışa abone olunacaklar: ana liste + açık pozisyonlar + aktif kırılım planları + alarmlar + koşanlar
+    (en çok yükselen önce) + izleme listesi. İlk IEX_MAX'i Alpaca IEX, devamı (varsa) Finnhub."""
     s = list(SYMBOLS)
     try:
         s += [p["sym"] for p in bot.open_positions()]
     except Exception:
         pass
+    s += list(PLAN.planlar) + [x["sym"] for x in KK["alarm"]]
     run = sorted(scanner.runners.items(), key=lambda kv: -((kv[1] or {}).get("pct") or 0))
-    s += [k for k, _ in run]
+    s += [k for k, _ in run] + list(IZLE)
     out = []
     for x in s:
         if x and x not in out:
             out.append(x)
-    return out[:IEX_MAX]
+    return out if tum else out[:IEX_MAX]
 
 
 async def alpaca_loop():
@@ -6353,7 +6355,7 @@ async def tg_analiz(sym):
     return "\n".join(out), png
 
 
-YARDIM = ("<b>Komutlar</b>\n/liste — ☀️ günün listesi ve durumu\n/girseydin — 💡 bugünkü kırılımlardan girseydin kaç % olurdu\n/hafta — 📅 haftalık rapor kartı\n/anket — 🗳 kanala \"bu hafta hangi hisse\" anketi\n/ders 1 — 🎓 mini kurs (5 ders)\n/kurgular — 🧭 kurgu kesici: hangi kurgu açık, hangisi gölgede\n/cikis — 🧪 çıkış laboratuvarı (4 çıkış kuralı karşılaştırması)\n/planlar — 📐 aktif kırılım planları (\"X kırılırsa giriş\")\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
+YARDIM = ("<b>Komutlar</b>\n/liste — ☀️ günün listesi ve durumu\n/girseydin — 💡 bugünkü kırılımlardan girseydin kaç % olurdu\n/hafta — 📅 haftalık rapor kartı\n/anket — 🗳 kanala \"bu hafta hangi hisse\" anketi\n/ders 1 — 🎓 mini kurs (5 ders)\n/kurgular — 🧭 kurgu kesici: hangi kurgu açık, hangisi gölgede\n/cikis — 🧪 çıkış laboratuvarı (4 çıkış kuralı karşılaştırması)\n/planlar — 📐 aktif kırılım planları (\"X kırılırsa giriş\")\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/sahip — bu sohbeti bot sahibi yap (sağlık raporları buraya gelir)\n/saglik — 🩺 bot sağlık durumu\n/kuraltest — 🧪 kuralları geçmiş veride karşılaştır\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
           "/analiz QNME — 15 dk analiz ve plan (grafikli)\n/alarm QNME 0.90 — fiyat alarmı\n/alarmlar — kurulu alarmlar\n"
           "/alarmsil QNME — alarmı sil\n/yorum — yapay zekalı piyasa yorumu\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
           "/basla — yeni işlem açmaya devam\n/ogren — bot ne öğrendi (saat, kurgular, model) · /ogren simdi — öğrenme turunu şimdi çalıştır\n"
@@ -6403,6 +6405,25 @@ async def tg_komut(text, chat, thread=None):
                                                     thread=thread)
     if cmd in ("start", "yardim", "yardım", "help"):
         send(YARDIM)
+    elif cmd == "sahip":
+        if not sahip_chat() or str(sahip_chat()) == str(chat):
+            KK["sahip"] = str(chat)
+            kk_kaydet()
+            send("✅ Bu sohbet bot sahibi olarak kaydedildi. Sağlık raporları, uyarılar ve kural testi buraya gelecek.\n\n"
+                 + "\n".join(saglik_satirlari()))
+        else:
+            send("Bot sahibi zaten kayıtlı.")
+    elif cmd in ("saglik", "sağlık"):
+        send("🩺 <b>SAĞLIK</b>\n" + "\n".join(saglik_satirlari()))
+    elif cmd in ("kuraltest", "kural"):
+        if KRT["running"]:
+            send(f"🧪 Kural testi çalışıyor: {KRT['prog']}")
+        elif arg and arg[0] in ("SONUC", "SONUÇ"):
+            krt_gonder()
+        else:
+            KRT["istek"] = 1
+            send("🧪 Kural testi sıraya alındı: normal seans kapalıyken başlar (son 10 gün, ~40 koşan hisse, 6 kural seçeneği). "
+                 "Bitince sonuç kartı gelecek.")
     elif cmd == "durum":
         send(tg_durum())
     elif cmd == "yorum":
@@ -7826,6 +7847,23 @@ DURUM_AD = {"yeni": "Durum: ⏳ <b>kırılım bekleniyor</b>",
 PLAN_FOTO = {}          # key → durum: plan resmi yeni rozetle yeniden çizilecek
 TG_SUSTUR = {}          # sym → gün: o gün plan/sinyal mesajı gönderilmez
 PLAN_TG_RED = {}        # sym → (zaman, neden): plan kuruldu ama Telegram'a gitmedi
+PLAN_ZINCIR = {}        # plan mesajı → olay zinciri (yaklaştı → onaylandı → K1 …): ilk mesajın altında özet
+
+
+def zincir(key, metin):
+    """Hissenin bütün gelişmeleri ilk plan mesajının altında sırayla görünsün."""
+    if not key:
+        return
+    L = PLAN_ZINCIR.setdefault(key, [])
+    sa = datetime.now(TR).strftime("%H:%M")
+    if L and L[-1].endswith(metin):
+        return
+    L.append(f"{sa} {metin}")
+    if key not in PLAN_DURUM:
+        PLAN_DURUM[key] = (tg.meta.get(key) or {}).get("durum", "").split("\n")[0] or DURUM_AD["yeni"]
+    if len(PLAN_ZINCIR) > 200:
+        for k_ in list(PLAN_ZINCIR)[:80]:
+            PLAN_ZINCIR.pop(k_, None)
 
 
 def sustur_mu(sym):
@@ -7853,7 +7891,7 @@ def _gun_et():
 
 def kk_kaydet():
     backup.data["kk"] = {"kayit": KK["kayit"][-300:], "alarm": KK["alarm"][-40:],
-                         "float": dict(list(KK["float"].items())[-300:]), "gon": KK["gon"]}
+                         "float": dict(list(KK["float"].items())[-300:]), "gon": KK["gon"], "sahip": KK["sahip"]}
     backup.dirty = True
 
 
@@ -8158,7 +8196,7 @@ def radar_gonder():
 def ders_gonder():
     KR = kural_karnesi(7)
     if KR:
-        sat = [{"sym": x["kural"][:22], "alt": f"{x['kaz']} kazanan · {x['kay']} kaybeden", "sag": f"%{x['wr']}",
+        sat = [{"sym": x["kural"][:26], "hash": False, "alt": f"{x['kaz']} kazanan · {x['kay']} kaybeden", "sag": f"%{x['wr']}",
                 "renk": "up" if x["wr"] >= 50 else "dn", "cubuk": x["wr"] / 100} for x in KR[:10]]
         png = _kart({"baslik": "Haftalık Kural Karnesi", "rozet": "ÖĞRENME", "renk": "vio",
                      "saat": datetime.now(TR).strftime("%d.%m.%Y"), "alt": "Hangi kural kazandırdı, hangisi kaybettirdi",
@@ -8195,6 +8233,192 @@ def alarm_gonder(al, px):
         push.notify(f"🔔 {al['sym']} {fk(al['fiyat'])} {ok}", f"Şimdi {fk(px)}", tag="alarm", url="/")
     except Exception:
         pass
+
+
+def sahip_chat():
+    return os.getenv("TG_SAHIP") or KK.get("sahip") or ""
+
+
+SAGLIK = {"plan": {}, "uyari": {}, "acik": set(), "rapor": None, "basla_tg": 0}
+FINN = {"durum": "kapalı (FINNHUB_KEY yok)" if not os.getenv("FINNHUB_KEY") else "başlıyor", "abone": set(), "son": 0.0}
+KRT = {"running": False, "istek": 0, "t": 0, "sonuc": None, "prog": "", "hata": ""}
+
+
+def _sahip_gonder(html, png=None):
+    ch = sahip_chat()
+    if ch and tg.ok:
+        tg.send(html, {"png": png} if png else None, chat=ch, konu="saglik", quiet=False)
+
+
+def saglik_satirlari():
+    now = time.time()
+    son_canli = max((v.get("t") or 0 for v in store.live.values()), default=0)
+    son_canli = max(son_canli, FINN["son"])
+    gun = _gun_et()
+    dun = sorted(k for k in SAGLIK["plan"] if k < gun)[-1:] or [None]
+    o = karne_ozet(dun[0]) if dun[0] else None
+    bas_bugun = sum(1 for t in backup.data.get("starts", []) if t >= time.time() - 86400)
+    return [f"{'✅' if state.iex == 'bağlı' else '⚠️'} Alpaca IEX: {state.iex} · {len(akis_semboller())} hisse canlı",
+            f"{'✅' if FINN['durum'] == 'bağlı' else '➖'} Finnhub: {FINN['durum']}" + (f" · {len(FINN['abone'])} hisse" if FINN["abone"] else ""),
+            f"{'✅' if now - state.yahoo_ok < 600 else '⚠️'} Mum verisi: son {int((now - state.yahoo_ok) // 60) if state.yahoo_ok else '—'} dk önce"
+            + (f" ({state.yahoo_err[:60]})" if state.yahoo_err and now - state.yahoo_ok > 600 else ""),
+            f"⚡ Son canlı işlem: {int((now - son_canli) // 60) if son_canli else '—'} dk önce",
+            f"📋 Koşan {len(scanner.runners)} · kırılım izleme {len(IZLE)} · aktif plan {len(PLAN.planlar)} · TradingView: {scanner.tv_status}",
+            (f"📐 Dün: {o['gonderilen']} plan kanala gitti · {o['kirilan']} kırıldı · K1+ %{o['wr']}" if o and o["wr"] is not None
+             else f"📐 Dün: {o['gonderilen']} plan kanala gitti" if o else "📐 Dün: kayıt yok"),
+            f"💾 Bellek {bellek_mb()}/512 MB · son 24 saatte {bas_bugun} kez başladı",
+            f"🧪 Kural testi: " + (f"{datetime.fromtimestamp(KRT['t'], TR).strftime('%d.%m')} · {KRT['sonuc']['varyant'][0]['ad']}"
+                                   f" K1+ %{KRT['sonuc']['varyant'][0]['wr']}" if KRT.get("sonuc") and KRT["sonuc"].get("varyant") else "henüz yok")]
+
+
+def _uyari(tur, var, metin, duzeldi):
+    """Sorun başlayınca (saatte en fazla bir) uyar, düzelince bir kez haber ver."""
+    now = time.time()
+    if var:
+        if now - SAGLIK["uyari"].get(tur, 0) >= 3600:
+            SAGLIK["uyari"][tur] = now
+            SAGLIK["acik"].add(tur)
+            _sahip_gonder("⚠️ <b>BOT SAĞLIK UYARISI</b>\n" + metin)
+    elif tur in SAGLIK["acik"]:
+        SAGLIK["acik"].discard(tur)
+        SAGLIK["uyari"].pop(tur, None)
+        _sahip_gonder("✅ " + duzeldi)
+
+
+async def saglik_loop():
+    """Sahibe özel: açılışta yeniden başlama bildirimi, her iş günü 09:00 ET sağlık raporu, sorun uyarıları."""
+    await asyncio.sleep(120)
+    if sahip_chat() and tg.ok:
+        bas = sum(1 for t in backup.data.get("starts", []) if t >= time.time() - 86400)
+        _sahip_gonder(f"🔄 <b>Bot yeniden başladı</b> · bellek {bellek_mb()} MB · son 24 saatte {bas}. başlama"
+                      + ("\n⚠️ Çok sık başlıyor: bellek taşıyor olabilir (Render'da MEM_DAYS=2 olmalı)" if bas >= 4 else ""))
+    while True:
+        await asyncio.sleep(60)
+        try:
+            if not sahip_chat() or not tg.ok:
+                continue
+            n = datetime.now(ET)
+            ses = cal.session(time.time())
+            gun = str(n.date())
+            if n.weekday() < 5 and n.hour == 9 and n.minute < 10 and SAGLIK["rapor"] != gun:
+                SAGLIK["rapor"] = gun
+                _sahip_gonder("🩺 <b>GÜNLÜK SAĞLIK RAPORU</b>\n" + "\n".join(saglik_satirlari()))
+            if ses in ("pre", "regular"):
+                now = time.time()
+                son = max((v.get("t") or 0 for v in store.live.values()), default=0)
+                son = max(son, FINN["son"])
+                _uyari("veri", son and now - son > 900, f"15 dakikadır hiç canlı işlem gelmiyor (IEX: {state.iex}).",
+                       "Canlı veri tekrar akıyor.")
+                _uyari("mum", state.yahoo_ok and now - state.yahoo_ok > 900,
+                       f"15 dakikadır mum verisi güncellenmiyor: {state.yahoo_err[:80] or 'bilinmeyen hata'}", "Mum verisi tekrar geliyor.")
+                acik_dk = (n.hour * 60 + n.minute) - 570
+                _uyari("plan", ses == "regular" and acik_dk >= 120 and not SAGLIK["plan"].get(gun),
+                       "Açılıştan 2 saat geçti, bugün hiç kırılım planı kurulmadı. Hisse sayfasında 'Neden mesaj gelmedi?' ile bak.",
+                       "Kırılım planları tekrar kuruluyor.")
+            _uyari("bellek", bellek_mb() > BELLEK_SINIR + 60, f"Bellek {bellek_mb()} MB (sınır 512): yakında yeniden başlayabilir.",
+                   "Bellek normale döndü.")
+        except Exception as e:
+            log.warning("Sağlık kontrolü hatası: %s", e)
+
+
+async def finnhub_loop():
+    """Ücretsiz Finnhub websocket: IEX'in 30 hisse sınırının ötesindeki 50 hisse daha (alım/satım akışı ve canlı fiyat)."""
+    key = os.getenv("FINNHUB_KEY", "")
+    if not key:
+        return
+    geri = 5
+    while True:
+        try:
+            async with websockets.connect(f"wss://ws.finnhub.io?token={key}", ping_interval=20, max_size=2 ** 22) as ws:
+                FINN["durum"] = "bağlı"
+                FINN["abone"] = set()
+                geri = 5
+
+                async def abone():
+                    while True:
+                        yeni = set(akis_semboller(tum=True)[IEX_MAX:IEX_MAX + 50])
+                        for x in FINN["abone"] - yeni:
+                            await ws.send(json.dumps({"type": "unsubscribe", "symbol": x}))
+                        for x in yeni - FINN["abone"]:
+                            await ws.send(json.dumps({"type": "subscribe", "symbol": x}))
+                        FINN["abone"] = yeni
+                        await asyncio.sleep(60)
+                g_ = asyncio.create_task(abone())
+                try:
+                    async for raw in ws:
+                        m = json.loads(raw)
+                        if m.get("type") == "trade":
+                            for d in m.get("data") or []:
+                                akis_islem(d.get("s"), float(d.get("p") or 0), float(d.get("v") or 0), (d.get("t") or 0) / 1000)
+                            FINN["son"] = time.time()
+                        elif m.get("type") == "error":
+                            FINN["durum"] = f"hata: {str(m.get('msg'))[:60]}"
+                finally:
+                    g_.cancel()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            FINN["durum"] = f"koptu: {str(e)[:60]}"
+        await asyncio.sleep(geri)
+        geri = min(300, geri * 2)
+
+
+async def krt_run(n_days=10):
+    KRT.update(running=True, prog="başlıyor…", hata="")
+
+    def prog(i, n, sym=""):
+        KRT["prog"] = sym if not n else f"{i}/{n} hisse-gün · {sym}"
+
+    try:
+        r = await asyncio.to_thread(geriye.kural_test, ALPACA_KEY, ALPACA_SECRET, n_days, ET, prog,
+                                    lambda: cal.session(time.time()) == "regular")
+        if r.get("hata"):
+            KRT["hata"] = r["hata"]
+        else:
+            KRT.update(sonuc=r, t=int(time.time()))
+            backup.data["krt"] = {"sonuc": r, "t": KRT["t"]}
+            backup.dirty = True
+            krt_gonder()
+        bellek_bosalt()
+    except Exception as e:
+        KRT["hata"] = str(e)[:160]
+        log.warning("Kural testi hatası: %s", e)
+    KRT.update(running=False, prog="", istek=0)
+
+
+def krt_gonder():
+    r = KRT.get("sonuc") or {}
+    V = [v for v in r.get("varyant") or [] if v["n"]]
+    if not V:
+        return
+    en = max(V, key=lambda v: (v["avg"] or -9, v["n"]))
+    kisa = {"Şu anki kurallar (uyarlanır · 2× hacim)": "Şu anki kurallar", "Tükenme / düşen tepe filtresi kapalı": "Filtreler kapalı"}
+    sat = [{"sym": kisa.get(v["ad"], v["ad"])[:22], "hash": False, "alt": f"{v['n']} kırılım · K1+ %{v['wr']}", "sag": f"{(v['avg'] or 0):+.2f}R".replace(".", ","),
+            "renk": "up" if (v["avg"] or 0) > 0 else "dn", "cubuk": (v["wr"] or 0) / 100} for v in V]
+    png = _kart({"baslik": "Kural Testi", "rozet": "GEÇMİŞ TEST", "renk": "vio", "saat": datetime.now(TR).strftime("%d.%m.%Y"),
+                 "alt": f"Son {r.get('gun')} gün · {r.get('aday')} koşan hisse-gün · kuralların seçenekleri", "satirlar": sat,
+                 "not_": "R = riske göre kazanç (1R = stop mesafesi) · geçmiş veri · yatırım tavsiyesi değildir"})
+    html = (f"🧪 <b>KURAL TESTİ · son {r.get('gun')} gün</b>\n" + "\n".join(
+        f"{'✅' if (v['avg'] or 0) > 0 else '❌'} {_h(v['ad'])}: {v['n']} kırılım · K1+ %{v['wr']} · ort. "
+        + f"{(v['avg'] or 0):+.2f}R".replace(".", ",")
+        for v in V) + f"\n\n💡 En iyi: <b>{_h(en['ad'])}</b>")
+    ch = sahip_chat()
+    if tg.ok:
+        tg.send(html, {"png": png} if png else None, chat=ch or None, konu="plan", quiet=True)
+
+
+async def krt_loop():
+    """Kural testi: istenince ya da her Cumartesi (normal seans dışında, başka test çalışmıyorken)."""
+    await asyncio.sleep(300)
+    while True:
+        await asyncio.sleep(60)
+        if KRT["running"] or KT["running"] or BT["running"] or not (ALPACA_KEY and ALPACA_SECRET):
+            continue
+        if cal.session(time.time()) == "regular":
+            continue
+        n = datetime.now(ET)
+        if KRT["istek"] or (n.weekday() == 5 and time.time() - (KRT["t"] or 0) > 3 * 86400):
+            await krt_run(10)
 
 
 async def kanal_loop():
@@ -8238,6 +8462,7 @@ def plan_olaylari():
         key = f"k:{p['id']}"
         sym = p["sym"]
         if ev == "yeni":
+            SAGLIK["plan"][_gun_et()] = SAGLIK["plan"].get(_gun_et(), 0) + 1
             kucuk = sym not in SYMBOLS
             feed_add("plan", sym, f"{fp_(p['giris'])} üstü kırılırsa giriş",
                      sub=f"stop {fp_(p['stop'])}   K1 {fp_(p['hedefler'][0])}   K2 {fp_(p['hedefler'][1])}   "
@@ -8274,6 +8499,7 @@ def plan_olaylari():
             if (kok in tg.meta or kok in PLAN_DURUM) and tg.ok and not sustur_mu(sym):
                 tg.send(kirilim_html(p, retest=True), plan_grafik_ch(p, durum="onaylı"), sym=sym, reply=kok, konu="plan", quiet=False)
                 kk_ekle(p, kirildi=True)
+                zincir(kok, f"🔁 tekrar test girişi {fk(p.get('e'))}")
             continue
         if key not in tg.meta and key not in PLAN_DURUM:
             continue
@@ -8284,10 +8510,12 @@ def plan_olaylari():
                         f"Fiyat {fk(p['giris'])} üstünde ama: {_h(planmod.RED_AD.get(p.get('red'), p.get('red') or ''))}.\n"
                         "<i>Koşullar düzelirse kırılım ayrıca bildirilir.</i>",
                         plan_grafik_ch(p, durum="sahte"), sym=sym, reply=key, konu="plan", quiet=True)
+                zincir(key, "⚠️ tükenme uyarısı · alım yok")
             continue
         if ev == "onaylı" and not p.get("bitis") and tg.ok and not p.get("onay_tg"):
             p["onay_tg"] = 1
             tg.send(kirilim_html(p), plan_grafik_ch(p, durum="onaylı"), sym=sym, reply=key, konu="plan", quiet=False)
+            zincir(key, f"🟢 onaylandı {fk(p.get('e') or p['giris'])} ({p.get('tf', 5)} dk)")
         sa = datetime.fromtimestamp(p.get("ot") or p.get("bitis") or time.time(), TR).strftime("%H:%M")
         if ev == "onaylı" and BOT_CFG.get("secici", 1):
             sg_ = engine.by_id.get(p.get("sig") or "")
@@ -8308,6 +8536,7 @@ def plan_olaylari():
                         + (f"<i>Bot içeride: stop <code>{fk(p['stop'])}</code> korunuyor; seviye geri alınmazsa çıkmak mantıklı.</i>"
                            if bot_ic else "<i>Bot girmedi · plan kapandı</i>"),
                         plan_grafik_ch(p, durum="sahte"), sym=sym, reply=key, konu="plan", quiet=not bot_ic)
+                zincir(key, "❌ sahte kırılım")
         elif ev == "kaçtı":
             PLAN_DURUM[key] = DURUM_AD["kaçtı"]
             PLAN_FOTO[key] = "kaçtı"
@@ -8342,6 +8571,7 @@ def plan_olaylari():
                                ("💡 Stopu girişe çekmek mantıklı." if i == 0 else "💰 Kârın bir kısmını almak mantıklı.")),
                             plan_grafik_ch(p, durum="k1" if i == 0 else "k2"),
                             sym=p["sym"], reply=f"k:{p['id']}", konu="plan", quiet=False)
+                    zincir(f"k:{p['id']}", f"🎯 K{i + 1} geldi {fk(h_[i])}")
     try:
         plan_takip()
     except Exception as e:
@@ -8397,6 +8627,7 @@ def yaklasma_kontrol():
         except Exception:
             pass
         tg.send("\n".join(sat), ch, sym=sym, reply=key, konu="plan", quiet=False)
+        zincir(key, f"🎯 yaklaştı {fk(px)} (%{str(round(uz, 1)).replace('.', ',')} kaldı)")
 
 
 def plan_takip():
@@ -8432,6 +8663,7 @@ def plan_takip():
             except Exception:
                 pass
             tg.send(html, ch, sym=p["sym"], reply=key, konu="plan", quiet=durum != "bozuldu")
+            zincir(key, "⚠️ kırılım bozuldu" if durum == "bozuldu" else f"🚀 kırılımdan {fy(tepe_pct)}")
 
         # kırılım bozuldu: onaydan sonra fiyat seviyenin %1 altına döndü
         if px < lvl * 0.99:
@@ -8473,6 +8705,9 @@ async def tg_plan_guncelle():
     """Plan mesajlarının alt satırı: ⏳ → 🏃 / ✅ / ❌ / ⌛"""
     for key, d in list(PLAN_DURUM.items()):
         m = tg.meta.get(key)
+        z_ = PLAN_ZINCIR.get(key)
+        if z_:
+            d = d + "\n" + "\n".join(z_[-6:])
         if not m or key not in tg.msg or m.get("durum") == d:
             continue
         text = m["base"] + "\n\n" + d
@@ -8826,8 +9061,10 @@ async def lifespan(app):
     dinle.on_msg = dis_oto
     learner.rebuild(engine.signals + BT["sigs"] + dis.as_signals())
     apply_ayar(backup.data.get("ayar"))
+    if isinstance(backup.data.get("krt"), dict) and backup.data["krt"].get("sonuc"):
+        KRT.update(sonuc=backup.data["krt"]["sonuc"], t=backup.data["krt"].get("t") or 0)
     if isinstance(backup.data.get("kk"), dict):
-        for k_ in ("kayit", "alarm", "float", "gon"):
+        for k_ in ("kayit", "alarm", "float", "gon", "sahip"):
             if isinstance(backup.data["kk"].get(k_), type(KK[k_])):
                 KK[k_] = backup.data["kk"][k_]
     if isinstance(backup.data.get("liste"), dict):
@@ -8878,7 +9115,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop)]
+                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -9036,9 +9273,18 @@ def api_tape(sym: str):
 
 @app.get("/api/kk")
 def api_kk():
-    """Kırılım karnesi + radar + haftanın dersleri."""
+    """Kırılım karnesi + radar + haftanın dersleri + kural testi + sağlık."""
     return {"karne": karne_ozet(None, 30), "bugun": karne_ozet(_gun_et()), "radar": radar_listesi(), "ders": ders_listesi(7),
-            "kural": kural_karnesi(7)}
+            "kural": kural_karnesi(7), "test": KRT.get("sonuc"), "test_t": KRT.get("t"), "test_run": KRT["running"],
+            "test_prog": KRT.get("prog"), "saglik": saglik_satirlari()}
+
+
+@app.post("/api/kuraltest")
+async def api_kuraltest(request: Request):
+    if not authorized(request):
+        return JSONResponse({"ok": 0, "hata": "giriş gerekli"}, status_code=401)
+    KRT["istek"] = 1
+    return {"ok": 1, "running": KRT["running"]}
 
 
 @app.post("/api/alarm")

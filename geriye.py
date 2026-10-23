@@ -372,3 +372,78 @@ def kosan_test(key, secret, n_days, et, progress=None, should_stop=None, ekle=No
     summ["aday"] = len(adaylar)
     summ["taranan"] = n_tum
     return out, summ
+
+
+KURAL_VARYANT = [("Şu anki kurallar (uyarlanır · 2× hacim)", {}),
+                 ("Hep 5 dk kapanış", {"tf": "5"}),
+                 ("Hep 1 dk kapanış", {"tf": "1"}),
+                 ("Hacim 1,5× yeter", {"hacim_k": 1.5}),
+                 ("Hacim 3× şart", {"hacim_k": 3.0}),
+                 ("Tükenme / düşen tepe filtresi kapalı", {"filtre": 0})]
+
+
+def kural_test(key, secret, n_days, et, progress=None, should_stop=None, max_n=40):
+    """Kırılım kurallarının seçenekleri geçmiş koşan hisselerde: her seçenek için kırılım sinyali sonuçları (R).
+    Dönüş: {"varyant": [{"ad","n","wr","avg","tot"}], "aday", "gun", "sn"}"""
+    hdr = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
+    now = datetime.now(UTC)
+    t0 = time.time()
+    sonuc = {ad: [] for ad, _ in KURAL_VARYANT}
+    with httpx.Client(timeout=40) as c:
+        days = calendar(c, hdr, (now - timedelta(days=int(n_days * 1.6) + 10)).date(), now.date())
+        trade_days = sorted(d for d in days if d <= datetime.now(et).date())[-(n_days + 1):]
+        if len(trade_days) < 2:
+            return {"hata": "takvim alınamadı"}
+        cal = BtCal({d: days[d] for d in trade_days}, et)
+        if progress:
+            progress(0, 0, "aday hisseler bulunuyor…")
+        adaylar, _ = kosan_adaylari(c, hdr, trade_days, et, min_pct=20.0, max_n=max_n)
+        for n, (sym, d, pc, hp) in enumerate(adaylar):
+            if should_stop and should_stop():
+                break
+            i = trade_days.index(d)
+            p = trade_days[i - 1]
+            start = datetime.combine(p, dtime(4), tzinfo=et).astimezone(UTC)
+            end = min(datetime.combine(d, dtime(20), tzinfo=et).astimezone(UTC), now - timedelta(minutes=20))
+            try:
+                bars = fetch(c, hdr, sym, start, end)
+            except Exception:
+                continue
+            tss = sorted(bars)
+            day_tss = [t for t in tss if cal.bar_info(t)[0] == d]
+            if len(day_tss) < 30:
+                continue
+            base = len(tss) - len(day_tss)
+            for ad, ay in KURAL_VARYANT:
+                store = _Store()
+                store.bars[sym] = bars
+                eng = sinyal.Engine(store, cal.bar_info, cal, et)
+                eng.learner = None
+                eng.bt_mode = True
+                eng.runners = {}
+                eng.plan = _plan.Planci(bt=True, ayar=ay)
+                eng.sadece_plan = {sym}
+                for k in range(max(base, 25), len(tss)):
+                    T = tss[k]
+                    if cal.bar_info(T)[1] == 3 or cal.bar_info(T)[0] != d:
+                        continue
+                    try:
+                        eng._evaluate(sym, tss, bars, k, T + 60)
+                    except Exception:
+                        pass
+                fin = day_tss[-1] + 4 * 3600
+                for sig in eng.signals:
+                    eng._update(sig, day_tss, bars, fin)
+                sonuc[ad] += [s_["r"] for s_ in eng.signals if s_.get("setup") == "kirilim" and s_.get("r") is not None]
+                del eng, store
+            del bars
+            gc.collect()
+            if progress:
+                progress(n + 1, len(adaylar), sym)
+            time.sleep(0.2)
+    out = []
+    for ad, _ in KURAL_VARYANT:
+        rs = sonuc[ad]
+        out.append({"ad": ad, "n": len(rs), "wr": round(100 * sum(1 for r in rs if r > 0) / len(rs)) if rs else None,
+                    "avg": round(sum(rs) / len(rs), 3) if rs else None, "tot": round(sum(rs), 2)})
+    return {"varyant": out, "aday": len(adaylar), "gun": n_days, "sn": int(time.time() - t0)}
