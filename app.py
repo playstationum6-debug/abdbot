@@ -21,6 +21,7 @@ import hmac
 import json
 import math
 import random
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
 import secrets
@@ -35,9 +36,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
-import pandas as pd
 import websockets
-import yfinance as yf
 
 import analiz
 import denetci
@@ -1133,11 +1132,61 @@ def status_payload():
 
 
 # ----------------------------------------------------------------- Yahoo
+_YH = {"c": None, "hata": 0, "yedek": 0}
+_YH_UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+          "Accept": "application/json"}
+
+
+def _yh_client():
+    if _YH["c"] is None:
+        _YH["c"] = httpx.Client(timeout=20, headers=_YH_UA, http2=False)
+    return _YH["c"]
+
+
+def yahoo_mum(sym, rng, interval, prepost=True):
+    """Yahoo grafik verisi doğrudan JSON olarak: [(ts, o, h, l, c, v)]. pandas/yfinance yüklemez (bellek ~60 MB az)."""
+    son = None
+    for host in ("query1", "query2"):
+        try:
+            r = _yh_client().get(f"https://{host}.finance.yahoo.com/v8/finance/chart/{sym}",
+                                 params={"range": rng, "interval": interval, "includePrePost": "true" if prepost else "false"})
+            if r.status_code != 200:
+                son = RuntimeError(f"Yahoo {r.status_code}")
+                continue
+            res = ((r.json().get("chart") or {}).get("result") or [None])[0]
+            if not res:
+                return []
+            ts = res.get("timestamp") or []
+            q = ((res.get("indicators") or {}).get("quote") or [{}])[0]
+            O, H, L, C, V = (q.get(k) or [] for k in ("open", "high", "low", "close", "volume"))
+            out = []
+            for i, t in enumerate(ts):
+                c = C[i] if i < len(C) else None
+                if c is None:
+                    continue
+                o = O[i] if i < len(O) and O[i] is not None else c
+                h = H[i] if i < len(H) and H[i] is not None else max(o, c)
+                l = L[i] if i < len(L) and L[i] is not None else min(o, c)
+                v = V[i] if i < len(V) and V[i] is not None else 0
+                out.append((int(t), float(o), float(h), float(l), float(c), float(v)))
+            return out
+        except Exception as e:
+            son = e
+    _YH["hata"] += 1
+    raise son or RuntimeError("Yahoo yanıt vermedi")
+
+
 _daily_cache = {}   # sembol -> (zaman, mumlar)
 
 
 def daily_fetch(sym):
     """Günlük grafik için 1 yıllık günlük mumlar (Yahoo)."""
+    try:
+        return [[datetime.fromtimestamp(t, ET).strftime("%Y-%m-%d"), round(o, 4), round(h, 4), round(l, 4), round(c, 4), int(v)]
+                for t, o, h, l, c, v in yahoo_mum(sym, "1y", "1d", False)]
+    except Exception:
+        _YH["yedek"] += 1
+    import pandas as pd, yfinance as yf
     df = yf.download(sym, period="1y", interval="1d", auto_adjust=False, progress=False, threads=False)
     if df is None or df.empty:
         return []
@@ -1197,6 +1246,24 @@ def yahoo_fetch(symbols, period):
 
 
 def _yahoo_fetch1(symbols, period):
+    """Önce hafif JSON istemcisi (hisse başına bir istek); hepsi başarısızsa yfinance yedeği."""
+    out, hata = {}, 0
+
+    def _bir(s_):
+        try:
+            return s_, yahoo_mum(s_, period, "1m", True)
+        except Exception:
+            return s_, None
+    with ThreadPoolExecutor(max_workers=min(4, len(symbols))) as ex:      # eskisi gibi 4 paralel istek
+        for s_, B in ex.map(_bir, symbols):
+            if B is None:
+                hata += 1
+            elif B:
+                out[s_] = {t: (o, h, l, c, v) for t, o, h, l, c, v in B}
+    if out or hata < len(symbols):
+        return out
+    _YH["yedek"] += 1
+    import pandas as pd, yfinance as yf
     df = yf.download(
         tickers=" ".join(symbols), period=period, interval="1m", prepost=True,
         group_by="ticker", auto_adjust=False, threads=min(4, len(symbols)), progress=False,
@@ -5332,6 +5399,11 @@ _kar_cache = {}
 
 
 def kar_fetch(sym, period, interval):
+    try:
+        return [(t, c) for t, o, h, l, c, v in yahoo_mum(sym, period, interval, False)]
+    except Exception:
+        _YH["yedek"] += 1
+    import pandas as pd, yfinance as yf
     df = yf.download(sym, period=period, interval=interval, auto_adjust=False, progress=False, threads=False,
                      prepost=False)
     if df is None or df.empty:
@@ -8723,7 +8795,7 @@ def saglik_satirlari():
             (f"📐 Dün: {o['gonderilen']} plan kanala gitti · {o['kirilan']} kırıldı · K1+ %{o['wr']}" if o and o["wr"] is not None
              else f"📐 Dün: {o['gonderilen']} plan kanala gitti" if o else "📐 Dün: kayıt yok"),
             f"⏸ Halt takibi: {HALT['durum']} · bugün {HALT['n']} · 🎬 video {VIDEO['n']}/{VIDEO_GUNLUK}",
-            f"💾 Bellek {bellek_mb()}/512 MB · son 24 saatte {bas_bugun} kez başladı",
+            f"💾 Bellek {bellek_mb()}/512 MB · son 24 saatte {bas_bugun} kez başladı" + (f" · ⚠️ Yahoo yedeğe düştü {_YH['yedek']} kez" if _YH["yedek"] else ""),
             f"🧪 Kural testi: " + (f"{datetime.fromtimestamp(KRT['t'], TR).strftime('%d.%m')} · {KRT['sonuc']['varyant'][0]['ad']}"
                                    f" K1+ %{KRT['sonuc']['varyant'][0]['wr']}" if KRT.get("sonuc") and KRT["sonuc"].get("varyant") else "henüz yok")]
 
@@ -9755,6 +9827,11 @@ _m15_cache = {}
 
 def m15_fetch(sym):
     """Kısa vade analizi için 60 günlük 15 dk mumlar (Yahoo, normal seans)."""
+    try:
+        return yahoo_mum(sym, "60d", "15m", False)
+    except Exception:
+        _YH["yedek"] += 1
+    import pandas as pd, yfinance as yf
     df = yf.download(sym, period="60d", interval="15m", auto_adjust=False, progress=False, threads=False, prepost=False)
     if df is None or df.empty:
         return []
