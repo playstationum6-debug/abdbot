@@ -786,7 +786,7 @@ HB = haberci.Haberci(os.getenv("SEC_UA", ""))
 scanner.keep = lambda sym: any(p["sym"] == sym for p in bot.open_positions())
 bot = botmod.Bot(engine, learner, store, cal, ET, ALPACA_KEY, ALPACA_SECRET, log, BOT_CFG)
 YZM = yzmod.YZ(scanner, log)          # Gemini + Google arama (anahtar: Render Environment → GEMINI_API_KEY)
-PLAN = planmod.Planci()               # kanallar gibi: seviyeyi önceden çizer, "X kırılırsa giriş"
+PLAN = planmod.Planci(ayar={"tf": os.getenv("PLAN_TF", "uyarlanir")})               # kanallar gibi: seviyeyi önceden çizer, "X kırılırsa giriş"
 PLAN.kote_fn = lambda s: KOTE.get(s)
 engine.plan = PLAN
 class _Hepsi:
@@ -7922,7 +7922,7 @@ def _plan_html(p):
         sey = {"var": "⚠️ seyreltme VAR", "yok": "seyreltme yok"}.get(yz.get("seyreltme"), "seyreltme bilinmiyor")
         ek.append(f"🧠 {_h(str(yz['katalizor'])[:90])} · {sey}")
     return (f"⏳ <b>PLAN · #{_h(p['sym'])}</b>  <code>{fk(px)}</code> → <code>{fk(p['giris'])}</code>\n"
-            f"<i>Giriş: {fk(p['giris'])} üstünde 1 dk mum kapanırsa (2× hacimle) limit emirle alış</i>\n\n"
+            f"<i>Giriş: {fk(p['giris'])} üstünde mum kapanırsa (hızlı piyasada 1 dk, sakin piyasada 5 dk · 2× hacimle) limit emirle alış</i>\n\n"
             + tg_seviyeler(p["giris"], p["stop"], p["hedefler"], px) + "\n"
             + ih_satir
             + (spread_satir(p["sym"]) + "\n" if spread_satir(p["sym"]) else "")
@@ -7932,7 +7932,7 @@ def _plan_html(p):
             + (piyasa_satir() + "\n" if piyasa_satir() else "") +
             f"<blockquote expandable>📌 {_h(tur)} · puan {str(p['puan']).replace('.', ',')}"
             + "".join("\n" + x for x in ek) +
-            "\nDestek/direnç 5 ve 15 dk mumlardan. Onay: 1 dk mum direncin üstünde kapanmalı, hacmi son 20 mumun ≥2 katı. Açılışın ilk 15 dk'sı, tükenme, "
+            "\nDestek/direnç 5 ve 15 dk mumlardan. Onay: mum direncin üstünde kapanmalı (piyasa hızlıysa 1 dk, sakinse 5 dk), hacmi son 20 mumun ≥2 katı. Açılışın ilk 15 dk'sı, tükenme, "
             "3 düşen tepe, satış emri baskısı (5×) ya da spread > %2 varsa sinyal yok. Sonraki 1 dk mum seviyenin altına "
             "kapanırsa sahte sayılır. Kırılım tutarsa eski direncin destek testi (en güçlü giriş) ayrıca bildirilir."
             "</blockquote>")
@@ -8194,7 +8194,7 @@ def kk_guncelle():
                 r["zirve"] = z
                 deg = True
             px_ = fiyat(r["sym"])                                # yükseldikten sonra kırılımın altına döndü mü
-            if not r.get("geri") and px_ and px_ < r["giris"] and (r.get("zirve") or 0) >= r["giris"] * 1.01:
+            if not r.get("geri") and not r.get("k") and px_ and px_ < r["giris"] and (r.get("zirve") or 0) >= r["giris"] * 1.01:
                 r["geri"] = int(now)
                 deg = True
         if r["st"] in ("stop", "K3", "sahte", "kırılmadı", "bitti", "onaysız"):
@@ -8231,7 +8231,7 @@ def kk_guncelle():
                 deg = True
             continue
         r["tepe"], r["dip"] = max(r["tepe"] or px, px), min(r["dip"] or px, px)
-        while r["k"] < len(r["hed"]) and px >= r["hed"][r["k"]]:
+        while r["k"] < len(r["hed"]) and max(px, r.get("zirve") or 0) >= r["hed"][r["k"]]:   # mum tepesi de sayılır
             r["k"] += 1
             deg = True
         if px <= r["stop"]:
@@ -8260,7 +8260,7 @@ def kk_guncelle():
             if z and z > (c_.get("zirve") or 0):
                 c_["zirve"] = z
                 deg = True
-            if not c_.get("geri") and px < c_["fiyat"] and (c_.get("zirve") or 0) >= c_["fiyat"] * 1.01:
+            if not c_.get("geri") and px < c_["fiyat"] * 0.995 and (c_.get("zirve") or 0) < c_["fiyat"] * 1.02 and (c_.get("zirve") or 0) >= c_["fiyat"] * 1.01:
                 c_["geri"] = int(now)
                 deg = True
     # fiyat alarmları
@@ -8353,7 +8353,9 @@ def _zirve_since(sym, t0):
 
 
 def _geri(r):
-    """Kırılımdan sonra en az %1 yükselip sonra tekrar kırılım fiyatının altına düştü mü."""
+    """Kırılım tutmadı: K1'e varamadan tekrar kırılım fiyatının altına döndü. K1+ geldikten sonra düşmek başarı sayılır."""
+    if r.get("k"):
+        return False
     return bool(r.get("geri")) or (r.get("st") == "stop" and (_tepe_pct(r) or 0) >= 1)
 
 
@@ -8553,7 +8555,7 @@ def karne_gonder():
                 + f"\n💰 <b>Zirveden toplam: {'+' if top >= 0 else ''}{top}$</b>"
                 + f"\n📏 <b>Plana uysaydın: {'+' if o['plan_top'] >= 0 else ''}{o['plan_top']}$</b> <i>(stop ve hedeflerle, komisyon dahil)</i>\n\n") if kaz else "")
             + (f"Son 30 kırılım: K1+ oranı <b>%{g['wr']}</b> · ortalama zirve {_fy0(g['ort_tepe'])}\n" if g["wr"] is not None else "")
-            + ("↩️ = zirve yaptıktan sonra kırılım fiyatının altına düştü\n" if any(r.get("geri") for r in o["liste"]) else "")
+            + ("↩️ = K1'e varamadan kırılım fiyatının altına döndü\n" if any(r.get("geri") for r in o["liste"]) else "")
             + "<i>Zirve = kırılımdan sonraki en yüksek fiyat · kazanan da kaybeden de sayıldı · yatırım tavsiyesi değildir</i>")
     tg.send(html, {"png": png} if png else None, konu="plan", quiet=True)
 
@@ -9916,6 +9918,14 @@ async def lifespan(app):
         for k_ in ("kayit", "alarm", "float", "gon", "sahip", "tgplan", "cizgi", "tahmin"):
             if isinstance(backup.data["kk"].get(k_), type(KK[k_])):
                 KK[k_] = backup.data["kk"][k_]
+        for r in KK["kayit"]:                         # eski kayıtlar: K1/K2/K3'ü mum tepesine göre düzelt
+            z, hed = max(r.get("tepe") or 0, r.get("zirve") or 0), [h for h in (r.get("hed") or []) if h]
+            if r.get("kt") and r.get("st") != "sahte" and z:
+                k_ = sum(1 for h in hed[:3] if z >= h)
+                if k_ > (r.get("k") or 0):
+                    r["k"] = k_
+                    if k_ >= 3 and r.get("st") in ("stop", "kırıldı", "bitti"):
+                        r["st"] = "K3"
     if isinstance(backup.data.get("liste"), dict):
         LISTE.update({k: v for k, v in backup.data["liste"].items() if k in ("gun", "t", "liste", "gecmis")})
         if LISTE.get("gun") == datetime.now(ET).date().isoformat():
