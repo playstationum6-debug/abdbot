@@ -6501,7 +6501,7 @@ async def tg_analiz(sym):
     return "\n".join(out), png
 
 
-YARDIM = ("<b>Komutlar</b>\n/liste — ☀️ günün listesi ve durumu\n/girseydin — 💡 bugünkü kırılımlardan girseydin kaç % olurdu\n/hafta — 📅 haftalık rapor kartı\n/anket — 🗳 kanala \"bu hafta hangi hisse\" anketi\n/ders 1 — 🎓 mini kurs (5 ders)\n/kurgular — 🧭 kurgu kesici: hangi kurgu açık, hangisi gölgede\n/cikis — 🧪 çıkış laboratuvarı (4 çıkış kuralı karşılaştırması)\n/planlar — 📐 aktif kırılım planları (\"X kırılırsa giriş\")\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/sahip — bu sohbeti bot sahibi yap (sağlık raporları buraya gelir)\n/saglik — 🩺 bot sağlık durumu\n/ekran — 👀 ben olsam bunları takip ederdim listesini kanala şimdi at\n/kuraltest — 🧪 kuralları geçmiş veride karşılaştır\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
+YARDIM = ("<b>Komutlar</b>\n/liste — ☀️ günün listesi ve durumu\n/girseydin — 💡 bugünkü kırılımlardan girseydin kaç % olurdu\n/hafta — 📅 haftanın özeti (her kırılım + isabet)\n/anket — 🗳 kanala \"bu hafta hangi hisse\" anketi\n/ders 1 — 🎓 mini kurs (5 ders)\n/kurgular — 🧭 kurgu kesici: hangi kurgu açık, hangisi gölgede\n/cikis — 🧪 çıkış laboratuvarı (4 çıkış kuralı karşılaştırması)\n/planlar — 📐 aktif kırılım planları (\"X kırılırsa giriş\")\n/yz QNME — 🧠 yapay zekâ internette araştırıp analiz eder\n/sor soru — 🧠 yapay zekâya sor (botun verisini bilir)\n/yzkarne — yapay zekâ kararlarının karnesi\n/neden VIVK — bot bu hisseye neden girmedi (hangi kurala takıldı)\n/kosantest — koşan küçük hisse kurgularını geçmiş veride test et\n/super — 💎 bugünün süper fırsatları ve karnesi\n/hisse QNME — hisse kartı (resimli)\n/panel — kontrol panelini yeniden kur ve sabitle\n/durum — bot ve para durumu\n/sahip — bu sohbeti bot sahibi yap (sağlık raporları buraya gelir)\n/saglik — 🩺 bot sağlık durumu\n/ekran — 👀 ben olsam bunları takip ederdim listesini kanala şimdi at\n/kuraltest — 🧪 kuralları geçmiş veride karşılaştır\n/pozisyon — açık pozisyonlar\n/karne — tüm sonuçlar + grafik\n"
           "/analiz QNME — 15 dk analiz ve plan (grafikli)\n/alarm QNME 0.90 — fiyat alarmı\n/alarmlar — kurulu alarmlar\n"
           "/alarmsil QNME — alarmı sil\n/yorum — yapay zekalı piyasa yorumu\n/rapor — gün sonu raporunu şimdi gönder\n/dur — yeni işlem açmayı durdur\n"
           "/basla — yeni işlem açmaya devam\n/ogren — bot ne öğrendi (saat, kurgular, model) · /ogren simdi — öğrenme turunu şimdi çalıştır\n"
@@ -6657,7 +6657,10 @@ async def tg_komut(text, chat, thread=None):
         send(lab_tg())
     elif cmd in ("girseydin", "girsaydin", "girseydim"):
         girseydin_gonder(zorla=True, chat=chat)
-    elif cmd in ("hafta", "haftalik", "haftalık"):
+    elif cmd in ("hafta", "haftalik", "haftalık", "ozet", "özet"):
+        if not hafta_ozet_gonder(chat=chat):
+            send("📅 Bu hafta henüz sonuçlanmış kırılım yok.")
+    elif cmd in ("haftakart",):
         haftalik_gonder(chat=chat)
     elif cmd == "anket":
         ok_ = await anket_gonder(None if not arg else chat)
@@ -8107,7 +8110,7 @@ def _gun_et():
 
 
 def kk_kaydet():
-    backup.data["kk"] = {"kayit": KK["kayit"][-300:], "alarm": KK["alarm"][-40:],
+    backup.data["kk"] = {"kayit": KK["kayit"][-900:], "alarm": KK["alarm"][-40:],
                          "float": dict(list(KK["float"].items())[-300:]), "gon": KK["gon"], "sahip": KK["sahip"],
                          "tgplan": KK["tgplan"], "cizgi": KK["cizgi"][-120:], "tahmin": KK["tahmin"][-200:]}
     backup.dirty = True
@@ -8243,7 +8246,7 @@ def kk_ekle(p, kirildi=False, gizli=False):
                         "kural": list(p.get("kurallar") or []), "vr": p.get("vr") if kirildi else None,
                         "oz": _oz(p["giris"], p.get("tur"), spread_yuzde(p["sym"]), p.get("puan"), time.time()),
                         "ih": (p.get("ih") or {}).get("p"), **({"gizli": 1} if gizli else {})})
-    del KK["kayit"][:-300]
+    del KK["kayit"][:-900]
     kk_kaydet()
 
 
@@ -8587,6 +8590,64 @@ def _kart(K):
 
 def _fy0(x):
     return "—" if x is None else fy(x)
+
+
+def hafta_ozet_gonder(chat=None):
+    """Haftalık özet: her kırılım tek satır (giriş → K1 → K2 → K3 | zirve), sonra toplu özet. Tutmayanlar da sayılır."""
+    bugun = datetime.now(ET).date()
+    pzt = bugun - timedelta(days=bugun.weekday())
+    gunler = {str(pzt + timedelta(days=i)) for i in range(5)}
+    K = sorted([r for r in KK["kayit"] if r["gun"] in gunler and _gorunur(r) and r.get("kt")
+                and r["st"] not in ("bekliyor", "kırılmadı", "onaysız")], key=lambda r: (r["sym"], r["kt"]))
+    if not K:
+        return False
+    say, sat, tut, kaz = {}, [], [], []
+    for r in K:
+        say[r["sym"]] = say.get(r["sym"], 0) + 1
+    no = {}
+    for r in K:
+        no[r["sym"]] = no.get(r["sym"], 0) + 1
+        ad = f"${_h(r['sym'])}" + (f" ({no[r['sym']]}. giriş)" if say[r["sym"]] > 1 else "")
+        g, hed, k = r["giris"], [h for h in (r.get("hed") or []) if h][:3], min(r.get("k") or 0, 3)
+        zv = max(r.get("tepe") or 0, r.get("zirve") or 0)
+        zs = f" | 🔥 Zirve ${fk(zv)} ({_fy0(_tepe_pct(r))})" if zv else ""
+        if k:
+            parca = " → ".join(f"K{i + 1} ${fk(hed[i])} ({_fy0((hed[i] / g - 1) * 100)})" for i in range(k))
+            sat.append(f"✅ <b>{ad}</b> — Kırılım ${fk(g)} → {parca}{zs}")
+            kaz.append(((hed[k - 1] / g - 1) * 100, r, k))
+        else:
+            neden = "sahte kırılım" if r["st"] == "sahte" else "K1'e varmadan stop" if r["st"] == "stop" else "K1 gelmedi"
+            tut.append(f"❌ <b>{ad}</b> — Kırılım ${fk(g)} · {neden}{zs}")
+    zir = [(_tepe_pct(r) or 0, r) for r in K]
+    stp = [((r["stop"] / r["giris"] - 1) * 100) for r in K if not min(r.get("k") or 0, 3) and r.get("stop")]
+    tum = [x[0] for x in kaz] + stp
+    en_k = max(kaz, key=lambda x: x[0]) if kaz else None
+    en_z = max(zir, key=lambda x: x[0])
+    k2 = sum(1 for x in kaz if x[2] >= 2)
+    bas = (f"📊 <b>ABD BORSA ANALİZ — HAFTANIN ÖZETİ</b> 💚\n"
+           f"{pzt.strftime('%d.%m')}–{(pzt + timedelta(days=4)).strftime('%d.%m.%Y')} | {len(say)} hisse, {len(K)} kırılım\n")
+    ozet = (f"─────────────────────\n📈 <b>HAFTANIN ÖZETİ</b>\n"
+            f"{len(say)} farklı hisse, {len(K)} kırılım · ✅ <b>{len(kaz)} hedef gördü</b> ({k2} K2+, {len(kaz) - k2} yalnız K1) · ❌ {len(K) - len(kaz)} tutmadı\n"
+            f"🎯 İsabet: <b>%{round(100 * len(kaz) / len(K))}</b>\n"
+            + (f"Hedef görenlerin ortalaması (ulaşılan son hedefe göre): <b>{_fy0(sum(x[0] for x in kaz) / len(kaz))}</b>\n" if kaz else "")
+            + (f"Tüm kırılımların ortalaması (tutmayanlar stopla): <b>{_fy0(sum(tum) / len(tum))}</b>\n" if tum else "")
+            + (f"En yüksek hedef kazancı: ${_h(en_k[1]['sym'])} <b>{_fy0(en_k[0])}</b> (K{en_k[2]})\n" if en_k else "")
+            + f"🔥 En yüksek zirve: ${_h(en_z[1]['sym'])} <b>{_fy0(en_z[0])}</b>\n"
+            "<i>Zirve = kırılımdan SONRAKİ en yüksek fiyat · tutmayanlar da listede · yatırım tavsiyesi değildir</i>")
+    satirlar = sat + ([""] + tut if tut else [])
+    parcalar, cur = [], bas
+    for ln in satirlar:
+        if len(cur) + len(ln) > 3600:
+            parcalar.append(cur)
+            cur = ""
+        cur += ln + "\n"
+    if len(cur) + len(ozet) > 3900:
+        parcalar.append(cur)
+        cur = ""
+    parcalar.append(cur + ozet)
+    for m in parcalar[:4]:
+        tg.send(m, None, chat=chat, konu="plan", quiet=True)
+    return True
 
 
 def karne_gonder():
@@ -9308,6 +9369,10 @@ async def kanal_loop():
                 G["karne"] = gun
                 kk_kaydet()
                 karne_gonder()
+            if n.weekday() == 4 and 995 <= hm < 1025 and G.get("ozet") != gun:
+                G["ozet"] = gun
+                kk_kaydet()
+                hafta_ozet_gonder()
             if n.weekday() == 4 and 980 <= hm < 1010 and G.get("ders") != gun:
                 G["ders"] = gun
                 kk_kaydet()
