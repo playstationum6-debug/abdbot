@@ -1430,7 +1430,7 @@ def parse_ts(s):
 AKIS = {}            # sembol -> {"p": son fiyat, "y": son yön, "dk": {dakika: [alım, satım, adet]}}
 AKIS_DK = 30         # tutulan dakika
 KOTE = {}            # sembol -> (alış, satış, ts)  IEX en iyi alış/satış
-KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}, "sahip": "", "tgplan": {}, "cizgi": [], "tahmin": []}
+KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}, "sahip": "", "tgplan": {}, "cizgi": [], "tahmin": [], "gece": []}
 KOMISYON = float(os.getenv("KOMISYON", "1.5"))     # satış başına broker komisyonu ($)
 YEDEK_ACIL = [0]     # plan mesajı gitti: 2 dk içinde yedekle (yeniden başlamada aynı plan tekrar gitmesin)   # kanal ekleri: kırılım karnesi, fiyat alarmı, float, gönderim izleri
 SPREAD_MAX = float(os.getenv("SPREAD_MAX", "2.0"))   # % üstü: plan mesajı gönderilmez (kayma riski)
@@ -6660,6 +6660,14 @@ async def tg_komut(text, chat, thread=None):
     elif cmd in ("hafta", "haftalik", "haftalık", "ozet", "özet"):
         if not hafta_ozet_gonder(chat=chat):
             send("📅 Bu hafta henüz sonuçlanmış kırılım yok.")
+    elif cmd in ("gece", "after"):
+        A = gece_adaylari()
+        if not A:
+            send("🌙 Şu an seans sonrası aday yok (bu komut ABD seans sonrasında, 23:00–03:00 TR arası çalışır).")
+        else:
+            send("🌙 <b>Gece adayları</b> (kanala ≥" + str(GECE_ESIK) + " puan gider)\n" + "\n".join(
+                f"{'✅' if a['puan'] >= GECE_ESIK else '·'} #{_h(a['sym'])} {fk(a['px'])} {fy(a['pct'])} · puan {a['puan']} · {_h(', '.join(a['neden']))}"
+                for a in A[:8]))
     elif cmd in ("haftakart",):
         haftalik_gonder(chat=chat)
     elif cmd == "anket":
@@ -8073,7 +8081,7 @@ def _gun_et():
 def kk_kaydet():
     backup.data["kk"] = {"kayit": KK["kayit"][-900:], "alarm": KK["alarm"][-40:],
                          "float": dict(list(KK["float"].items())[-300:]), "gon": KK["gon"], "sahip": KK["sahip"],
-                         "tgplan": KK["tgplan"], "cizgi": KK["cizgi"][-120:], "tahmin": KK["tahmin"][-200:]}
+                         "tgplan": KK["tgplan"], "cizgi": KK["cizgi"][-120:], "tahmin": KK["tahmin"][-200:], "gece": KK["gece"][-300:]}
     backup.dirty = True
 
 
@@ -8613,6 +8621,169 @@ def hafta_ozet_gonder(chat=None):
     for m in parcalar[:4]:
         tg.send(m, None, chat=chat, konu="plan", quiet=True)
     return True
+
+
+# ================================================================ GECE HİSSESİ
+# Seans sonrası (after-hours) haberle yükselen, gücünü koruyan hisse; gece taşınır, ertesi sabah piyasa öncesinde satılır.
+GECE_ESIK = int(os.getenv("GECE_ESIK", "60"))       # bu puanın altı kanala gitmez (ama ölçülür)
+GECE_MAX = int(os.getenv("GECE_MAX", "3"))          # bir gecede en fazla kaç hisse
+GECE_HEDEF = float(os.getenv("GECE_HEDEF", "1.0"))   # sabah en yüksek fiyat girişin en az %X üstüne çıkarsa "tuttu"
+
+
+def _haber_saat(n):
+    try:
+        return datetime.fromisoformat(str(n.get("t") or "").replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def gece_adaylari():
+    """Seans sonrasında yükselen hisseleri puanla. Puan = haber + güç (zirvede tutunma) + hacim + VWAP + spread."""
+    if getattr(scanner, "gain_src", None) != "post":
+        return []
+    now = time.time()
+    t16 = datetime.now(ET).replace(hour=16, minute=0, second=0, microsecond=0).timestamp()
+    out = []
+    for g in (scanner.gainers or [])[:30]:
+        sym, pct, px, vol = g["symbol"], g.get("percent_change") or 0, g.get("price") or 0, g.get("volume") or 0
+        r_ = scanner.runners.get(sym) or {}
+        n_ = r_.get("news") or {}
+        sec = (r_.get("sec") or {}).get("kind")
+        red = None
+        if not (6 <= pct <= 120):
+            red = f"seans sonrası %{pct:.0f}"
+        elif px < 0.8:
+            red = "fiyat 0,8$ altı"
+        elif sec in ("seyreltme", "dikkat"):
+            red = "SEC: hisse satışı riski"
+        elif r_.get("news_kind") == "kötü":
+            red = "kötü haber"
+        elif not n_:
+            red = "haber yok"
+        if red:
+            continue
+        ht = _haber_saat(n_)
+        puan, neden = 0, []
+        if r_.get("news_kind") == "iyi":
+            puan += 30
+            neden.append("güçlü haber")
+        else:
+            puan += 12
+        if ht and ht >= t16 - 1800:
+            puan += 12
+            neden.append("haber kapanıştan sonra")
+        elif ht and now - ht > 12 * 3600:
+            puan -= 10
+        puan += 15 if 10 <= pct <= 45 else 6 if pct <= 80 else 0
+        b = store.bars.get(sym) or {}
+        A = [(t, *b[t][:5]) for t in sorted(b) if t >= t16]
+        son = fiyat(sym) or px
+        if len(A) >= 10:
+            hi = max(x[2] for x in A)
+            vv = sum((x[5] or 0) for x in A)
+            vw = sum(((x[2] + x[3] + x[4]) / 3) * (x[5] or 0) for x in A) / vv if vv else None
+            if son >= hi * 0.96:
+                puan += 20
+                neden.append("zirvesinde tutunuyor")
+            elif son >= hi * 0.9:
+                puan += 8
+            else:
+                puan -= 15
+            if vw and son > vw:
+                puan += 10
+            onc = [x for x in A if x[0] <= now - 20 * 60]
+            if onc and son >= onc[-1][4] * 0.99:
+                puan += 8
+        dv = px * vol
+        puan += 15 if dv >= 2e6 else 8 if dv >= 5e5 else 0
+        if dv >= 5e5:
+            neden.append(f"seans sonrası {dv / 1e6:.1f}M$ işlem".replace(".", ","))
+        spr = spread_yuzde(sym)
+        if spr is not None:
+            puan += 5 if spr <= 1 else -10 if spr > 3 else 0
+        out.append({"sym": sym, "pct": round(pct, 1), "px": son, "puan": puan, "neden": neden, "spr": spr,
+                    "haber": tr_or(n_.get("headline")) if n_ else "", "sec": sec})
+    out.sort(key=lambda x: -x["puan"])
+    return out
+
+
+def _sabah_tr():
+    """Ertesi işlem gününün piyasa öncesi açılışı (04:00 ET) Türkiye saatiyle."""
+    d = datetime.now(ET).date() + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return datetime(d.year, d.month, d.day, 4, 0, tzinfo=ET).astimezone(TR).strftime("%H:%M")
+
+
+def gece_gonder(zorla=False, chat=None):
+    gun = _gun_et()
+    if not zorla and any(x["gun"] == gun for x in KK["gece"]):
+        return 0
+    A = gece_adaylari()
+    secilen = [a for a in A if a["puan"] >= GECE_ESIK][:GECE_MAX]
+    sabah = _sabah_tr()
+    for a in A[:8]:                                   # gönderilmeyenler de ölçülür: eşik ayarı veriyle yapılır
+        if any(x["gun"] == gun and x["sym"] == a["sym"] for x in KK["gece"]):
+            continue
+        rec = dict(a, gun=gun, t=int(time.time()), giris=a["px"], gitti=a in secilen, mid=None)
+        KK["gece"].append(rec)
+        if a in secilen and tg.ok:
+            html = (f"🌙 <b>GECE HİSSESİ · #{_h(a['sym'])}</b>\n"
+                    f"Alış <b>{fk(a['px'])}</b> civarı · seans sonrası <b>{fy(a['pct'])}</b>\n"
+                    + (f"📰 {_h(a['haber'][:90])}\n" if a.get("haber") else "")
+                    + f"🌅 Sabah {sabah}'da piyasa öncesi açılışta satış\n"
+                    f"<i>⚠️ Gece taşıma riski: sabah aşağı da açılabilir</i>")
+            rec["key"] = f"gece:{gun}:{a['sym']}"
+            tg.send(html, None, key=rec["key"], sym=a["sym"], chat=chat, konu="plan", quiet=False)
+    del KK["gece"][:-300]
+    kk_kaydet()
+    return len(secilen)
+
+
+async def gece_degerlendir():
+    """Ertesi sabah: piyasa öncesi açılış ve en yüksek fiyat (04:00–09:30 ET) → tuttu mu."""
+    bugun = _gun_et()
+    n_ = datetime.now(ET)
+    if n_.hour * 60 + n_.minute < 9 * 60 + 35:
+        return
+    deg = False
+    for r in KK["gece"]:
+        if r.get("sonuc") is not None or r["gun"] >= bugun:
+            continue
+        try:
+            B = await asyncio.to_thread(yahoo_mum, r["sym"], "5d", "1m", True)
+        except Exception:
+            continue
+        g0 = datetime.fromisoformat(bugun).replace(tzinfo=ET)
+        t0, t1 = g0.replace(hour=4).timestamp(), g0.replace(hour=9, minute=30).timestamp()
+        P = [b for b in B if t0 <= b[0] < t1]
+        if not P:
+            if time.time() - r["t"] > 4 * 86400:
+                r["sonuc"] = "veri yok"
+                deg = True
+            continue
+        g = r["giris"]
+        ac, hi, kp = P[0][1], max(b[2] for b in P), P[-1][4]
+        r.update(acilis=round((ac / g - 1) * 100, 1), en_yuksek=round((hi / g - 1) * 100, 1), kapanis=round((kp / g - 1) * 100, 1),
+                 sonuc="tuttu" if hi >= g * (1 + GECE_HEDEF / 100) else "tutmadı")
+        deg = True
+        if r.get("gitti") and tg.ok:
+            tg.send(f"🌅 <b>#{_h(r['sym'])}</b> sabah: açılış <b>{fy(r['acilis'])}</b> · en yüksek <b>{fy(r['en_yuksek'])}</b> "
+                    + ("✅" if r["sonuc"] == "tuttu" else "❌"), None, sym=r["sym"], reply=r.get("key"), konu="plan", quiet=True)
+    if deg:
+        kk_kaydet()
+
+
+def gece_ozet():
+    G = [r for r in KK["gece"] if r.get("sonuc") in ("tuttu", "tutmadı")]
+    gi = [r for r in G if r.get("gitti")]
+    f = lambda L: {"n": len(L), "tuttu": sum(1 for r in L if r["sonuc"] == "tuttu"),
+                   "wr": round(100 * sum(1 for r in L if r["sonuc"] == "tuttu") / len(L)) if L else None,
+                   "ort_acilis": round(sum(r["acilis"] for r in L) / len(L), 1) if L else None,
+                   "ort_yuksek": round(sum(r["en_yuksek"] for r in L) / len(L), 1) if L else None}
+    return {"kanal": f(gi), "hepsi": f(G), "esik": GECE_ESIK,
+            "liste": [{k: r.get(k) for k in ("sym", "gun", "giris", "pct", "puan", "gitti", "sonuc", "acilis", "en_yuksek", "neden", "haber")}
+                      for r in reversed(KK["gece"][-20:])]}
 
 
 def karne_gonder():
@@ -9330,6 +9501,13 @@ async def kanal_loop():
                     if radar_gonder() or hm >= dk + 19:
                         G[ad] = gun
                         kk_kaydet()
+            if 1160 <= hm < 1185 and G.get("gece") != gun:
+                G["gece"] = gun
+                kk_kaydet()
+                gece_gonder()
+            if 575 <= hm < 700 and G.get("gece_deg") != gun:
+                G["gece_deg"] = gun
+                _gorev(gece_degerlendir())
             if 970 <= hm < 1000 and G.get("karne") != gun:
                 G["karne"] = gun
                 kk_kaydet()
@@ -10006,7 +10184,7 @@ async def lifespan(app):
     if isinstance(backup.data.get("krt"), dict) and backup.data["krt"].get("sonuc"):
         KRT.update(sonuc=backup.data["krt"]["sonuc"], t=backup.data["krt"].get("t") or 0)
     if isinstance(backup.data.get("kk"), dict):
-        for k_ in ("kayit", "alarm", "float", "gon", "sahip", "tgplan", "cizgi", "tahmin"):
+        for k_ in ("kayit", "alarm", "float", "gon", "sahip", "tgplan", "cizgi", "tahmin", "gece"):
             if isinstance(backup.data["kk"].get(k_), type(KK[k_])):
                 KK[k_] = backup.data["kk"][k_]
         for r in KK["kayit"]:                         # eski kayıtlar: K1/K2/K3'ü mum tepesine göre düzelt
@@ -10329,7 +10507,7 @@ def api_kk():
     """Kırılım karnesi + radar + haftanın dersleri + kural testi + sağlık."""
     return {"karne": karne_ozet(None, 30), "bugun": karne_ozet(_gun_et()), "radar": radar_listesi(), "ders": ders_listesi(7),
             "kural": kural_karnesi(7), "test": KRT.get("sonuc"), "test_t": KRT.get("t"), "test_run": KRT["running"],
-            "test_prog": KRT.get("prog"), "saglik": saglik_satirlari(), "cizgi": cizgi_karne(), "ogrenme": ogrenme_ozet()}
+            "test_prog": KRT.get("prog"), "saglik": saglik_satirlari(), "cizgi": cizgi_karne(), "ogrenme": ogrenme_ozet(), "gece": gece_ozet()}
 
 
 @app.post("/api/kuraltest")
