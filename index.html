@@ -218,6 +218,131 @@ h3{font-size:20px;font-weight:900;padding:18px 18px 10px;letter-spacing:-.5px}
 .th button.sec.k{background:var(--li);color:#0b1200;border-color:var(--li);transform:scale(1.06)}.th button.sec.m{background:var(--dn);color:#fff;border-color:var(--dn);transform:scale(1.06)}
 #mk{display:block;width:100%;border-radius:22px;touch-action:none}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+/* === ABD·BOT / COMPLETE VISUAL REDESIGN v2 ===
+   Presentation layer only: existing IDs, event handlers, API calls and JS remain intact. */
+:root{
+ --bg:#080d18;--c1:#101827;--c2:#172338;--c3:#26354c;--ln:#26364d;
+ --tx:#f2f6ff;--mu:#91a2bb;--up:#35e0b0;--dn:#ff637d;--am:#ffca69;
+ --li:#64d8ff;--vi:#a58bff;--grad:linear-gradient(135deg,#64d8ff,#7189ff);
+ --sp:cubic-bezier(.2,.75,.25,1);--bo:cubic-bezier(.2,.8,.2,1);
+}
+html,body{background:var(--bg);color:var(--tx)}
+body{background:linear-gradient(180deg,#101c30 0,#080d18 34%,#080d18 100%)}
+button{touch-action:manipulation}
+.scr{padding-top:calc(var(--safe-t) + 10px);padding-bottom:calc(var(--safe-b) + 105px)}
+.scr.gizli{transform:translateY(8px) scale(.995)}
+.gl{background:linear-gradient(145deg,rgba(21,34,54,.98),rgba(13,22,37,.98));border:1px solid #263953;border-radius:23px;box-shadow:0 8px 24px rgba(0,0,0,.13)}
+.lt{padding:14px 20px 0;align-items:center}
+.lt h1{font-size:30px;letter-spacing:-1.2px;font-weight:850}
+.lt h1 em{color:var(--li)}
+.av{width:42px;height:42px;border-radius:15px;background:#182941;color:var(--li);border:1px solid #335170;box-shadow:inset 0 0 0 4px rgba(100,216,255,.04)}
+.sub{padding:7px 20px 15px;font-size:12px;letter-spacing:.1px}
+.live{background:var(--up);box-shadow:0 0 0 4px rgba(53,224,176,.09)}
+.live:after{display:none}
+.tape{height:38px;margin:0 0 14px;background:#0c1524;border-color:#1e3048}
+.tape span{font-size:12px;letter-spacing:.3px}
+.st{gap:10px;padding:2px 18px 17px}
+.st .h{width:66px;font-size:11px;color:#b8c8dc}
+.ring{width:60px;height:60px}
+.ring b{inset:7px;background:#14233a;font-size:12px}
+.ring .bg{stroke:#293c55}
+.hero{margin:0 14px;padding:20px 19px 18px;background:linear-gradient(130deg,#172b47 0%,#111e32 57%,#101827 100%);border:1px solid #31506f;border-radius:25px;box-shadow:0 12px 30px rgba(0,0,0,.18);isolation:isolate}
+.hero:before{content:"";position:absolute;right:-38px;top:-50px;width:170px;height:170px;border:1px solid rgba(100,216,255,.14);border-radius:50%;box-shadow:0 0 0 20px rgba(100,216,255,.025),0 0 0 42px rgba(100,216,255,.02);z-index:-1}
+.hero small{font-size:10px;letter-spacing:1.8px;color:#9fb4cd}
+.hero .n{font-size:50px;letter-spacing:-2.5px;color:var(--li);line-height:1.08;margin:7px 0 5px}
+.hero .n em{font-size:15px;color:#b2c1d5}
+.hero p{font-size:12px;line-height:1.5;color:#9fb2cb}
+.hg{gap:7px;margin-top:18px}
+.hg div{background:rgba(4,12,24,.38);border:1px solid rgba(132,168,206,.13);border-radius:15px;padding:11px 10px}
+.hg span{font-size:9px;letter-spacing:.7px;line-height:1.3;color:#8fa5c1;min-height:24px}
+.hg b{font-size:18px;display:block;margin-top:3px}
+#hmap{padding:0 14px}
+.seg{margin:15px 14px 10px;padding:5px;background:#0c1524;border:1px solid #22344d;border-radius:16px;box-shadow:none}
+.seg i{top:5px;bottom:5px;left:5px;border-radius:12px;background:#23466a;border:1px solid #3e719d}
+.seg button{font-size:12px;padding:10px 2px;color:#8fa2bc;white-space:nowrap}
+.seg button.on{color:#f5fbff}
+#liste{padding:0 12px}
+.row{padding:13px 11px;gap:11px;border:1px solid transparent;border-radius:18px;margin:5px 0;background:rgba(17,29,47,.55)}
+.row:active{background:#192a42;transform:scale(.985)}
+.lg{width:43px;height:43px;border-radius:13px;font-size:10px;border:1px solid rgba(255,255,255,.045)}
+.lg.g{background:#10382f;color:var(--up)}.lg.y{background:#3a2b16;color:var(--am)}.lg.r{background:#3a1c2b;color:var(--dn)}.lg.n{background:#1a2a41;color:#dceaff}
+.row .n b{font-size:15px;letter-spacing:.1px}.row .n small{font-size:11.5px;color:#91a5c0}
+.pr{min-width:76px}.pr b{font-size:15px}.pr small{font-size:11px}
+.isk{height:68px;border-radius:18px;background:linear-gradient(90deg,#111c2e,#192840,#111c2e);background-size:100% 100%;animation:none}
+.tab{left:12px;right:12px;bottom:calc(var(--safe-b) + 9px);max-width:460px;padding:6px;border-radius:22px;background:rgba(13,23,39,.98);border:1px solid #2b3f59;box-shadow:0 10px 35px rgba(0,0,0,.42)}
+.tab .ind{border-radius:16px;background:#1b3855;border:1px solid #2d587c}
+.tab button{font-size:10px;padding:7px 0;color:#8ea2bc}
+.tab .on{color:var(--li)}
+.tab svg{width:21px;height:21px}
+#det,#oyP{background:linear-gradient(180deg,#101c30 0,#080d18 35%)}
+.nb{padding:9px 14px;background:rgba(8,13,24,.97);border-bottom:1px solid #21334b}
+.nb button{background:#17263c;border:1px solid #2b405a;border-radius:13px}
+.dh{padding:13px 18px 5px;gap:12px}
+.dlg{width:50px;height:50px;border-radius:15px;background:var(--grad);color:#07111e}
+.dh .s{font-size:23px}
+h3{font-size:17px;letter-spacing:-.2px;padding:19px 18px 10px}
+.ara{background:#101c2e;border:1px solid #2a3d56;border-radius:15px;padding:13px 15px}
+.ara input{font-size:16px}
+.tgl{background:#111e31;border:1px solid #263953;border-radius:17px}
+.sw.on{background:var(--up)}
+.bos{padding:34px 24px;font-size:14px}
+.bos .e{animation:none}
+.btn,.btns button,.nb button,.ob button,.th button{transition:transform .16s ease,background .16s ease,border-color .16s ease}
+button:active,.btn:active,.th button:active{transform:scale(.97)}
+.kv,.gs,.kr,.cc,.cd,.g4,.m3,.kg div,.skr div,.sonuc,.lvl,.oc{border-radius:18px}
+.gs{background:linear-gradient(135deg,#163a39,#111e30 75%);border-color:#2d5c61}
+.gs .tp b{color:var(--up)}
+.kv{background:#111e31;border:1px solid #263953;padding:13px}
+.kv b{font-size:24px}
+.kg{gap:7px}
+.kg div{background:#16253a;border:1px solid #263a54}
+.kg span{font-size:9.5px;color:#91a5c0}
+.kg b{font-size:16px}
+.bar{background:#293b53!important;border-radius:99px}
+.fill{border-radius:99px}
+.oc{background:linear-gradient(145deg,#172840,#101827);border:1px solid #263953;min-height:145px}
+.oc .e{animation:none}
+.oc .rk{color:var(--li)}
+.lvl{background:linear-gradient(135deg,#252344,#141d31 75%);border-color:#3d3c70}
+.lvl .bd{animation:none}
+.ob button{border-radius:15px}
+.ob .y{background:var(--up);color:#05231c}
+.ob .h{background:#351d2a;color:var(--dn);border-color:#663043}
+.ob .n{background:#1a2a41}
+.skr div{background:#111e31;border-color:#263953}
+.toast{background:#16253a;border-color:#35516e}
+#ada{border-color:#31506f!important}
+#mk{border-radius:18px}
+@media(max-width:360px){
+ .lt h1{font-size:27px}.hero .n{font-size:44px}.hg{gap:5px}.hg div{padding:9px 7px}.hg b{font-size:16px}
+ .seg button{font-size:11px}.row{gap:8px;padding:11px 7px}.lg{width:39px;height:39px}
+}
+@media(prefers-reduced-motion:reduce){
+ .tape div,.ring.yak,.oc .e,.lvl .bd,.live:after,.sp polyline{animation:none!important}
+}
+
+
+/* === EXPANSION PACK: premium dashboard + extra working pages === */
+:root{--cyan:#64d8ff;--blue:#7a8cff;--mint:#35e0b0;--amber:#ffca69;--surface:#101b2d;--surface2:#15243a}
+.extra-h{padding:22px 18px 10px;display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.extra-h h2{font-size:22px;letter-spacing:-.6px;margin:0;font-weight:850}
+.extra-h p{font-size:12px;color:var(--mu);margin:5px 0 0;line-height:1.45}
+.extra-cap{font-size:9px;letter-spacing:1.5px;color:#7f96b4;font-weight:900}
+.launchpad{padding:8px 14px 22px}
+.launchgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.launchcard{position:relative;overflow:hidden;min-height:132px;padding:16px 15px;border-radius:21px;border:1px solid #2a3d57;background:linear-gradient(145deg,#15243a,#0f1929);text-align:left;color:var(--tx);display:flex;flex-direction:column;justify-content:space-between;gap:13px;cursor:pointer;transition:transform .18s ease,border-color .18s ease}
+.launchcard:active{transform:scale(.975)}.launchcard:before{content:"";position:absolute;width:100px;height:100px;right:-35px;top:-35px;border:1px solid rgba(100,216,255,.14);border-radius:50%;box-shadow:0 0 0 14px rgba(100,216,255,.025)}
+.launchicon{width:39px;height:39px;border-radius:13px;display:grid;place-items:center;font-size:19px;background:#1c3854;border:1px solid #315675;color:var(--cyan)}
+.launchcard b{font-size:14px;display:block;letter-spacing:-.1px}.launchcard small{display:block;color:#8fa5c0;font-size:11px;line-height:1.4;margin-top:4px}.launcharrow{position:absolute;right:14px;bottom:17px;color:#7590b2;font-size:18px}
+.pagehead{padding:16px 18px 12px;display:flex;align-items:center;gap:12px}.backpill{width:39px;height:39px;border-radius:13px;background:#182940;border:1px solid #2b405a;color:#e8f3ff;font-size:22px;cursor:pointer}.pagehead h1{font-size:25px;letter-spacing:-.8px;margin:0}.pagehead p{font-size:12px;color:var(--mu);margin:4px 0 0}
+.pagepad{padding:0 14px 28px}.metric-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.metric-card{padding:15px;border-radius:19px;background:linear-gradient(145deg,#14243a,#0e1929);border:1px solid #263b55;min-width:0}.metric-card .label{font-size:10px;letter-spacing:.8px;color:#91a7c2;font-weight:800}.metric-card .value{font-size:25px;font-weight:850;letter-spacing:-1px;margin-top:8px;white-space:nowrap}.metric-card .hint{font-size:11px;color:#8da2bd;margin-top:5px;line-height:1.4}
+.panel{border:1px solid #273b55;background:linear-gradient(145deg,#132238,#0e1828);border-radius:21px;padding:16px;margin-top:11px}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.panel-head h3{padding:0;margin:0;font-size:14px;letter-spacing:-.1px}.eyebrow{font-size:9px;letter-spacing:1.2px;color:#839bb8;font-weight:900}.soft-btn,.primary-btn,.danger-btn{border-radius:13px;border:1px solid #2d4967;background:#1a3049;color:#dceeff;padding:11px 13px;font-size:12px;font-weight:800;cursor:pointer;transition:transform .15s ease,background .15s ease}.primary-btn{background:linear-gradient(135deg,#6bdcff,#8795ff);border-color:transparent;color:#071421}.danger-btn{background:#321f2b;border-color:#573247;color:#ff9bae}.soft-btn:active,.primary-btn:active,.danger-btn:active{transform:scale(.97)}
+.field{width:100%;min-width:0;background:#0b1524;border:1px solid #2a3e58;border-radius:13px;color:#eff6ff;padding:12px 13px;font-size:14px;outline:none}.field:focus{border-color:#64d8ff;box-shadow:0 0 0 3px rgba(100,216,255,.08)}.field-label{font-size:10px;color:#92a7c1;font-weight:800;display:block;margin:0 0 6px 2px}.formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.formrow{display:flex;gap:8px;align-items:center}.data-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0;border-bottom:1px solid #24364d}.data-row:last-child{border-bottom:0;padding-bottom:0}.data-row:first-child{padding-top:0}.data-row b{font-size:13px}.data-row small{display:block;font-size:11px;color:#8fa4bf;margin-top:4px}.pilltag{display:inline-flex;align-items:center;gap:5px;border:1px solid #29445b;background:#15283d;border-radius:99px;padding:5px 8px;font-size:10px;font-weight:800;color:#b7d9f5}.empty-state{text-align:center;padding:25px 15px;color:#8fa4bf;font-size:12px;line-height:1.6}.empty-state strong{display:block;font-size:14px;color:#dce9f8;margin-bottom:4px}
+.weather-top{padding:20px;border-radius:24px;border:1px solid #34516e;background:radial-gradient(circle at 85% 10%,rgba(100,216,255,.14),transparent 36%),linear-gradient(145deg,#18324d,#111d30 70%);position:relative;overflow:hidden}.weather-top .city{font-size:13px;color:#b2c5dc}.weather-top .degrees{font-size:58px;font-weight:850;letter-spacing:-3px;line-height:1.05;margin:13px 0 4px}.weather-top .weather-icon{font-size:44px;position:absolute;right:18px;top:35px}.weather-top .condition{font-size:14px;font-weight:800}.weather-top .feels{font-size:11px;color:#9db2cb;margin-top:5px}.forecast{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}.forecast-day{padding:12px 3px;text-align:center;border-radius:15px;background:#132238;border:1px solid #273b55}.forecast-day b{font-size:10px;color:#b8c9dc}.forecast-day i{display:block;font-style:normal;font-size:19px;margin:8px 0}.forecast-day strong{font-size:11px;display:block}.forecast-day small{display:block;color:#8199b7;font-size:10px;margin-top:4px}
+.chart-bars{height:115px;display:flex;align-items:flex-end;gap:7px;padding:12px 0 2px}.chart-bars i{flex:1;min-width:3px;border-radius:6px 6px 2px 2px;background:linear-gradient(180deg,#64d8ff,#657bff);opacity:.9}.calendar-item{display:grid;grid-template-columns:49px 1fr auto;align-items:center;gap:11px;padding:12px 0;border-bottom:1px solid #25374e}.calendar-item:last-child{border:0}.datebox{background:#172b42;border:1px solid #2d4762;border-radius:13px;padding:8px 3px;text-align:center}.datebox b{font-size:17px;display:block}.datebox small{font-size:9px;color:#91a8c4;font-weight:800}.calendar-item strong{font-size:12px;display:block}.calendar-item p{font-size:10px;color:#8ea4bf;margin:4px 0 0;line-height:1.4}.severity{font-size:9px;font-weight:900;border-radius:8px;padding:6px 7px;background:#3b2e1b;color:#ffce7b}.severity.high{background:#3c1d2b;color:#ff9ab0}.severity.low{background:#16342f;color:#70e6c0}
+@media(max-width:360px){.launchgrid{gap:7px}.launchcard{padding:13px;min-height:125px}.metric-card{padding:12px}.metric-card .value{font-size:22px}.weather-top .degrees{font-size:51px}.pagehead h1{font-size:23px}}
+
 </style>
 </head>
 <body>
@@ -237,6 +362,15 @@ h3{font-size:20px;font-weight:900;padding:18px 18px 10px;letter-spacing:-.5px}
   <div id="hmap"></div>
   <div class="gl seg" id="seg"><i></i><button data-k="yak">Yaklaşan</button><button data-k="kir">Kırılan</button><button data-k="tak">★ Takip</button><button data-k="hep">Tümü</button></div>
   <div id="liste"><div class="isk"></div><div class="isk"></div><div class="isk"></div></div>
+  <div class="extra-h"><div><div class="extra-cap">ABD·BOT LAB</div><h2>Terminalini genişlet</h2><p>Takip, analiz ve günlük araçların tek yerde.</p></div><span class="pilltag">✦ PRO ARAÇLAR</span></div>
+  <div class="launchpad"><div class="launchgrid">
+    <button class="launchcard" onclick="sekmeAc('piyasa')"><span class="launchicon">◫</span><span><b>Piyasa görünümü</b><small>Hareket, kırılım dağılımı ve izleme listesi</small></span><span class="launcharrow">↗</span></button>
+    <button class="launchcard" onclick="sekmeAc('portfoy')"><span class="launchicon">▥</span><span><b>Portföyüm</b><small>Lot, maliyet ve kâr/zarar takibi</small></span><span class="launcharrow">↗</span></button>
+    <button class="launchcard" onclick="sekmeAc('hava')"><span class="launchicon">☼</span><span><b>Hava durumu</b><small>Şehir seç, saatlik ve 5 günlük tahmini gör</small></span><span class="launcharrow">↗</span></button>
+    <button class="launchcard" onclick="sekmeAc('takvim')"><span class="launchicon">▦</span><span><b>Ekonomi takvimi</b><small>Önemli günleri ve kendi notlarını düzenle</small></span><span class="launcharrow">↗</span></button>
+    <button class="launchcard" onclick="sekmeAc('gunluk')"><span class="launchicon">✎</span><span><b>İşlem günlüğü</b><small>Planını, nedenini ve sonucu kaydet</small></span><span class="launcharrow">↗</span></button>
+    <button class="launchcard" onclick="sekmeAc('haber')"><span class="launchicon">◉</span><span><b>Haber merkezi</b><small>Piyasa kaynaklarına hızlı erişim</small></span><span class="launcharrow">↗</span></button>
+  </div></div>
 </section>
 
 <section class="scr gizli" id="s-canli">
@@ -277,6 +411,42 @@ h3{font-size:20px;font-weight:900;padding:18px 18px 10px;letter-spacing:-.5px}
   <div class="sub">Hisse kodunu yaz</div>
   <div class="gl ara"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8b90a0" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="araI" placeholder="ör. AIOK" autocapitalize="characters" autocomplete="off" maxlength="6"></div>
   <div id="araL"></div>
+</section>
+
+<section class="scr gizli" id="s-piyasa">
+ <div class="pagehead"><button class="backpill" onclick="sekmeAc('ana')">‹</button><div><h1>Piyasa görünümü</h1><p>Botun izlediği hisselerin genel durumu</p></div></div>
+ <div class="pagepad"><div class="metric-grid"><div class="metric-card"><div class="label">İZLENEN HİSSE</div><div class="value" id="mkCount">—</div><div class="hint">Bot listesindeki semboller</div></div><div class="metric-card"><div class="label">KIRILIM</div><div class="value" id="mkBreak" style="color:var(--mint)">—</div><div class="hint">Giriş seviyesi kırılanlar</div></div><div class="metric-card"><div class="label">YAKLAŞAN</div><div class="value" id="mkNear" style="color:var(--amber)">—</div><div class="hint">Seviyeye yaklaşanlar</div></div><div class="metric-card"><div class="label">RİSK DURUMU</div><div class="value" id="mkRisk">—</div><div class="hint">Sahte kırılım + stop</div></div></div>
+ <div class="panel"><div class="panel-head"><h3>Durum dağılımı</h3><span class="eyebrow">CANLI LİSTE</span></div><div id="mkDistribution"></div></div>
+ <div class="panel"><div class="panel-head"><h3>En yakın fırsatlar</h3><span class="eyebrow">BOT VERİSİ</span></div><div id="mkOpportunities"><div class="empty-state">Canlı veriler yükleniyor…</div></div></div>
+ <div class="panel"><div class="panel-head"><h3>Hareket özeti</h3><span class="eyebrow">GÖRSEL ÖZET</span></div><div class="chart-bars" id="mkBars"></div><div class="hint" style="font-size:11px;color:#8da3bd">Sütunlar botun mevcut durum dağılımını görselleştirir; endeks getirisi değildir.</div></div></div>
+</section>
+
+<section class="scr gizli" id="s-portfoy">
+ <div class="pagehead"><button class="backpill" onclick="sekmeAc('ana')">‹</button><div><h1>Portföyüm</h1><p>Bu cihazda saklanan kişisel takip listesi</p></div></div>
+ <div class="pagepad"><div class="metric-grid"><div class="metric-card"><div class="label">TAHMİNİ DEĞER</div><div class="value" id="pfValue">$0.00</div><div class="hint">Fiyat varsa bot listesinden alınır</div></div><div class="metric-card"><div class="label">TAHMİNİ K/Z</div><div class="value" id="pfPnl">$0.00</div><div class="hint" id="pfPnlHint">Gerçekleşmemiş sonuç</div></div></div>
+ <div class="panel"><div class="panel-head"><h3>Varlık ekle</h3><span class="eyebrow">YEREL KAYIT</span></div><form id="pfForm"><div class="formgrid"><div><label class="field-label" for="pfSym">Hisse kodu</label><input class="field" id="pfSym" maxlength="8" placeholder="NVDA" required></div><div><label class="field-label" for="pfQty">Lot / adet</label><input class="field" id="pfQty" type="number" min="0.0001" step="any" placeholder="1" required></div><div><label class="field-label" for="pfAvg">Ortalama maliyet ($)</label><input class="field" id="pfAvg" type="number" min="0.0001" step="any" placeholder="150.00" required></div><div style="display:flex;align-items:end"><button class="primary-btn" type="submit" style="width:100%">＋ Ekle</button></div></div></form><p class="hint" style="font-size:10px;color:#8198b5;margin:12px 2px 0">Portföy bilgileri yalnızca bu tarayıcıda saklanır. Fiyatlar gecikmeli olabilir; bu alan aracı kurum hesabına bağlı değildir.</p></div>
+ <div class="panel"><div class="panel-head"><h3>Varlıklarım</h3><button class="soft-btn" id="pfExport">Dışa aktar</button></div><div id="pfList"></div></div></div>
+</section>
+
+<section class="scr gizli" id="s-hava">
+ <div class="pagehead"><button class="backpill" onclick="sekmeAc('ana')">‹</button><div><h1>Hava durumu</h1><p>Şehir bazlı güncel koşullar ve tahmin</p></div></div>
+ <div class="pagepad"><div class="panel" style="margin-top:0"><div class="formrow"><input class="field" id="wxCity" value="İzmir" placeholder="Şehir adı"><button class="primary-btn" id="wxSearch">Ara</button></div><div class="hint" style="font-size:10px;color:#8299b6;margin:9px 2px 0">Veri kaynağı: Open-Meteo · İnternet bağlantısı gerekir.</div></div>
+ <div id="wxState" class="empty-state">Hava durumu yükleniyor…</div><div id="wxContent" style="display:none"><div class="weather-top"><div class="city" id="wxName">İzmir</div><div class="weather-icon" id="wxIcon">☀️</div><div class="degrees" id="wxTemp">—°</div><div class="condition" id="wxCond">—</div><div class="feels" id="wxMeta">—</div></div><div class="metric-grid" style="margin-top:10px"><div class="metric-card"><div class="label">RÜZGÂR</div><div class="value" id="wxWind">—</div><div class="hint">km/sa</div></div><div class="metric-card"><div class="label">NEM</div><div class="value" id="wxHum">—</div><div class="hint">bağıl nem</div></div></div><div class="panel"><div class="panel-head"><h3>5 günlük tahmin</h3><span class="eyebrow">GÜNLÜK</span></div><div class="forecast" id="wxForecast"></div></div></div></div>
+</section>
+
+<section class="scr gizli" id="s-takvim">
+ <div class="pagehead"><button class="backpill" onclick="sekmeAc('ana')">‹</button><div><h1>Ekonomi takvimi</h1><p>Takip etmek istediğin günleri kendin planla</p></div></div>
+ <div class="pagepad"><div class="panel" style="margin-top:0"><div class="panel-head"><h3>Takvime not ekle</h3><span class="eyebrow">KİŞİSEL</span></div><form id="calForm"><label class="field-label" for="calTitle">Etkinlik / not</label><input class="field" id="calTitle" maxlength="90" placeholder="Örn. Fed faiz kararı" required><div class="formgrid" style="margin-top:10px"><div><label class="field-label" for="calDate">Tarih</label><input class="field" id="calDate" type="date" required></div><div><label class="field-label" for="calImpact">Önem</label><select class="field" id="calImpact"><option value="high">Yüksek</option><option value="medium" selected>Orta</option><option value="low">Düşük</option></select></div></div><button class="primary-btn" style="width:100%;margin-top:11px">＋ Takvime kaydet</button></form></div><div class="panel"><div class="panel-head"><h3>Yaklaşan notlar</h3><span class="eyebrow">KAYITLARIN</span></div><div id="calList"></div></div><div class="hint" style="font-size:10px;color:#8299b6;line-height:1.5;padding:10px 3px">Bu sayfa resmi, otomatik güncellenen ekonomik veri takvimi değildir. Kendi etkinliklerini eklemek için hazırlanmıştır; tarihleri önemli duyuruların resmi kaynaklarından doğrula.</div></div>
+</section>
+
+<section class="scr gizli" id="s-gunluk">
+ <div class="pagehead"><button class="backpill" onclick="sekmeAc('ana')">‹</button><div><h1>İşlem günlüğü</h1><p>Planlarını ve kararlarının nedenini kaydet</p></div></div>
+ <div class="pagepad"><div class="panel" style="margin-top:0"><div class="panel-head"><h3>Yeni kayıt</h3><span class="eyebrow">KENDİ NOTLARIN</span></div><form id="jrForm"><div class="formgrid"><div><label class="field-label" for="jrSym">Hisse kodu</label><input class="field" id="jrSym" maxlength="8" placeholder="NVDA" required></div><div><label class="field-label" for="jrType">İşlem türü</label><select class="field" id="jrType"><option>İzleme</option><option>Alış</option><option>Satış</option><option>Stop</option><option>Hedef</option></select></div></div><label class="field-label" for="jrNote" style="margin-top:11px">Neden / plan / sonuç</label><textarea class="field" id="jrNote" rows="3" maxlength="700" placeholder="Giriş sebebim, geçersiz olacağı seviye, riskim…" required style="resize:vertical"></textarea><button class="primary-btn" style="width:100%;margin-top:11px">Kaydı sakla</button></form></div><div class="panel"><div class="panel-head"><h3>Geçmiş kayıtlar</h3><button class="soft-btn" id="jrClear">Temizle</button></div><div id="jrList"></div></div></div>
+</section>
+
+<section class="scr gizli" id="s-haber">
+ <div class="pagehead"><button class="backpill" onclick="sekmeAc('ana')">‹</button><div><h1>Haber merkezi</h1><p>Piyasa araştırması için kaynak kısayolları</p></div></div>
+ <div class="pagepad"><div class="panel" style="margin-top:0"><div class="panel-head"><h3>Hızlı kaynaklar</h3><span class="eyebrow">HARİCİ SİTELER</span></div><div class="data-row"><div><b>Yahoo Finance</b><small>Hisse fiyatları, şirket haberleri ve izleme listeleri</small></div><button class="soft-btn" onclick="window.open('https://finance.yahoo.com/','_blank','noopener')">Aç ↗</button></div><div class="data-row"><div><b>Nasdaq</b><small>ABD piyasası, şirketler ve piyasa verileri</small></div><button class="soft-btn" onclick="window.open('https://www.nasdaq.com/market-activity','_blank','noopener')">Aç ↗</button></div><div class="data-row"><div><b>SEC EDGAR</b><small>Şirketlerin resmi bildirimleri ve finansal raporları</small></div><button class="soft-btn" onclick="window.open('https://www.sec.gov/edgar/search/','_blank','noopener')">Aç ↗</button></div><div class="data-row"><div><b>Federal Reserve</b><small>Faiz kararları ve para politikası duyuruları</small></div><button class="soft-btn" onclick="window.open('https://www.federalreserve.gov/newsevents.htm','_blank','noopener')">Aç ↗</button></div><div class="data-row"><div><b>TradingView</b><small>Grafik, teknik görünüm ve sembol karşılaştırma</small></div><button class="soft-btn" onclick="window.open('https://www.tradingview.com/markets/stocks-usa/','_blank','noopener')">Aç ↗</button></div></div><div class="panel"><div class="panel-head"><h3>Haber kontrol listesi</h3><span class="eyebrow">İŞLEM ÖNCESİ</span></div><div id="newsChecklist"></div></div><div class="hint" style="font-size:10px;color:#8299b6;line-height:1.5;padding:10px 3px">Bağlantılar harici kaynaklara gider. Bu sayfa haberleri otomatik çekmez veya yatırım tavsiyesi üretmez.</div></div>
 </section>
 
 <div id="det"></div>
@@ -675,5 +845,50 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch
 segAyarla();indAyarla();anaYukle();bilYukle();setInterval(()=>{if(sekme==='ana'&&!DS)anaYukle()},5000);setInterval(bilYukle,15000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){anaYukle();bilYukle()}});
 </script>
+
+<script>
+/* ABD·BOT expansion features — independent, client-side additions. */
+(()=>{
+ const byId=id=>document.getElementById(id);
+ const read=(k,d=[])=>{try{const v=JSON.parse(localStorage.getItem('abx_'+k));return v==null?d:v}catch(e){return d}};
+ const write=(k,v)=>{try{localStorage.setItem('abx_'+k,JSON.stringify(v));return true}catch(e){return false}};
+ const safe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const money=n=>Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2});
+ const priceFor=sym=>{try{const list=typeof CANLI!=='undefined'?CANLI:[];const x=list.find(x=>x.sym===sym);return x&&Number(x.px)>0?Number(x.px):null}catch(e){return null}};
+ const statusName=x=>x.st==='kırıldı'?'Kırıldı':x.st==='yaklaşıyor'?'Yaklaşıyor':x.st==='sahte'?'Sahte kırılım':x.st==='stop'?'Stop':'Bekliyor';
+ function marketRender(){let L=[];try{L=typeof CANLI!=='undefined'?CANLI:[]}catch(e){};const count=L.length,br=L.filter(x=>x.st==='kırıldı'),near=L.filter(x=>x.st==='yaklaşıyor'),risk=L.filter(x=>x.st==='sahte'||x.st==='stop');
+  [['mkCount',count],['mkBreak',br.length],['mkNear',near.length],['mkRisk',risk.length]].forEach(([id,v])=>{if(byId(id))byId(id).textContent=v});
+  const groups=[['Kırıldı',br.length,'#35e0b0'],['Yaklaşıyor',near.length,'#ffca69'],['Bekliyor',L.filter(x=>x.st!=='kırıldı'&&x.st!=='yaklaşıyor'&&x.st!=='sahte'&&x.st!=='stop').length,'#64d8ff'],['Riskli',risk.length,'#ff637d']];
+  const max=Math.max(1,...groups.map(g=>g[1]));if(byId('mkDistribution'))byId('mkDistribution').innerHTML=groups.map(g=>`<div style="margin:13px 0"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:7px"><span>${g[0]}</span><b>${g[1]}</b></div><div style="height:7px;background:#263951;border-radius:99px;overflow:hidden"><div style="height:100%;width:${g[1]/max*100}%;background:${g[2]};border-radius:99px"></div></div></div>`).join('');
+  const opportunities=near.slice().sort((a,b)=>(a.uzak??99)-(b.uzak??99)).slice(0,6);if(byId('mkOpportunities'))byId('mkOpportunities').innerHTML=opportunities.length?opportunities.map(x=>`<div class="data-row"><div><b>${safe(x.sym)}</b><small>${safe(statusName(x))} · giriş ${safe(x.giris??'—')}</small></div><div style="text-align:right"><b style="color:var(--amber)">${x.uzak==null?'—':'%'+Number(x.uzak).toFixed(1).replace('.',',')}</b><small>uzaklık</small></div></div>`).join(''):'<div class="empty-state"><strong>Şu an yaklaşan sinyal yok</strong>Yeni veriler geldikçe bu alan güncellenir.</div>';
+  const vals=groups.map(g=>g[1]);if(byId('mkBars'))byId('mkBars').innerHTML=vals.map((v,i)=>`<i title="${groups[i][0]}: ${v}" style="height:${Math.max(5,v/max*100)}%;opacity:${v?1:.3}"></i>`).join('');
+ }
+ function portfolioRender(){const list=read('portfolio',[]);let value=0,cost=0;list.forEach(x=>{const px=priceFor(x.sym)||x.avg;value+=px*x.qty;cost+=x.avg*x.qty});const pnl=value-cost;
+  if(byId('pfValue'))byId('pfValue').textContent=money(value);if(byId('pfPnl')){byId('pfPnl').textContent=(pnl>0?'+':'')+money(pnl);byId('pfPnl').style.color=pnl>=0?'var(--mint)':'var(--dn)'}if(byId('pfPnlHint'))byId('pfPnlHint').textContent=cost?`Maliyet ${money(cost)} · ${cost?((pnl/cost)*100).toFixed(2):'0'}%`:'Henüz varlık eklenmedi';
+  if(byId('pfList'))byId('pfList').innerHTML=list.length?list.map((x,i)=>{const px=priceFor(x.sym),now=px||x.avg,p=now*x.qty-x.avg*x.qty;return `<div class="data-row"><div style="min-width:0"><b>${safe(x.sym)}</b><small>${x.qty} adet · maliyet ${money(x.avg)}${px?' · fiyat bot listesinden':' · fiyat bulunamadı'}</small></div><div style="text-align:right"><b>${money(now*x.qty)}</b><small style="color:${p>=0?'var(--mint)':'var(--dn)'}">${p>=0?'+':''}${money(p)}</small></div><button class="danger-btn" data-pfdel="${i}" aria-label="Sil">×</button></div>`}).join(''):'<div class="empty-state"><strong>Portföyün henüz boş</strong>Üstteki formdan hisse ve maliyetini ekleyebilirsin.</div>';
+ }
+ byId('pfForm')?.addEventListener('submit',e=>{e.preventDefault();const sym=byId('pfSym').value.trim().toUpperCase().replace(/[^A-Z.]/g,'');const qty=Number(byId('pfQty').value),avg=Number(byId('pfAvg').value);if(!sym||qty<=0||avg<=0)return;const list=read('portfolio',[]);const found=list.find(x=>x.sym===sym);if(found){const total=found.qty+qty;found.avg=(found.avg*found.qty+avg*qty)/total;found.qty=total}else list.push({sym,qty,avg});write('portfolio',list);e.target.reset();portfolioRender();});
+ byId('pfList')?.addEventListener('click',e=>{const b=e.target.closest('[data-pfdel]');if(!b)return;const list=read('portfolio',[]);list.splice(Number(b.dataset.pfdel),1);write('portfolio',list);portfolioRender()});
+ byId('pfExport')?.addEventListener('click',()=>{const data=JSON.stringify(read('portfolio',[]),null,2);const blob=new Blob([data],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='abd-bot-portfoy.json';a.click();URL.revokeObjectURL(url)});
+ const weatherCode=c=>{if(c===0)return ['Açık','☀️'];if(c===1)return ['Çoğunlukla açık','🌤️'];if(c===2)return ['Parçalı bulutlu','⛅'];if(c===3)return ['Kapalı','☁️'];if([45,48].includes(c))return ['Sisli','🌫️'];if([51,53,55,56,57].includes(c))return ['Çisenti','🌦️'];if([61,63,65,66,67,80,81,82].includes(c))return ['Yağmurlu','🌧️'];if([71,73,75,77,85,86].includes(c))return ['Karlı','❄️'];if([95,96,99].includes(c))return ['Gök gürültülü','⛈️'];return ['Değişken','🌡️']};
+ const dayNames=['Paz','Pzt','Sal','Çar','Per','Cum','Cmt'];
+ async function weatherLoad(city){if(!byId('wxState'))return;byId('wxState').style.display='block';byId('wxState').textContent='Hava durumu aranıyor…';byId('wxContent').style.display='none';try{const gr=await fetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(city)+'&count=1&language=tr&format=json');if(!gr.ok)throw Error('Şehir aranamadı');const gd=await gr.json();if(!gd.results?.length)throw Error('Şehir bulunamadı. Başka bir isim dene.');const place=gd.results[0];const wr=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=5`);if(!wr.ok)throw Error('Tahmin alınamadı');const d=await wr.json(),c=d.current,[cond,icon]=weatherCode(c.weather_code);byId('wxName').textContent=[place.name,place.admin1,place.country].filter(Boolean).join(', ');byId('wxIcon').textContent=icon;byId('wxTemp').textContent=Math.round(c.temperature_2m)+'°';byId('wxCond').textContent=cond;byId('wxMeta').textContent=`Hissedilen ${Math.round(c.apparent_temperature)}° · Yağış ${c.precipitation} mm`;byId('wxWind').textContent=Math.round(c.wind_speed_10m);byId('wxHum').textContent=c.relative_humidity_2m+'%';byId('wxForecast').innerHTML=d.daily.time.map((date,i)=>{const dt=new Date(date+'T12:00:00');const [desc,ico]=weatherCode(d.daily.weather_code[i]);return `<div class="forecast-day"><b>${i===0?'Bugün':dayNames[dt.getDay()]}</b><i>${ico}</i><strong>${Math.round(d.daily.temperature_2m_max[i])}°</strong><small>${Math.round(d.daily.temperature_2m_min[i])}°</small></div>`}).join('');byId('wxState').style.display='none';byId('wxContent').style.display='block';write('weatherCity',city)}catch(err){byId('wxState').textContent=err.message||'Hava durumu alınamadı. İnternet bağlantını kontrol et.'}}
+ byId('wxSearch')?.addEventListener('click',()=>weatherLoad(byId('wxCity').value.trim()||'İzmir'));byId('wxCity')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();weatherLoad(byId('wxCity').value.trim()||'İzmir')}});
+ function calendarRender(){const list=read('calendar',[]).slice().sort((a,b)=>a.date.localeCompare(b.date));if(!byId('calList'))return;byId('calList').innerHTML=list.length?list.map((x,i)=>{const d=new Date(x.date+'T12:00:00');const imp=x.impact==='high'?'YÜKSEK':x.impact==='low'?'DÜŞÜK':'ORTA';return `<div class="calendar-item"><div class="datebox"><b>${d.getDate()}</b><small>${d.toLocaleDateString('tr-TR',{month:'short'}).toUpperCase()}</small></div><div><strong>${safe(x.title)}</strong><p>${d.toLocaleDateString('tr-TR',{weekday:'long',year:'numeric'})}</p></div><div style="display:flex;flex-direction:column;align-items:end;gap:7px"><span class="severity ${x.impact==='high'?'high':x.impact==='low'?'low':''}">${imp}</span><button class="soft-btn" data-caldel="${i}" style="padding:5px 8px">Sil</button></div></div>`}).join(''):'<div class="empty-state"><strong>Takviminde kayıt yok</strong>Önemli tarihleri üstteki formdan ekleyebilirsin.</div>'}
+ byId('calForm')?.addEventListener('submit',e=>{e.preventDefault();const title=byId('calTitle').value.trim(),date=byId('calDate').value;if(!title||!date)return;const list=read('calendar',[]);list.push({title,date,impact:byId('calImpact').value,id:Date.now()});write('calendar',list);e.target.reset();byId('calDate').value=new Date().toISOString().slice(0,10);calendarRender()});
+ byId('calList')?.addEventListener('click',e=>{const b=e.target.closest('[data-caldel]');if(!b)return;const list=read('calendar',[]).slice().sort((a,b)=>a.date.localeCompare(b.date));list.splice(Number(b.dataset.caldel),1);write('calendar',list);calendarRender()});
+ function journalRender(){const list=read('journal',[]);if(!byId('jrList'))return;byId('jrList').innerHTML=list.length?list.map((x,i)=>`<div class="data-row" style="align-items:flex-start"><div style="min-width:0;flex:1"><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><b>${safe(x.sym)}</b><span class="pilltag">${safe(x.type)}</span></div><small>${new Date(x.time).toLocaleString('tr-TR')}</small><div style="font-size:12px;line-height:1.55;color:#c4d2e4;margin-top:7px;white-space:pre-wrap;overflow-wrap:anywhere">${safe(x.note)}</div></div><button class="danger-btn" data-jrdel="${i}">×</button></div>`).join(''):'<div class="empty-state"><strong>Henüz günlük kaydı yok</strong>İşlem öncesi düşünceni kaydetmek, sonradan kararlarını değerlendirmene yardım eder.</div>'}
+ byId('jrForm')?.addEventListener('submit',e=>{e.preventDefault();const sym=byId('jrSym').value.trim().toUpperCase().replace(/[^A-Z.]/g,''),note=byId('jrNote').value.trim();if(!sym||!note)return;const list=read('journal',[]);list.unshift({sym,type:byId('jrType').value,note,time:Date.now()});write('journal',list.slice(0,150));e.target.reset();journalRender()});
+ byId('jrList')?.addEventListener('click',e=>{const b=e.target.closest('[data-jrdel]');if(!b)return;const list=read('journal',[]);list.splice(Number(b.dataset.jrdel),1);write('journal',list);journalRender()});byId('jrClear')?.addEventListener('click',()=>{if(confirm('İşlem günlüğündeki tüm kayıtlar silinsin mi?')){write('journal',[]);journalRender()}});
+ const checks=['Şirketin son bilançosunu ve beklentilerini kontrol ettim.','Haber / bilanço / ekonomik veri riski var mı baktım.','Giriş, stop ve hedef seviyelerini önceden belirledim.','Pozisyon büyüklüğünü ve toplam riski hesapladım.','Kırılımı hacim ve kapanışla doğruladım.'];if(byId('newsChecklist'))byId('newsChecklist').innerHTML=checks.map((x,i)=>`<label class="data-row" style="justify-content:flex-start;cursor:pointer"><input type="checkbox" data-newscheck="${i}" style="accent-color:#64d8ff;width:17px;height:17px"><span style="font-size:12px;line-height:1.45">${x}</span></label>`).join('');
+ byId('newsChecklist')?.addEventListener('change',e=>{const c=e.target.closest('[data-newscheck]');if(!c)return;const a=read('newschecks',{});a[c.dataset.newscheck]=c.checked;write('newschecks',a)});const savedChecks=read('newschecks',{});byId('newsChecklist')?.querySelectorAll('[data-newscheck]').forEach(c=>c.checked=!!savedChecks[c.dataset.newscheck]);
+ // The app's existing refresh cycle remains untouched; update derived cards when its data changes.
+ const originalAna=window.anaYukle;if(typeof originalAna==='function'){const wrapped=async function(...args){const r=await originalAna.apply(this,args);marketRender();portfolioRender();return r};window.anaYukle=wrapped}
+ const originalTab=window.sekmeAc;if(typeof originalTab==='function'){window.sekmeAc=function(t){originalTab(t);if(t==='piyasa')marketRender();if(t==='portfoy')portfolioRender();if(t==='hava')weatherLoad(read('weatherCity','İzmir'));if(t==='takvim')calendarRender();if(t==='gunluk')journalRender()}}
+ // Some original top-level declarations are lexical; refresh once after the first render as well.
+ setTimeout(()=>{marketRender();portfolioRender();calendarRender();journalRender();if(byId('calDate'))byId('calDate').value=new Date().toISOString().slice(0,10)},350);
+})();
+</script>
+
 </body>
 </html>
