@@ -8232,7 +8232,7 @@ def kk_guncelle():
     now = time.time()
     deg = False
     for r in KK["kayit"][-80:]:
-        if r.get("kt") and r["gun"] == gun and r["st"] not in ("sahte", "kırılmadı", "onaysız"):
+        if r.get("kt") and r["gun"] == gun and r["st"] == "kırıldı":       # stop / K3 / gün sonu sonrası yükseliş sayılmaz
             z = _zirve_since(r["sym"], r["kt"])                # kırılımdan sonraki en yüksek mum (gün içinde kalıcı)
             if z and z > (r.get("zirve") or 0):
                 r["zirve"] = z
@@ -8408,7 +8408,7 @@ def _geri(r):
 
 
 def _tepe_pct(r):
-    t = max(r.get("tepe") or 0, r.get("zirve") or 0)
+    t = (r.get("tepe") or 0) if r.get("st") == "stop" else max(r.get("tepe") or 0, r.get("zirve") or 0)
     return round((t / r["giris"] - 1) * 100, 1) if t and r.get("giris") else None
 
 
@@ -10188,7 +10188,8 @@ async def lifespan(app):
             if isinstance(backup.data["kk"].get(k_), type(KK[k_])):
                 KK[k_] = backup.data["kk"][k_]
         for r in KK["kayit"]:                         # eski kayıtlar: K1/K2/K3'ü mum tepesine göre düzelt
-            z, hed = max(r.get("tepe") or 0, r.get("zirve") or 0), [h for h in (r.get("hed") or []) if h]
+            z = (r.get("tepe") or 0) if r.get("st") == "stop" else max(r.get("tepe") or 0, r.get("zirve") or 0)
+            hed = [h for h in (r.get("hed") or []) if h]
             if r.get("kt") and r.get("st") != "sahte" and z:
                 k_ = sum(1 for h in hed[:3] if z >= h)
                 if k_ > (r.get("k") or 0):
