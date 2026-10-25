@@ -1511,6 +1511,7 @@ def akis_semboller(tum=False):
     except Exception:
         pass
     s += list(PLAN.planlar) + [x["sym"] for x in KK["alarm"]]
+    s += [k for k, v in sorted(VIEWED.items(), key=lambda kv: -kv[1]) if time.time() - v < 600][:3]   # sitede açık hisse: canlı işlem akışı
     s += [c["sym"] for c in KK["cizgi"] if c["st"] in ("bekliyor", "kırıldı")]
     run = sorted(scanner.runners.items(), key=lambda kv: -((kv[1] or {}).get("pct") or 0))
     s += [k for k, _ in run] + list(IZLE)
@@ -10443,7 +10444,7 @@ async def api_hisse(request: Request, sym: str, bars: int = 0):
     k = KOTE.get(sym)
     out = {"sym": sym, "p": sm.get("p") or fiyat(sym), "ch": sm.get("ch"), "plan": plan, "ab": akis_ozet(sym),
            "bid": k[0] if k else None, "ask": k[1] if k else None, "spr": spread_yuzde(sym),
-           "son": list(reversed(((AKIS.get(sym) or {}).get("son") or [])[-12:])),
+           "son": list(reversed(((AKIS.get(sym) or {}).get("son") or [])[-25:])),
            "float": (KK["float"].get(sym) or [None, None])[1], "fd": float_donus(sym),
            "sec": (r_.get("sec") or {}).get("kind"), "haber": tr_or(n_.get("headline")) if n_ else None,
            "gun_pct": r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct"),
@@ -10488,6 +10489,56 @@ def api_bildirim(request: Request):
     return {"liste": list(reversed(BILDIRIM[-60:]))}
 
 
+HABER_C = {}
+
+
+def _haber_cek(sym):
+    """Finnhub ücretsiz şirket haberleri: son 3 gün, en yeni 8 başlık."""
+    key = os.getenv("FINNHUB_KEY", "")
+    if not key:
+        return []
+    bit = datetime.now(ET).date()
+    r = httpx.get("https://finnhub.io/api/v1/company-news", timeout=8,
+                  params={"symbol": sym, "from": str(bit - timedelta(days=3)), "to": str(bit), "token": key})
+    L = r.json() if r.status_code == 200 else []
+    out = []
+    for h in sorted(L if isinstance(L, list) else [], key=lambda x: -(x.get("datetime") or 0))[:8]:
+        b = str(h.get("headline") or "").strip()
+        if b:
+            out.append({"t": int(h.get("datetime") or 0), "k": str(h.get("source") or "")[:30], "b": tr_or(b)[:200],
+                        "u": str(h.get("url") or "")[:400]})
+    return out
+
+
+@app.get("/api/haber")
+async def api_haber(request: Request, sym: str):
+    """Hisse sayfası haber listesi (10 dk önbellek, en fazla 40 hisse tutulur)."""
+    if not authorized(request):
+        return JSONResponse({"hata": "giriş gerekli"}, status_code=401)
+    sym = re.sub(r"[^A-Z.\-]", "", sym.upper())[:8]
+    c = HABER_C.get(sym)
+    if c and time.time() - c[0] < 600:
+        return {"liste": c[1]}
+    try:
+        L = await asyncio.to_thread(_haber_cek, sym)
+    except Exception as e:
+        log.debug("Haber alınamadı %s: %s", sym, e)
+        L = c[1] if c else []
+    HABER_C[sym] = (time.time(), L)
+    if len(HABER_C) > 40:
+        HABER_C.pop(min(HABER_C, key=lambda k: HABER_C[k][0]), None)
+    return {"liste": L}
+
+
+def hafta_ozet():
+    """Son 7 günün karnesi: kırılım, K1'e ulaşan, isabet."""
+    bas = str((datetime.now(ET) - timedelta(days=6)).date())
+    son = [r for r in KK["kayit"] if r["gun"] >= bas and _gorunur(r) and r["st"] not in ("bekliyor", "kırılmadı", "onaysız")]
+    kaz = sum(1 for r in son if _kk_sonuc(r)[2] is True)
+    kay = sum(1 for r in son if _kk_sonuc(r)[2] is False)
+    return {"kirilan": len(son), "kazanan": kaz, "kaybeden": kay, "wr": round(100 * kaz / (kaz + kay)) if kaz + kay else None}
+
+
 @app.get("/api/canli")
 def api_canli():
     L = canli_listesi()
@@ -10508,7 +10559,7 @@ def api_kk():
     """Kırılım karnesi + radar + haftanın dersleri + kural testi + sağlık."""
     return {"karne": karne_ozet(None, 30), "bugun": karne_ozet(_gun_et()), "radar": radar_listesi(), "ders": ders_listesi(7),
             "kural": kural_karnesi(7), "test": KRT.get("sonuc"), "test_t": KRT.get("t"), "test_run": KRT["running"],
-            "test_prog": KRT.get("prog"), "saglik": saglik_satirlari(), "cizgi": cizgi_karne(), "ogrenme": ogrenme_ozet(), "gece": gece_ozet()}
+            "test_prog": KRT.get("prog"), "saglik": saglik_satirlari(), "cizgi": cizgi_karne(), "ogrenme": ogrenme_ozet(), "gece": gece_ozet(), "hafta": hafta_ozet()}
 
 
 @app.post("/api/kuraltest")
