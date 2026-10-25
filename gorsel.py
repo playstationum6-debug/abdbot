@@ -118,7 +118,7 @@ def _mix(c, a, bg=BG):
 
 
 # ---------------------------------------------------------------- ana grafik: seviye merdiveni
-def plan_grafik(bars, p, max_bars=84):
+def plan_grafik_eski(bars, p, max_bars=84):
     """
     bars: [(t,o,h,l,c,v[,seans])] — 5 dk (ya da 1 dk) mumlar
     p: {sym, last, ch, durum, baslik, alt, giris, stop, hedefler[], seviye, neden, haber, t_sig, yon, conf, tf}
@@ -814,3 +814,157 @@ def kirilim_video(bars, d_, n_kare=34):
     kareler[0].save(out, format="GIF", save_all=True, append_images=kareler[1:], duration=[110] * (len(kareler) - 9) + [1600] + [200] * 8,
                     loop=0, optimize=True)
     return out.getvalue()
+
+
+# ---------------------------------------------------------------- Webull tarzı sade grafik (kanal)
+W_BG = (0, 0, 0)
+W_SEANS = (20, 20, 22)
+W_GRID = (28, 28, 32)
+W_AX = (120, 122, 130)
+W_UP = (38, 194, 129)
+W_DN = (239, 69, 101)
+W_TURUNCU = (255, 149, 0)
+W_DURUM = {"bekliyor": ("BEKLİYOR", (120, 122, 130)), "yaklasiyor": ("YAKLAŞIYOR", W_TURUNCU), "onaylı": ("KIRDI", W_UP),
+           "giris": ("KIRDI", W_UP), "k1": ("K1 ✓", W_UP), "k2": ("K2 ✓", W_UP), "k3": ("K3 ✓", W_UP), "ilerleme": ("YÜKSELİYOR", W_UP),
+           "sahte": ("SAHTE", W_DN), "kaçtı": ("KAÇTI", W_TURUNCU), "bozuldu": ("BOZULDU", W_DN), "stop": ("STOP", W_DN)}
+
+
+def _adim(rng, n=5):
+    s = rng / n
+    m = 10 ** math.floor(math.log10(s))
+    k = s / m
+    return (1 if k < 1.5 else 2 if k < 3 else 5 if k < 7 else 10) * m
+
+
+def _wpill(d, x, y, txt, bg, fg, f, sag=True, S=2):
+    tw = d.textlength(txt, font=f)
+    w, h = tw + 18 * S, f.size + 12 * S
+    x0 = x - w if sag else x
+    d.rounded_rectangle([x0, y - h / 2, x0 + w, y + h / 2], radius=6 * S, fill=bg)
+    d.text((x0 + 9 * S, y - f.size / 2 - 2 * S), txt, font=f, fill=fg)
+    return h
+
+
+def plan_grafik(bars, p, max_bars=78):
+    """Webull'un siyah ekranı gibi: sade mumlar, sağda fiyat ekseni, seviyeler eksende renkli etiketle."""
+    if not bars or len(bars) < 8:
+        return None
+    S = 2
+    W, H = 1080, 1180
+    AX = 150
+    B = bars[-max_bars:]
+    n = len(B)
+    last = p.get("last") or B[-1][4]
+    hed = [h for h in (p.get("hedefler") or []) if h][:3]
+    lv = []
+    if p.get("giris"):
+        lv.append((p["giris"], "GİRİŞ", W_TURUNCU, (0, 0, 0), 3))
+    if p.get("stop"):
+        lv.append((p["stop"], "STOP", W_DN, (255, 255, 255), 2))
+    for i, h in enumerate(hed):
+        lv.append((h, f"K{i + 1}", (22, 60, 44), W_UP, 1))
+    hi, lo = max(b[2] for b in B), min(b[3] for b in B)
+    for v, *_ in lv:
+        if lo * 0.6 < v < hi * 1.6:
+            hi, lo = max(hi, v), min(lo, v)
+    rng = (hi - lo) or hi * 0.02
+    hi += rng * 0.07
+    lo -= rng * 0.05
+    img = Image.new("RGB", (W * S, H * S), W_BG)
+    d = ImageDraw.Draw(img, "RGBA")
+    f = lambda sz, w="r": F(sz * S, w)
+    HDR = 210
+    x0, x1 = 18 * S, (W - AX) * S
+    py0, py1 = (HDR + 20) * S, (H - 210) * S
+    vy0, vy1 = (H - 190) * S, (H - 110) * S
+    cw = (x1 - x0) / (n + 3)
+    X = lambda i: x0 + (i + 0.5) * cw
+    Y = lambda v: py1 - (v - lo) / (hi - lo) * (py1 - py0)
+    # başlık (Webull gibi: sembol, fiyat, değişim)
+    ch = p.get("ch")
+    d.text((40 * S, 30 * S), p.get("sym", ""), font=f(64, "b"), fill=(255, 255, 255))
+    renk = W_UP if (ch or 0) >= 0 else W_DN
+    fiyat = f"{fp(last)}"
+    d.text((40 * S, 112 * S), fiyat, font=f(46, "b"), fill=renk)
+    tw = d.textlength(fiyat, font=f(46, "b"))
+    if ch is not None:
+        d.text((40 * S + tw + 18 * S, 126 * S), fpct(ch), font=f(30, "sb"), fill=renk)
+    et, er = W_DURUM.get(p.get("durum") or "bekliyor", W_DURUM["bekliyor"])
+    fpl = f(28, "b")
+    pw = d.textlength(et, font=fpl) + 36 * S
+    d.rounded_rectangle([(W - 40) * S - pw, 40 * S, (W - 40) * S, 92 * S], radius=26 * S, fill=er + (40,), outline=er + (180,), width=2 * S)
+    d.text(((W - 40) * S - pw + 18 * S, 50 * S), et, font=fpl, fill=er)
+    d.text(((W - 40) * S - d.textlength(p.get("tf") or "5 dk", font=f(24)), 116 * S), p.get("tf") or "5 dk", font=f(24), fill=W_AX)
+    # seans dışı (öncesi / sonrası) gri alan
+    if len(B[0]) > 6:
+        i = 0
+        while i < n:
+            if B[i][6] != 1:
+                j = i
+                while j + 1 < n and B[j + 1][6] != 1:
+                    j += 1
+                d.rectangle([X(i) - cw / 2, py0 - 20 * S, X(j) + cw / 2, vy1], fill=W_SEANS)
+                i = j + 1
+            else:
+                i += 1
+    # ızgara + eksen
+    st = _adim(hi - lo)
+    v = math.ceil(lo / st) * st
+    fa = f(26)
+    dolu = [Y(x[0]) for x in lv if lo < x[0] < hi] + [Y(last)]
+    while v < hi:
+        y = Y(v)
+        _dash(d, x0, y, x1, W_GRID, 1 * S, 3 * S, 6 * S)
+        if all(abs(y - z) > 34 * S for z in dolu):
+            d.text((x1 + 18 * S, y - 15 * S), fp(v), font=fa, fill=W_AX)
+        v += st
+    # saatler
+    for i in range(0, n, max(1, n // 4)):
+        d.text((max(x0, X(i) - 30 * S), (H - 96) * S), datetime.fromtimestamp(B[i][0], TR).strftime("%H:%M"), font=f(24), fill=W_AX)
+    # hacim
+    vm = max(b[5] for b in B) or 1
+    for i, b in enumerate(B):
+        h_ = (b[5] / vm) * (vy1 - vy0)
+        c = W_UP if b[4] >= b[1] else W_DN
+        d.rectangle([X(i) - cw * 0.32, vy1 - h_, X(i) + cw * 0.32, vy1], fill=c + (90,))
+    # seviye çizgileri
+    for v, ad, bg, fg, kal in lv:
+        if not (lo < v < hi):
+            continue
+        y = Y(v)
+        if kal >= 3:
+            d.line([x0, y, x1, y], fill=bg, width=3 * S)
+        else:
+            _dash(d, x0, y, x1, bg if kal == 2 else W_UP, kal * S, 10 * S, 7 * S)
+        d.text((x0 + 8 * S, y - 34 * S), ad, font=f(22, "b"), fill=(bg if kal >= 2 else W_UP))
+    # mumlar
+    bw = max(2 * S, cw * 0.62)
+    for i, b in enumerate(B):
+        c = W_UP if b[4] >= b[1] else W_DN
+        x = X(i)
+        d.line([x, Y(b[2]), x, Y(b[3])], fill=c, width=max(2, int(1.6 * S)))
+        t, bt = Y(max(b[1], b[4])), Y(min(b[1], b[4]))
+        d.rectangle([x - bw / 2, t, x + bw / 2, max(bt, t + 2 * S)], fill=c)
+    # kırılım işareti
+    if p.get("t_sig"):
+        k = bisect_left([b[0] for b in B], p["t_sig"])
+        if 0 <= k < n:
+            x, y = X(k), Y(B[k][3]) + 22 * S
+            d.polygon([(x, y - 12 * S), (x - 11 * S, y + 8 * S), (x + 11 * S, y + 8 * S)], fill=W_UP)
+    # şu anki fiyat çizgisi
+    yl = Y(last)
+    _dash(d, x0, yl, x1, renk + (200,), 2 * S, 4 * S, 5 * S)
+    # eksen etiketleri (çakışmasın)
+    et_ = sorted([(Y(v), fp(v), bg, fg) for v, ad, bg, fg, kal in lv if lo < v < hi] + [(yl, fp(last), renk, (0, 0, 0))], key=lambda z: z[0])
+    fe = f(26, "b")
+    son = -1e9
+    for y, t, bg, fg in et_:
+        y = max(y, son + 40 * S)
+        son = y
+        _wpill(d, (W - 6) * S, y, t, bg, fg, fe, S=S)
+    # imza
+    d.text((40 * S, (H - 56) * S), "ABD BORSA ANALİZ", font=f(22, "b"), fill=(70, 72, 80))
+    if p.get("neden"):
+        nd = p["neden"][:60]
+        d.text(((W - 40) * S - d.textlength(nd, font=f(22)), (H - 56) * S), nd, font=f(22), fill=(70, 72, 80))
+    return _png(img.resize((W, H), Image.LANCZOS))

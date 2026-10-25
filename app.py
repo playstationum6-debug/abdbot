@@ -1751,7 +1751,7 @@ class Telegram:
         return n
 
     def _markup(self, sym):
-        if not sym:
+        if not sym or not os.getenv("KANAL_UYGULAMA_DUGMESI"):   # kanalda uygulama düğmesi yok (uygulama sadece yöneticiye)
             return None
         url = f"https://t.me/{self.username}?startapp=s_{sym}" if self.username and MINI_APP else f"{SITE_URL}/?s={sym}"
         return {"inline_keyboard": [[{"text": f"📈 #{sym} grafiği aç", "url": url}]]}
@@ -7983,64 +7983,25 @@ def _poc_satir(p):
 
 
 def _plan_html(p):
-    tur = " + ".join(planmod.TUR_AD.get(t, t) for t in p["tur"])
-    px = _px(p["sym"]) or p.get("px")
-    ek = []
-    if p.get("kanal"):
-        ek.append("📣 Seviye takip edilen bir kanaldan; onayı bot kendi kuralıyla verir")
-    if p.get("liste"):
-        ek.append("☀️ Günün Listesi'nde")
-    ih = p.get("ih") or {}
-    ih_satir = (f"🧠 Tutma ihtimali <b>%{ih['p']}</b> <i>(geçmiş {ih['n']} kırılımdan" + (" · " + _h(", ".join(ih["neden"])) if ih.get("neden") else "") + ")</i>\n") if ih.get("p") is not None else ""
-    yz = p.get("yz") or {}
-    if yz.get("katalizor"):
-        sey = {"var": "⚠️ seyreltme VAR", "yok": "seyreltme yok"}.get(yz.get("seyreltme"), "seyreltme bilinmiyor")
-        ek.append(f"🧠 {_h(str(yz['katalizor'])[:90])} · {sey}")
-    return (f"⏳ <b>PLAN · #{_h(p['sym'])}</b>  <code>{fk(px)}</code> → <code>{fk(p['giris'])}</code>\n"
-            f"<i>Giriş: {fk(p['giris'])} üstünde mum kapanırsa (hızlı piyasada 1 dk, sakin piyasada 5 dk · 2× hacimle) limit emirle alış</i>\n\n"
-            + tg_seviyeler(p["giris"], p["stop"], p["hedefler"], px) + "\n"
-            + ih_satir
-            + (spread_satir(p["sym"]) + "\n" if spread_satir(p["sym"]) else "")
-            + (float_satir(p["sym"]) + "\n" if float_satir(p["sym"]) else "")
-            + _poc_satir(p)
-            + (sec_satir(p["sym"]) + "\n" if sec_satir(p["sym"]) else "")
-            + (piyasa_satir() + "\n" if piyasa_satir() else "") +
-            f"<blockquote expandable>📌 {_h(tur)} · puan {str(p['puan']).replace('.', ',')}"
-            + "".join("\n" + x for x in ek) +
-            "\nDestek/direnç 5 ve 15 dk mumlardan. Onay: mum direncin üstünde kapanmalı (piyasa hızlıysa 1 dk, sakinse 5 dk), hacmi son 20 mumun ≥2 katı. Açılışın ilk 15 dk'sı, tükenme, "
-            "3 düşen tepe, satış emri baskısı (5×) ya da spread > %2 varsa sinyal yok. Sonraki 1 dk mum seviyenin altına "
-            "kapanırsa sahte sayılır. Kırılım tutarsa eski direncin destek testi (en güçlü giriş) ayrıca bildirilir."
-            "</blockquote>")
+    """Kısa plan mesajı: herkesin 3 saniyede anlayacağı 2 satır (detay grafikte)."""
+    h = [x for x in (p.get("hedefler") or []) if x][:3]
+    ih = (p.get("ih") or {}).get("p")
+    return (f"⏳ <b>#{_h(p['sym'])}</b> <b>{fk(p['giris'])}</b> üstü kırarsa al\n"
+            f"🔴 Stop <b>{fk(p['stop'])}</b>   🟢 Hedef {' · '.join(fk(x) for x in h)}"
+            + (f"\n🧠 Tutma ihtimali %{ih}" if ih is not None else "")
+            + ("\n☀️ Günün listesinde" if p.get("liste") else ""))
 
 
 def kirilim_html(p, retest=False):
-    """Onaylanan kırılım / tekrar test mesajı: limit giriş, stop, hedefler, lot, kurallar."""
+    """Kısa kırılım mesajı."""
     e_ = p.get("e") or p["giris"]
-    lot = planmod.LOT_USD / (2 if p.get("yarim") else 1)
-    adet = int(lot // e_) if e_ else 0
-    bas = ("🔁 <b>TEKRAR TEST · EN GÜÇLÜ GİRİŞ · #{s}</b>\nDirenç <code>{l}</code> kırıldı, geri çekildi, eski direnç destek olarak "
-           "tuttu; yeşil 5 dk mum yüksek hacimle kapandı ({v}×)") if retest else \
-        ("🟢 <b>KIRILIM ONAYLANDI · #{s}</b>\n" + ("1 dk mum" if p.get("tf", 1) == 1 else "5 dk mum")
-         + " <code>{e}</code> ile direncin (<code>{l}</code>) üstünde kapandı · hacim {v}×")
-    out = [bas.format(s=_h(p["sym"]), e=fk(e_), l=fk(p["giris"] if not retest else (p.get("lvl") or p["giris"])),
-                      v=str(p.get("vr") or "—").replace(".", ",")),
-           ""]
+    h = [x for x in (p.get("hedefler") or []) if x][:3]
     px = fiyat(p["sym"])
+    bas = (f"🔁 <b>#{_h(p['sym'])}</b> geri çekildi ve tuttu · tekrar giriş <b>{fk(e_)}</b>" if retest
+           else f"✅ <b>#{_h(p['sym'])} KIRDI</b> · giriş <b>{fk(e_)}</b>")
+    out = [bas, f"🔴 Stop <b>{fk(p['stop'])}</b>   🟢 Hedef {' · '.join(fk(x) for x in h)}"]
     if px and e_ and px > e_ * 1.02:
-        out.append(f"⚠️ Fiyat şimdi <code>{fk(px)}</code>, girişin {fy(_yuzde(px, e_))} üstünde: <b>kovalamayın</b>, "
-                   f"limit emir ancak {fk(e_)}'e geri çekilirse dolar.")
-    out += [
-           f"📝 <b>Limit alış</b> <code>{fk(e_)}</code> · piyasa emri kullanmayın",
-           f"🔴 Stop <code>{fk(p['stop'])}</code> <i>(kırılan direncin altı, {fy(_yuzde(p['stop'], e_))})</i>",
-           "🟢 Hedef " + " · ".join(f"<code>{fk(h)}</code>" for h in p["hedefler"][:3])]
-    if e_ > p["stop"]:
-        out.append(f"⚖️ Risk/ödül <b>1:{(p['hedefler'][1] - e_) / (e_ - p['stop']):.1f}</b>".replace(".", ","))
-    out.append("💡 K1'de yarısını sat, stopu giriş fiyatına çek.")
-    out.append(f"📦 {lot:.0f}$ ≈ {adet} adet" + (" · <i>öncesi seans hacmi düşük: yarım lot</i>" if p.get("yarim") else ""))
-    for s_ in (spread_satir(p["sym"]), float_satir(p["sym"]), sec_satir(p["sym"]), piyasa_satir()):
-        if s_:
-            out.append(s_)
-    out.append("<i>Paper takip · yatırım tavsiyesi değildir</i>")
+        out.append(f"⚠️ Fiyat {fk(px)}, girişten {fy(_yuzde(px, e_))} yukarıda · kovalama")
     return "\n".join(out)
 
 
@@ -8054,16 +8015,16 @@ def plan_grafik_ch(p, durum=None):
     v = gorsel.plan_veri(p, p["sym"], None, durum=durum, haber=haber or None) if gorsel else None
     if v:
         v["last"] = None
+        v["ch"] = (summary(p["sym"]) or {}).get("ch")
         if p.get("ot"):
             v["t_sig"] = p["ot"]
     return {"sym": p["sym"], "v4": v, "title": f"#{p['sym']}  kırılım planı {fp_(p['giris'])}",
             "lines": {"giris": p["giris"], "stop": p["stop"], "hedef": p["hedefler"][1]}}
 
 
-DURUM_AD = {"yeni": "Durum: ⏳ <b>kırılım bekleniyor</b>",
-            "kaçtı": "Durum: 🏃 <b>tek mumda kaçtı</b> · kovalanmıyor, seviyeye geri çekilirse (retest) girilecek",
-            "onaylı": "Durum: ✅ <b>KIRILDI</b>", "sahte": "Durum: ⚠️ <b>SAHTE KIRILIM</b>", "iptal": "Durum: ✖️ <b>iptal</b>",
-            "süre": "Durum: ⌛ <b>süre doldu</b>"}
+DURUM_AD = {"yeni": "⏳ <b>bekleniyor</b>", "kaçtı": "🏃 <b>kaçtı</b> · kovalamıyoruz",
+            "onaylı": "✅ <b>KIRDI</b>", "sahte": "❌ <b>sahte kırılım</b>", "iptal": "✖️ <b>iptal</b>",
+            "süre": "⌛ <b>süre doldu</b>"}
 PLAN_FOTO = {}          # key → durum: plan resmi yeni rozetle yeniden çizilecek
 TG_SUSTUR = {}          # sym → gün: o gün plan/sinyal mesajı gönderilmez
 PLAN_TG_RED = {}        # sym → (zaman, neden): plan kuruldu ama Telegram'a gitmedi
@@ -8381,7 +8342,11 @@ def ilerleme_kontrol():
         ilk["ilr"] = max(es)
         tk = KK["tgplan"].get(sym) or {}
         key = tk.get("key") if tk.get("gun") == gun else None
-        sat = [f"🚀 <b>#{_h(sym)} KIRILIMDAN {fy(pct)}</b>  <code>{fk(px)}</code>", ""]
+        tg.send(f"🚀 <b>#{_h(sym)} {fk(px)}</b> · kırılımdan <b>{fy(pct)}</b>" + (" 🔥" if pct >= 25 else ""), None, sym=sym, reply=key, konu="plan", quiet=pct < 50)
+        if key:
+            zincir(key, f"🚀 kırılımdan {fy(pct)}")
+        continue
+        sat = []
         for i, r in enumerate(L[:3], 1):
             p_ = (px / r["giris"] - 1) * 100
             kar = planmod.LOT_USD * p_ / 100
@@ -9461,10 +9426,7 @@ def plan_olaylari():
         if ev == "red":
             if tg.ok and not p.get("red_tg"):
                 p["red_tg"] = 1
-                tg.send(f"⚠️ <b>TÜKENME UYARISI · #{_h(sym)} · ALIM YAPMA</b>\n"
-                        f"Fiyat {fk(p['giris'])} üstünde ama: {_h(planmod.RED_AD.get(p.get('red'), p.get('red') or ''))}.\n"
-                        "<i>Koşullar düzelirse kırılım ayrıca bildirilir.</i>",
-                        plan_grafik_ch(p, durum="sahte"), sym=sym, reply=key, konu="plan", quiet=True)
+                tg.send(f"⚠️ <b>#{_h(sym)}</b> tükendi · şimdilik alma", None, sym=sym, reply=key, konu="plan", quiet=True)
                 zincir(key, "⚠️ tükenme uyarısı · alım yok")
             continue
         if ev in ("sahte", "iptal", "süre") or (ev == "onaylı" and not p.get("bitis")):
@@ -9492,10 +9454,7 @@ def plan_olaylari():
             PLAN_FOTO[key] = "sahte"
             if tg.ok:
                 bot_ic = p.get("sig") and any(q.get("sig") == p["sig"] and q["st"] in botmod.OPEN_ST for q in bot.positions)
-                tg.send(f"⚠️ <b>SAHTE KIRILIM · #{_h(sym)}</b>\n{_h(p.get('neden', ''))}\n"
-                        + (f"<i>Bot içeride: stop <code>{fk(p['stop'])}</code> korunuyor; seviye geri alınmazsa çıkmak mantıklı.</i>"
-                           if bot_ic else "<i>Bot girmedi · plan kapandı</i>"),
-                        plan_grafik_ch(p, durum="sahte"), sym=sym, reply=key, konu="plan", quiet=not bot_ic)
+                tg.send(f"❌ <b>#{_h(sym)}</b> takip dışı · sahte kırılım", None, sym=sym, reply=key, konu="plan", quiet=not bot_ic)
                 zincir(key, "❌ sahte kırılım")
         elif ev == "kaçtı":
             PLAN_DURUM[key] = DURUM_AD["kaçtı"]
@@ -9503,12 +9462,8 @@ def plan_olaylari():
             px_ = fiyat(sym) or p.get("px")
             if tg.ok and not p.get("kacti_tg"):
                 p["kacti_tg"] = 1
-                tg.send(f"🏃 <b>KIRDI AMA KAÇTI · #{_h(sym)}</b>\n"
-                        f"Kırılım <code>{fk(p['giris'])}</code> tek mumda geçildi, fiyat <code>{fk(px_)}</code>"
-                        f" ({fy(_yuzde(px_, p['giris']))}).\n"
-                        f"⛔ <b>Kovalamayın.</b> Fiyat {fk(p['giris'])}–{fk(p['giris'] * 1.02)} bölgesine geri çekilip "
-                        "üstünde tutarsa 🔁 tekrar test mesajı gelecek (45 dk izlenir).\n<i>Yatırım tavsiyesi değildir</i>",
-                        plan_grafik_ch(p, durum="kaçtı"), sym=sym, reply=key, konu="plan", quiet=False)
+                tg.send(f"🏃 <b>#{_h(sym)}</b> kırdı ama kaçtı ({fk(px_)}) · kovalama, geri çekilirse haber veririm", None,
+                        sym=sym, reply=key, konu="plan", quiet=False)
                 zincir(key, f"🏃 kırdı ama kaçtı {fk(px_)}")
         else:
             PLAN_DURUM[key] = DURUM_AD.get(ev, ev) + (f" · {_h(p.get('neden'))}" if p.get("neden") else "")
@@ -9535,12 +9490,8 @@ def plan_olaylari():
                     PLAN_DURUM[f"k:{p['id']}"] = DURUM_AD["onaylı"] + f" · 🎯 <b>K{i + 1} geldi</b> <code>{fk(h_[i])}</code>"
                     PLAN_FOTO[f"k:{p['id']}"] = "k1" if i == 0 else "k2"
                     pos_ = next((q for q in bot.positions if q.get("sig") == p["sig"]), None)
-                    tg.send(f"🎯 <b>K{i + 1} GELDİ · #{_h(p['sym'])}</b> <code>{fk(h_[i])}</code> <i>({fy((h_[i] / p['giris'] - 1) * 100)})</i>\n"
-                            + (("Bot: yarısını satıyor, stop maliyete çekiliyor." if i == 0 else "Bot: iz süren stop zirveyi arkadan takip ediyor.")
-                               if pos_ and pos_["st"] in botmod.OPEN_ST else
-                               ("💡 Stopu girişe çekmek mantıklı." if i == 0 else "💰 Kârın bir kısmını almak mantıklı.")),
-                            plan_grafik_ch(p, durum="k1" if i == 0 else "k2"),
-                            sym=p["sym"], reply=f"k:{p['id']}", konu="plan", quiet=False)
+                    tg.send(f"🎯 <b>#{_h(p['sym'])}</b> K{i + 1} geldi <b>{fk(h_[i])}</b> ({fy((h_[i] / p['giris'] - 1) * 100)})",
+                            None, sym=p["sym"], reply=f"k:{p['id']}", konu="plan", quiet=i == 0)
                     zincir(f"k:{p['id']}", f"🎯 K{i + 1} geldi {fk(h_[i])}")
                     if i == 1:
                         _gorev(video_gonder(p, f"K2 ✓ {fy((h_[1] / (p.get('e') or p['giris']) - 1) * 100)}"))
@@ -9751,9 +9702,7 @@ async def tg_foto_degistir(mid, png, caption, mk=None):
 def plan_dugmeler(p):
     sym = p["sym"]
     url = f"https://t.me/{tg.username}?startapp=s_{sym}" if tg.username and MINI_APP else f"{SITE_URL}/?s={sym}"
-    return {"inline_keyboard": [[{"text": "📊 Grafik", "url": url},
-                                 {"text": "🧠 Neden?", "callback_data": f"q:{p['id']}"[:60]},
-                                 {"text": "🔕 Sustur", "callback_data": f"m:{sym}"[:60]}]]}
+    return {"inline_keyboard": [[{"text": "🧠 Neden bu hisse?", "callback_data": f"q:{p['id']}"[:60]}]]}
 
 
 def plan_ozet():
