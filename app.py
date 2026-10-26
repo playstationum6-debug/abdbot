@@ -568,7 +568,7 @@ class Store:
             if xv is not None:
                 v = xv
             row = [o, h, l, c, v, "yahoo"]
-            if old is None or old[:5] != row[:5]:
+            if old is None or old[:5] != row[:5] or old[5] != "yahoo":   # canlı tick mumu Yahoo'yla aynı olsa da "yahoo" olmalı (sinyal motoru sadece onları değerlendirir)
                 cur[ts] = row
                 self.dirty.add((sym, ts))
                 changed_min = ts if changed_min is None else min(changed_min, ts)
@@ -6095,7 +6095,7 @@ def neden_rapor(sym):
     else:
         son_ = next((q for q in reversed(PLAN.gecmis) if q["sym"] == sym), None)
         if son_:
-            out.append(f"📐 Son plan {fp_(son_['giris'])}: {son_['st']} — {son_.get('neden', '')}")
+            out.append(f"📐 Son plan ({son_.get('gun', '?')}) {fp_(son_['giris'])}: {son_['st']} — {son_.get('neden', '')}")
     nd = PLAN.neden.get(sym)
     if nd and now - nd[0] < 6 * 3600:
         out.append(f"🧩 Plan motoru ({_sa(nd[0])}): {nd[1]}")
