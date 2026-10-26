@@ -6,6 +6,7 @@ Seviyeler (bugünün 1 dk mumlarından):
   kaybedilen : fiyatın önce üstünde olup sonra altına düştüğü taban / öncesi seans tepesi (geri alma)
   pmh        : piyasa öncesi tepesi (normal seansta)
   pdh        : dünkü tepe
+  cgd        : çok günlük direnç — son ~3 ayın günlük grafiğinde en az 2 kez dönülen tepe (app.py hesaplar)
   hod        : gün tepesi (fiyat altındaysa)
   yuvarlak   : 0,05 / 0,25 / 0,50 / 1,00 katları (herkesin baktığı sayılar)
 Yakın seviyeler (%1,5) birleştirilir; puan = türlerin ağırlıkları. Puanı ≥ 2 olan, fiyatın %0,5–12 üstündeki en iyi
@@ -20,16 +21,18 @@ yeşil, hacimli 5 dk mum kapanırsa "tekrar test" (en güçlü giriş). Sonraki 
 tutarsa "retest" girişi.
 """
 import math
+import os
 import time
 from datetime import datetime
 
-AGIRLIK = {"taban": 2.0, "kaybedilen": 2.0, "pmh": 1.5, "pdh": 1.5, "hod": 1.0, "yuvarlak": 0.5, "kanal": 3.0, "liste": 2.5,
+AGIRLIK = {"taban": 2.0, "kaybedilen": 2.0, "pmh": 1.5, "pdh": float(os.getenv("PDH_PUAN", "2.0")),
+           "cgd": float(os.getenv("CGD_PUAN", "2.0")), "hod": 1.0, "yuvarlak": 0.5, "kanal": 3.0, "liste": 2.5,
            "direnç": 1.5, "tam sayı": 1.0, "pgh": 1.5}
 TUR_AD = {"taban": "sabahki / gün içi tabanın tavanı", "kaybedilen": "kaybedilen seviye (geri alma)",
           "pmh": "piyasa öncesi tepesi", "pdh": "dünkü tepe", "hod": "gün tepesi", "yuvarlak": "yuvarlak sayı",
           "kanal": "kanalın verdiği seviye", "liste": "sabah listesinin seviyesi",
           "direnç": "gün içinde birkaç kez dönülen tepe", "tam sayı": "tam dolar (herkesin baktığı sayı)",
-          "pgh": "önceki günlerin tepesi"}
+          "pgh": "önceki günlerin tepesi", "cgd": "çok günlük direnç (son 3 ayda birkaç kez dönülen tepe)"}
 RED_AD = {"tukenme": "tükenme: en yüksek hacim tepe mumunda ve üst fitil gövdenin 2 katından uzun",
           "dusen": "art arda 3 düşen tepe + azalan hacim",
           "emir": "satış tarafındaki emirler alışın 5 katından fazla",
@@ -147,6 +150,7 @@ class Planci:
         self.liste = {}              # sym -> sabah listesi seviyesi {"lvl","stop","hedefler","neden","t"} (gün boyu geçerli)
         self.kote_fn = None          # app.py: sym -> (alış, satış, ts, alış_adet, satış_adet)
         self.retest = {}             # sym -> kırılımı tutmuş plan (eski direnç destek olarak test edilecek)
+        self.cgd = None              # app.py: sym -> [çok günlük direnç seviyeleri] (günlük grafikten)
         self.neden = {}              # sym -> (zaman, metin): plan neden kurulmadı / kırılım neden onaylanmadı
 
     # ------------------------------------------------------------------ kanal seviyesi
@@ -248,6 +252,13 @@ class Planci:
             lv.append((x["pdh"], "pdh", None, None))
         if x.get("hod") and c < x["hod"]:
             lv.append((x["hod"], "hod", None, None))
+        if self.cgd and not self.bt:
+            try:
+                for v in self.cgd(sym) or []:
+                    if c < v <= c * 1.12:
+                        lv.append((v, "cgd", None, None))
+            except Exception:
+                pass
         for v in yuvarlaklar(c):
             lv.append((v, "tam sayı" if v >= 2 and abs(v - round(v)) < 1e-6 else "yuvarlak", None, None))
         lv += self._direncler(tss, bars, ds, k, c)

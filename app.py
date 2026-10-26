@@ -5369,6 +5369,51 @@ def eko_bugun():
 GUN_TREND = {}
 
 
+CGD = {}   # sym -> (gün, [çok günlük direnç seviyeleri])
+
+
+def cgd_hesapla(rows, gun):
+    """Son ~66 günlük mumda (bugün hariç) tepe noktaları: iki yanındaki 2'şer günün tepesinden yüksek gün.
+    Birbirine %3 yakın tepeler tek seviye; en az 2 kez dönülmüş olanlar direnç (seviye = kümenin en yükseği)."""
+    R = [r for r in rows if r[0] < gun][-66:]
+    H = [r[2] for r in R]
+    tepe = sorted(H[i] for i in range(2, len(H) - 2) if H[i] >= max(H[i - 2:i] + H[i + 1:i + 3]))
+    out, kume = [], []
+    for h in tepe:
+        if kume and h > kume[0] * 1.03:
+            if len(kume) >= 2:
+                out.append(round(max(kume), 4))
+            kume = []
+        kume.append(h)
+    if len(kume) >= 2:
+        out.append(round(max(kume), 4))
+    return out[-8:]
+
+
+def cgd_seviye(sym):
+    v = CGD.get(sym)
+    return v[1] if v and v[0] == _gun_et() else []
+
+
+async def cgd_loop():
+    """Koşan / izlenen / planlı hisselerin çok günlük dirençleri (günlük mumlar zaten önbellekte, ek yük küçük)."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            gun = _gun_et()
+            for sym in list(dict.fromkeys(list(scanner.runners) + list(IZLE) + list(PLAN.planlar)))[:60]:
+                if (CGD.get(sym) or ("",))[0] == gun:
+                    continue
+                rows = await get_daily(sym)
+                CGD[sym] = (gun, cgd_hesapla(rows, gun) if rows else [])
+                await asyncio.sleep(0.5)
+            for k in [k for k, v in CGD.items() if v[0] != gun]:
+                del CGD[k]
+        except Exception as e:
+            log.debug("Çok günlük direnç hatası: %s", e)
+        await asyncio.sleep(120)
+
+
 def gunluk_trend(sym):
     return (GUN_TREND.get(sym) or (0, 0))[1]
 
@@ -10261,6 +10306,7 @@ async def lifespan(app):
     engine.bilanco = bilanco_durum
     engine.hava = lambda: HAVA["etiket"]
     engine.gunluk = gunluk_trend
+    PLAN.cgd = cgd_seviye
     bot.engel = eko_engel
     backup.record_start()
     await backup.save(engine, bot)
@@ -10271,7 +10317,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop, halt_loop)]
+                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, cgd_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop, halt_loop)]
     yield
     for t in tasks:
         t.cancel()
