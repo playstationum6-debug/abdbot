@@ -265,6 +265,9 @@ class State:
     yahoo_t0 = 0.0          # son başarılı Yahoo çekiminin BAŞLADIĞI an (bu andan önce biten mumlar kapanmıştır)
     xvol_last = 0.0         # öncesi/sonrası hacmi için son başarılı Alpaca IEX mum çekimi
     xvol_err = ""
+    sip_last = 0.0          # tüm borsaların hacmi (Alpaca SIP, 15 dk gecikmeli, ücretsiz plan)
+    sip_err = ""
+    sip_n = 0
     started = time.time()
 
 
@@ -1383,6 +1386,47 @@ async def iex_ext_volume(symbols):
     store.flush()
     state.xvol_last = now
     state.xvol_err = ""
+    if now - state.sip_last >= 300:
+        state.sip_last = now
+        try:
+            await sip_ext_volume(symbols, ses_start(now), now - 16 * 60)
+            state.sip_err = ""
+        except Exception as e:
+            state.sip_err = str(e)[:80]
+            log.info("SIP hacim alınamadı: %s", e)
+
+
+async def sip_ext_volume(symbols, start, end):
+    """Tüm borsaların 1 dk hacmi (SIP; ücretsiz planda son 15 dk hariç). Yeniden başlasa da sabahtan beri hacim bilinir,
+    Finnhub'ın dinlemediği hisselerde de. Aynı dakikada IEX/Finnhub ile büyük olan kalır."""
+    if end <= start:
+        return
+    params = {"symbols": ",".join(symbols), "timeframe": "1Min", "feed": "sip", "limit": 10000,
+              "start": datetime.fromtimestamp(start, UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "end": datetime.fromtimestamp(end, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    got, n = {}, 0
+    async with httpx.AsyncClient(timeout=25) as c:
+        for _ in range(10):
+            r = await c.get("https://data.alpaca.markets/v2/stocks/bars", params=params, headers=alpaca_headers())
+            if r.status_code != 200:
+                raise RuntimeError(f"SIP {r.status_code}: {r.text[:60]}")
+            js = r.json()
+            for sym, rows in (js.get("bars") or {}).items():
+                d = got.setdefault(sym, {})
+                for b in rows or []:
+                    ts = int(parse_ts(b.get("t", "")) // 60 * 60)
+                    if cal.session(ts) in ("pre", "post"):
+                        d[ts] = float(b.get("v") or 0)
+                        n += 1
+            tok = js.get("next_page_token")
+            if not tok:
+                break
+            params["page_token"] = tok
+    for sym, vols in got.items():
+        if vols:
+            store.set_xvol(sym, vols)
+    store.flush()
+    state.sip_n = n
 
 
 async def yahoo_loop():
@@ -9070,6 +9114,8 @@ def saglik_satirlari():
     bas_bugun = sum(1 for t in backup.data.get("starts", []) if t >= time.time() - 86400)
     return [f"{'✅' if state.iex == 'bağlı' else '⚠️'} Alpaca IEX: {state.iex} · {len(akis_semboller())} hisse canlı",
             f"{'✅' if FINN['durum'] == 'bağlı' else '➖'} Finnhub: {FINN['durum']}" + (f" · {len(FINN['abone'])} hisse" if FINN["abone"] else ""),
+            f"{'✅' if not state.sip_err else '⚠️'} Öncesi/sonrası hacim: " + (f"SIP hata ({state.sip_err[:50]})" if state.sip_err else
+                f"SIP ✓ ({state.sip_n} mum)" if state.sip_last else "SIP bekleniyor") + f" · Finnhub {len(FVOL)} hisse",
             f"{'✅' if now - state.yahoo_ok < 600 else '⚠️'} Mum verisi: son {int((now - state.yahoo_ok) // 60) if state.yahoo_ok else '—'} dk önce"
             + (f" ({state.yahoo_err[:60]})" if state.yahoo_err and now - state.yahoo_ok > 600 else ""),
             f"⚡ Son canlı işlem: {int((now - son_canli) // 60) if son_canli else '—'} dk önce",
