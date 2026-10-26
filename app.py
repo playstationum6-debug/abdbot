@@ -1132,15 +1132,28 @@ def status_payload():
 
 
 # ----------------------------------------------------------------- Yahoo
-_YH = {"c": None, "hata": 0, "yedek": 0}
+_YH = {"c": None, "hata": 0, "yedek": 0, "son": "", "tur": ""}
+_YH_TL = __import__("threading").local()
 _YH_UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
           "Accept": "application/json"}
 
 
 def _yh_client():
-    if _YH["c"] is None:
-        _YH["c"] = httpx.Client(timeout=20, headers=_YH_UA, http2=False)
-    return _YH["c"]
+    """Chrome gibi görünen bağlantı (curl_cffi, yfinance ile zaten kurulu): Yahoo düz istemciyi sık reddediyor.
+    Oturum iş parçacığı başına ayrı; curl_cffi yoksa eski httpx istemcisi."""
+    c = getattr(_YH_TL, "c", None)
+    if c is None:
+        try:
+            from curl_cffi import requests as _cr
+            c = _cr.Session(impersonate="chrome", timeout=20)
+            _YH["tur"] = "chrome"
+        except Exception:
+            if _YH["c"] is None:
+                _YH["c"] = httpx.Client(timeout=20, headers=_YH_UA, http2=False)
+            c = _YH["c"]
+            _YH["tur"] = "httpx"
+        _YH_TL.c = c
+    return c
 
 
 def yahoo_mum(sym, rng, interval, prepost=True):
@@ -1152,6 +1165,7 @@ def yahoo_mum(sym, rng, interval, prepost=True):
                                  params={"range": rng, "interval": interval, "includePrePost": "true" if prepost else "false"})
             if r.status_code != 200:
                 son = RuntimeError(f"Yahoo {r.status_code}")
+                _YH["son"] = f"{r.status_code}"
                 continue
             res = ((r.json().get("chart") or {}).get("result") or [None])[0]
             if not res:
@@ -1172,6 +1186,7 @@ def yahoo_mum(sym, rng, interval, prepost=True):
             return out
         except Exception as e:
             son = e
+            _YH["son"] = type(e).__name__ + " " + str(e)[:40]
     _YH["hata"] += 1
     raise son or RuntimeError("Yahoo yanıt vermedi")
 
@@ -8993,7 +9008,7 @@ def saglik_satirlari():
             (f"📐 Dün: {o['gonderilen']} plan kanala gitti · {o['kirilan']} kırıldı · K1+ %{o['wr']}" if o and o["wr"] is not None
              else f"📐 Dün: {o['gonderilen']} plan kanala gitti" if o else "📐 Dün: kayıt yok"),
             f"⏸ Halt takibi: {HALT['durum']} · bugün {HALT['n']} · 🎬 video {VIDEO['n']}/{VIDEO_GUNLUK}",
-            f"💾 Bellek {bellek_mb()}/512 MB · son 24 saatte {bas_bugun} kez başladı" + (f" · ⚠️ Yahoo yedeğe düştü {_YH['yedek']} kez" if _YH["yedek"] else ""),
+            f"💾 Bellek {bellek_mb()}/512 MB · son 24 saatte {bas_bugun} kez başladı" + (f" · ⚠️ Yahoo yedeğe düştü {_YH['yedek']} kez ({_YH['tur'] or '—'}, son hata: {_YH['son'] or '—'})" if _YH["yedek"] else f" · Yahoo: {_YH['tur'] or '—'}"),
             f"🧪 Kural testi: " + (f"{datetime.fromtimestamp(KRT['t'], TR).strftime('%d.%m')} · {KRT['sonuc']['varyant'][0]['ad']}"
                                    f" K1+ %{KRT['sonuc']['varyant'][0]['wr']}" if KRT.get("sonuc") and KRT["sonuc"].get("varyant") else "henüz yok")]
 
