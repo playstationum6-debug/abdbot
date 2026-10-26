@@ -1212,6 +1212,62 @@ def yahoo_mum(sym, rng, interval, prepost=True):
     raise son or RuntimeError("Yahoo yanıt vermedi")
 
 
+def yahoo_son(sym):
+    """Yahoo'dan (gerçek zamanlı) son fiyat ve önceki kapanış: (fiyat, önceki kapanış, zaman). Hafif tek istek."""
+    r = _yh_client().get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}",
+                         params={"range": "1d", "interval": "1m", "includePrePost": "true"})
+    if r.status_code != 200:
+        return None
+    res = ((r.json().get("chart") or {}).get("result") or [None])[0] or {}
+    m = res.get("meta") or {}
+    ts = res.get("timestamp") or []
+    C = ((res.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+    for i in range(len(ts) - 1, -1, -1):
+        if i < len(C) and C[i]:
+            pc = m.get("chartPreviousClose") or m.get("previousClose")
+            return (float(C[i]), float(pc) if pc else None, int(ts[i]))
+    return None
+
+
+HIZLI = {"t": 0, "n": 0, "eklenen": []}
+
+
+async def hizli_kesif_loop():
+    """TradingView'in ücretsiz verisi NYSE/AMEX hisselerinde 15 dk gecikmeli: SRTM gibi ani sıçramalar geç görülüyordu.
+    Öncesi/sonrası seansta her dakika TradingView adaylarının (yükselenler + %3+ adaylar) gerçek fiyatına Yahoo'dan bakılır;
+    %10'u geçen hemen koşan listesine eklenir."""
+    await asyncio.sleep(90)
+    while True:
+        await asyncio.sleep(60)
+        try:
+            if cal.session(time.time()) not in ("pre", "post"):
+                continue
+            aday = [g.get("symbol") for g in (scanner.gainers or [])] + list(scanner.aday)
+            aday = [x for x in dict.fromkeys(aday) if x and x not in scanner.runners and x not in SYMBOLS][:40]
+            if not aday:
+                continue
+
+            def _bak(s_):
+                try:
+                    return s_, yahoo_son(s_)
+                except Exception:
+                    return s_, None
+            with ThreadPoolExecutor(max_workers=4) as ex:
+                son = list(ex.map(_bak, aday))
+            HIZLI.update(t=time.time(), n=len(aday))
+            async with httpx.AsyncClient(timeout=20) as c:
+                for s_, v in son:
+                    if not v or not v[1] or time.time() - v[2] > 600:
+                        continue
+                    pct = (v[0] / v[1] - 1) * 100
+                    if pct >= scanner.min_pct and v[0] >= planmod.MIN_FIYAT:
+                        if await scanner._add(c, s_, round(pct, 2), v[0], "hızlı keşif"):
+                            HIZLI["eklenen"] = (HIZLI["eklenen"] + [s_])[-10:]
+                            log.info("Hızlı keşif: %s %+.1f%% eklendi", s_, pct)
+        except Exception as e:
+            log.debug("Hızlı keşif hatası: %s", e)
+
+
 _daily_cache = {}   # sembol -> (zaman, mumlar)
 
 
@@ -9131,6 +9187,7 @@ def saglik_satirlari():
             f"{'✅' if now - state.yahoo_ok < 600 else '⚠️'} Mum verisi: son {int((now - state.yahoo_ok) // 60) if state.yahoo_ok else '—'} dk önce"
             + (f" ({state.yahoo_err[:60]})" if state.yahoo_err and now - state.yahoo_ok > 600 else ""),
             f"⚡ Son canlı işlem: {int((now - son_canli) // 60) if son_canli else '—'} dk önce",
+            (f"⚡ Hızlı keşif: {HIZLI['n']} aday baktı · son eklenen {', '.join(HIZLI['eklenen'][-3:]) or '—'}" if HIZLI["t"] else "⚡ Hızlı keşif: öncesi/sonrası seansta çalışır"),
             f"📋 Koşan {len(scanner.runners)} · kırılım izleme {len(IZLE)} · aktif plan {len(PLAN.planlar)} · TradingView: {scanner.tv_status}",
             (f"📐 Dün: {o['gonderilen']} plan kanala gitti · {o['kirilan']} kırıldı · K1+ %{o['wr']}" if o and o["wr"] is not None
              else f"📐 Dün: {o['gonderilen']} plan kanala gitti" if o else "📐 Dün: kayıt yok"),
@@ -10444,7 +10501,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, cgd_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop, halt_loop)]
+                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, cgd_loop, hizli_kesif_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop, halt_loop)]
     yield
     for t in tasks:
         t.cancel()
