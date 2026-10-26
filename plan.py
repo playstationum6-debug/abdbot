@@ -38,7 +38,7 @@ RED_AD = {"tukenme": "tükenme: en yüksek hacim tepe mumunda ve üst fitil göv
           "emir": "satış tarafındaki emirler alışın 5 katından fazla",
           "acilis": "açılışın ilk 15 dakikası",
           "hacim": "kırılım mumunun hacmi son 20 mumun 2 katına ulaşmadı",
-          "spread": "alış-satış farkı %2'den büyük"}
+          "spread": "alış-satış farkı %2'den büyük (0,50$ altında %1) ya da bilinmiyor"}
 
 
 def bes_dk(tss, bars, ds, k, sn=300):
@@ -103,6 +103,8 @@ HACIM_K = 2.0                # kırılım mumu hacmi ≥ son 20 mum ortalamasın
 RETEST_HACIM_K = 1.5         # tekrar testte yeşil mum hacmi
 ACILIS_BEKLE = 15            # 9:30'dan sonraki ilk 15 dk yeni sinyal yok
 RR_MIN = 1.5                 # bir sonraki dirence kadar risk/ödül en az 1:1,5
+MIN_FIYAT = float(os.getenv("PLAN_MIN_FIYAT", "0.20"))   # bunun altına plan yok
+KURUS = 0.50                 # bunun altında spread en fazla %1 ve bilinmeli (kote yoksa sinyal yok)
 EMIR_K = 5.0                 # satış tarafı emir miktarı alışın 5 katından büyükse sinyal yok
 LOT_USD = 250                # mesajlardaki örnek işlem büyüklüğü
 RETEST_SN = 90 * 60          # kırılım tuttuktan sonra tekrar test bu kadar izlenir
@@ -391,8 +393,11 @@ class Planci:
         if self.ayar.get("filtre", 1) and dusen_tepeler(B5[:-1]):
             return "dusen"
         k_ = self.kote_fn(sym) if self.kote_fn else None
+        kurus = (x.get("c") or 1) < KURUS and not self.bt
+        if kurus and not (k_ and time.time() - k_[2] < 180):
+            return "spread"                                  # 0,50$ altı: alış-satış bilinmeden sinyal yok
         if k_ and time.time() - k_[2] < 180:
-            if k_[0] > 0 and k_[1] > k_[0] and (k_[1] - k_[0]) / ((k_[0] + k_[1]) / 2) > 0.02:
+            if k_[0] > 0 and k_[1] > k_[0] and (k_[1] - k_[0]) / ((k_[0] + k_[1]) / 2) > (0.01 if kurus else 0.02):
                 return "spread"
             if len(k_) >= 5 and k_[3] and k_[4] and k_[4] > EMIR_K * k_[3]:
                 return "emir"
@@ -547,8 +552,8 @@ class Planci:
         son = next((q for q in reversed(self.gecmis) if q["sym"] == sym), None)
         if son and T - (son.get("bitis") or son["t"]) < TEKRAR_SN:
             return self._nd(sym, T, "az önce bir plan bitti, 15 dk bekleniyor")
-        if c < 0.5:
-            return self._nd(sym, T, "fiyat 0,50$ altında")
+        if c < MIN_FIYAT:
+            return self._nd(sym, T, f"fiyat {MIN_FIYAT:.2f}$ altında".replace(".", ","))
         kn = self.kanal.get(sym)
         if kn and time.time() - kn["t"] < 6 * 3600 and kn["lvl"] * 0.85 < c < kn["lvl"] * 1.005:
             g = {"ust": kn["lvl"], "tur": {"kanal"}, "dip": None, "puan": AGIRLIK["kanal"]}

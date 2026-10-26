@@ -578,11 +578,12 @@ class Store:
         return 0
 
     def set_xvol(self, sym, vols):
-        """Öncesi/sonrası seans mumlarına Alpaca IEX hacmini yaz."""
+        """Öncesi/sonrası seans mumlarına hacim yaz (Alpaca IEX ve Finnhub; aynı dakikada büyük olan kalır)."""
         cur = self.xvol.setdefault(sym, {})
         bars = self.bars.get(sym)
         changed = False
         for ts, v in vols.items():
+            v = max(v, cur.get(ts) or 0)                    # IEX ve Finnhub aynı dakikayı sayar: büyüğü
             if cur.get(ts) == v:
                 continue
             cur[ts] = v
@@ -1465,6 +1466,10 @@ KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}, "sahip": "", "tgplan": {
 KOMISYON = float(os.getenv("KOMISYON", "1.5"))     # satış başına broker komisyonu ($)
 YEDEK_ACIL = [0]     # plan mesajı gitti: 2 dk içinde yedekle (yeniden başlamada aynı plan tekrar gitmesin)   # kanal ekleri: kırılım karnesi, fiyat alarmı, float, gönderim izleri
 SPREAD_MAX = float(os.getenv("SPREAD_MAX", "2.0"))   # % üstü: plan mesajı gönderilmez (kayma riski)
+
+
+def _spr_max(p):
+    return min(SPREAD_MAX, 1.0) if (p.get("giris") or 1) < 0.5 else SPREAD_MAX
 
 
 def spread_yuzde(sym):
@@ -9124,6 +9129,21 @@ async def saglik_loop():
             log.warning("Sağlık kontrolü hatası: %s", e)
 
 
+FVOL = {}   # sym -> {dakika: hacim} öncesi/sonrası seans, Finnhub (tüm borsalar)
+
+
+def fvol_yaz():
+    """Finnhub dakikalık hacmini mumlara yaz (Yahoo bu saatlerde 0 verir, IEX 08:00 ET'den önce boş)."""
+    cut = time.time() - 240
+    for s_, m_ in list(FVOL.items()):
+        if m_:
+            store.set_xvol(s_, dict(m_))
+        for k_ in [k_ for k_ in m_ if k_ < cut]:
+            del m_[k_]
+        if not m_:
+            FVOL.pop(s_, None)
+
+
 async def finnhub_loop():
     """Ücretsiz Finnhub websocket: IEX'in 30 hisse sınırının ötesindeki 50 hisse daha (alım/satım akışı ve canlı fiyat)."""
     key = os.getenv("FINNHUB_KEY", "")
@@ -9139,7 +9159,13 @@ async def finnhub_loop():
 
                 async def abone():
                     while True:
-                        yeni = set(akis_semboller(tum=True)[IEX_MAX:IEX_MAX + 50])
+                        ext = cal.session(time.time()) in ("pre", "post")      # IEX bu saatlerde neredeyse boş
+                        L_ = akis_semboller(tum=True)
+                        if ext:                                                # önce planlar ve koşanlar (ana liste sonra)
+                            run_ = [k for k, _ in sorted(scanner.runners.items(), key=lambda kv: -((kv[1] or {}).get("pct") or 0))]
+                            L_ = list(dict.fromkeys(list(PLAN.planlar) + run_ + list(IZLE) + L_))
+                        yeni = set(L_[:50] if ext else L_[IEX_MAX:IEX_MAX + 50])
+                        fvol_yaz()
                         for x in FINN["abone"] - yeni:
                             await ws.send(json.dumps({"type": "unsubscribe", "symbol": x}))
                         for x in yeni - FINN["abone"]:
@@ -9151,9 +9177,19 @@ async def finnhub_loop():
                     async for raw in ws:
                         m = json.loads(raw)
                         if m.get("type") == "trade":
+                            ext = cal.session(time.time()) in ("pre", "post")
                             for d in m.get("data") or []:
-                                akis_islem(d.get("s"), float(d.get("p") or 0), float(d.get("v") or 0), (d.get("t") or 0) / 1000)
+                                s_, p_, v_, t_ = d.get("s"), float(d.get("p") or 0), float(d.get("v") or 0), (d.get("t") or 0) / 1000
+                                akis_islem(s_, p_, v_, t_)
+                                if ext and s_ and p_ > 0:
+                                    store.on_trade(s_, p_, t_)                     # canlı fiyat (IEX kapalıyken)
+                                    m_ = FVOL.setdefault(s_, {})
+                                    k_ = int(t_ // 60 * 60)
+                                    m_[k_] = m_.get(k_, 0.0) + v_
                             FINN["son"] = time.time()
+                            if time.time() - FINN.get("fv", 0) > 20:
+                                FINN["fv"] = time.time()
+                                fvol_yaz()
                         elif m.get("type") == "error":
                             FINN["durum"] = f"hata: {str(m.get('msg'))[:60]}"
                 finally:
@@ -9631,7 +9667,7 @@ def plan_olaylari():
                          else "Telegram kapalı" if not tg.ok else "plan bildirimi kapalı" if not PUSH_PREF.get("tg_plan", 1)
                          else f"puan {p['puan']} (ana listedeki hisse için en az 3,5)" if not (kucuk or p["puan"] >= 3.5)
                          else f"günlük plan sınırı doldu ({PLAN_TG_GUNLUK})" if _PLAN_TG["n"] >= PLAN_TG_GUNLUK
-                         else f"spread %{spread_yuzde(sym)} > %{SPREAD_MAX}" if (spread_yuzde(sym) or 0) > SPREAD_MAX
+                         else f"spread %{spread_yuzde(sym)} > %{_spr_max(p)}" if (spread_yuzde(sym) or 0) > _spr_max(p)
                          else "hisse bugün susturuldu" if sustur_mu(sym)
                          else f"bu hisseye bugün {PLAN_TG_HISSE} plan gitti" if hs[0] >= PLAN_TG_HISSE
                          else "aynı hisseye 30 dk içinde ikinci plan" if time.time() - hs[1] < PLAN_TG_ARA else "")
@@ -9649,7 +9685,7 @@ def plan_olaylari():
             if _ogren_red and _sec_ != "seyreltme" and not any(r_["id"] == p["id"] for r_ in KK["kayit"][-60:]):
                 kk_ekle(p, gizli=True)                       # kanala gitmez ama sonucu ölçülür: öğrenme kör kalmaz
             if not _ogren_red and _sec_ != "seyreltme" and tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK \
-                    and (spread_yuzde(sym) or 0) <= SPREAD_MAX \
+                    and (spread_yuzde(sym) or 0) <= _spr_max(p) \
                     and not sustur_mu(sym) and hs[0] < PLAN_TG_HISSE and time.time() - hs[1] >= PLAN_TG_ARA:
                 hs[0] += 1
                 hs[1] = time.time()
