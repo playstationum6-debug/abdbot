@@ -9187,6 +9187,7 @@ def saglik_satirlari():
             f"{'✅' if now - state.yahoo_ok < 600 else '⚠️'} Mum verisi: son {int((now - state.yahoo_ok) // 60) if state.yahoo_ok else '—'} dk önce"
             + (f" ({state.yahoo_err[:60]})" if state.yahoo_err and now - state.yahoo_ok > 600 else ""),
             f"⚡ Son canlı işlem: {int((now - son_canli) // 60) if son_canli else '—'} dk önce",
+            f"⏱ Canlı onay: {CANLI_ONAY['n']} kez" + (f" · son {CANLI_ONAY['son']}" if CANLI_ONAY["son"] else ""),
             (f"⚡ Hızlı keşif: {HIZLI['n']} aday baktı · son eklenen {', '.join(HIZLI['eklenen'][-3:]) or '—'}" if HIZLI["t"] else "⚡ Hızlı keşif: öncesi/sonrası seansta çalışır"),
             f"📋 Koşan {len(scanner.runners)} · kırılım izleme {len(IZLE)} · aktif plan {len(PLAN.planlar)} · TradingView: {scanner.tv_status}",
             (f"📐 Dün: {o['gonderilen']} plan kanala gitti · {o['kirilan']} kırıldı · K1+ %{o['wr']}" if o and o["wr"] is not None
@@ -9247,6 +9248,58 @@ async def saglik_loop():
             log.warning("Sağlık kontrolü hatası: %s", e)
 
 
+CANLI1 = {}   # sym -> {dakika: [a, y, d, k, hacim]} Finnhub işlemlerinden canlı 1 dk mumlar (son 10 dk)
+CANLI_ONAY = {"n": 0, "son": ""}
+
+
+async def canli_onay_loop():
+    """Kırılım onayını Yahoo'yu (60–90 sn gecikme) beklemeden ver: bekleyen planı olan hissede dakika kapanır kapanmaz
+    Finnhub'dan kurulan canlı mum yazılır ve sinyal motoru hemen çalıştırılır (bütün filtreler aynı). Yahoo mumu
+    sonra gelince onun üstüne yazar. Ayar: CANLI_ONAY=0 kapatır."""
+    if os.getenv("CANLI_ONAY", "1") == "0":
+        return
+    await asyncio.sleep(120)
+    while True:
+        await asyncio.sleep(3)
+        try:
+            now = time.time()
+            if cal.session(now) == "closed":
+                continue
+            son_tam = int((now - 4) // 60 * 60) - 60          # kapanmış son dakika (4 sn geç gelen işlemler için)
+            for sym, p in list(PLAN.planlar.items()):
+                if p.get("st") != "bekliyor":
+                    continue
+                c1 = CANLI1.get(sym)
+                bars = store.bars.get(sym)
+                if not c1 or bars is None or son_tam not in c1:
+                    continue
+                son_bak = engine.last_eval.get(sym)
+                if son_bak is None or son_bak >= son_tam:
+                    continue
+                if c1[son_tam][1] < p["giris"]:                # dakikanın tepesi seviyeye bile ulaşmadı: acele yok
+                    continue
+                yaz = 0
+                for T in sorted(t_ for t_ in c1 if son_bak < t_ <= son_tam):
+                    eski = bars.get(T)
+                    if eski is not None and eski[5] == "yahoo":
+                        continue
+                    a, y, d, k, v = c1[T]
+                    xv = store.xvol.get(sym, {}).get(T)
+                    bars[T] = [a, y, d, k, max(v, xv or 0), "yahoo"]
+                    store.ver[sym] = store.ver.get(sym, 0) + 1
+                    yaz += 1
+                if not yaz:
+                    continue
+                before = len(engine.signals)
+                engine.process(sym, son_tam + 60, now)
+                CANLI_ONAY["n"] += 1
+                CANLI_ONAY["son"] = f"{sym} {datetime.fromtimestamp(now, TR).strftime('%H:%M:%S')}"
+                if len(engine.signals) > before:
+                    log.info("Canlı onay: %s yeni sinyal (Yahoo beklenmeden)", sym)
+        except Exception as e:
+            log.debug("Canlı onay hatası: %s", e)
+
+
 FVOL = {}   # sym -> {dakika: hacim} öncesi/sonrası seans, Finnhub (tüm borsalar)
 
 
@@ -9282,7 +9335,9 @@ async def finnhub_loop():
                         if ext:                                                # önce planlar ve koşanlar (ana liste sonra)
                             run_ = [k for k, _ in sorted(scanner.runners.items(), key=lambda kv: -((kv[1] or {}).get("pct") or 0))]
                             L_ = list(dict.fromkeys(list(PLAN.planlar) + run_ + list(IZLE) + L_))
-                        yeni = set(L_[:50] if ext else L_[IEX_MAX:IEX_MAX + 50])
+                        if not ext:                                            # normal seansta da önce aktif planlar (canlı onay için tam hacim)
+                            L_ = list(dict.fromkeys(list(PLAN.planlar) + L_[IEX_MAX:]))
+                        yeni = set(L_[:50])
                         fvol_yaz()
                         for x in FINN["abone"] - yeni:
                             await ws.send(json.dumps({"type": "unsubscribe", "symbol": x}))
@@ -9299,6 +9354,16 @@ async def finnhub_loop():
                             for d in m.get("data") or []:
                                 s_, p_, v_, t_ = d.get("s"), float(d.get("p") or 0), float(d.get("v") or 0), (d.get("t") or 0) / 1000
                                 akis_islem(s_, p_, v_, t_)
+                                if s_ and p_ > 0:
+                                    c1 = CANLI1.setdefault(s_, {})
+                                    k1 = int(t_ // 60 * 60)
+                                    b1 = c1.get(k1)
+                                    if b1 is None:
+                                        c1[k1] = [p_, p_, p_, p_, v_]
+                                        for o_ in [o_ for o_ in c1 if o_ < k1 - 600]:
+                                            del c1[o_]
+                                    else:
+                                        b1[1], b1[2], b1[3], b1[4] = max(b1[1], p_), min(b1[2], p_), p_, b1[4] + v_
                                 if ext and s_ and p_ > 0:
                                     store.on_trade(s_, p_, t_)                     # canlı fiyat (IEX kapalıyken)
                                     m_ = FVOL.setdefault(s_, {})
@@ -10501,7 +10566,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, cgd_loop, hizli_kesif_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop, halt_loop)]
+                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, cgd_loop, hizli_kesif_loop, canli_onay_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop, halt_loop)]
     yield
     for t in tasks:
         t.cancel()
