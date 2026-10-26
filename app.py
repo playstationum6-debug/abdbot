@@ -3702,6 +3702,9 @@ async def fast_loop():
                 tr = (sn or {}).get("latestTrade") or {}
                 p = float(tr.get("p") or 0)
                 t = parse_ts(tr.get("t", "")) if tr.get("t") else 0
+                lv_ = store.live.get(sym)
+                if (p <= 0 or now - t > 120) and lv_ and now - lv_["t"] <= 120:
+                    p, t = lv_["p"], lv_["t"]                          # IEX kapalı: Finnhub canlı fiyatı
                 if p <= 0 or now - t > 120:
                     FAST_RED[sym] = (now, f"IEX'te son işlem {int(now - t) if t else '?'} sn önce: fiyat bayat, hızlı kırılım bakılmadı"
                                      if p > 0 else "IEX'te fiyat yok: hızlı kırılım bakılamadı")
