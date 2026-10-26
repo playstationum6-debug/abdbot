@@ -175,6 +175,22 @@ POLL_ACTIVE = int(os.getenv("YAHOO_POLL_SEC", "60"))  # seans içindeyken
 POLL_IDLE = 900                                       # piyasa kapalıyken
 KEEP_DAYS = int(os.getenv("KEEP_DAYS", "20"))         # veritabanında tutulan gün
 MEM_SEC = int(os.getenv("MEM_DAYS", "4")) * 86400     # ana liste: bellekte tutulan süre (sinyaller ~4 gün yeter)
+
+
+def bellek_kesim(sn):
+    """Bellekte tutulacak en eski mum zamanı. Takvim günü değil İŞLEM günü sayılır: MEM_DAYS=2 pazartesi sabahı
+    cumayı da tutar (yoksa önceki kapanış/dünkü tepe bilinmez ve hiç plan kurulmaz)."""
+    cut = time.time() - sn
+    try:
+        n = max(1, round(sn / 86400) - 1)
+        gd = getattr(globals().get("cal"), "days", None) or {}
+        bugun = datetime.now(ET).date()
+        gunler = sorted(d for d in gd if d < bugun)[-n:]
+        if gunler:
+            cut = min(cut, datetime.combine(gunler[0], gd[gunler[0]]["sopen"], ET).timestamp())
+    except Exception:
+        pass
+    return int(cut)
 YAN_SEC = 86400                                       # koşusu biten / bakılıp geçilen hisseler: 1 gün
 BELLEK_SINIR = int(os.getenv("BELLEK_SINIR_MB", "390"))  # Render ücretsiz: 512 MB; bunu geçince önbellek boşaltılır
 try:   # Python'un boşalan belleği işletim sistemine geri vermesi + iş parçacığı başına ayrı bellek havuzunu sınırla
@@ -521,7 +537,7 @@ class Store:
         self.xvol = {}                              # sembol -> {ts: hacim}
 
     def load(self):
-        since = int(time.time() - MEM_SEC)
+        since = bellek_kesim(MEM_SEC)
         rows = self.db.execute(
             "SELECT symbol, ts, o, h, l, c, v, src FROM bars WHERE ts >= ?", (since,)
         ).fetchall()
@@ -624,7 +640,7 @@ class Store:
     def prune(self, aktif=None, ana_sec=None):
         """Eski mumları bellekten at. aktif dışındaki hisselerde (koşusu bitmiş, bakılıp geçilmiş) 1 gün tutulur."""
         now = time.time()
-        cut = int(now - (ana_sec or MEM_SEC))
+        cut = bellek_kesim(ana_sec or MEM_SEC)
         cut_yan = int(now - YAN_SEC)
         for sym, bars in self.bars.items():
             c = cut if (aktif is None or sym in aktif) else max(cut, cut_yan)
@@ -10227,8 +10243,8 @@ async def housekeeping():
 async def lifespan(app):
     if not SITE_PASSWORD:
         log.warning("SITE_PASSWORD boş: site şifresiz açık!")
+    await cal.refresh(force=True)        # önce takvim: bellek kesimi işlem gününe göre hesaplanır
     store.load()
-    await cal.refresh(force=True)
     sigs, botdays = await backup.restore()
     engine.load(sigs)
     bot.load(botdays)
