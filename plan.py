@@ -103,6 +103,11 @@ HACIM_K = 2.0                # kırılım mumu hacmi ≥ son 20 mum ortalamasın
 RETEST_HACIM_K = 1.5         # tekrar testte yeşil mum hacmi
 ACILIS_BEKLE = 15            # 9:30'dan sonraki ilk 15 dk yeni sinyal yok
 RR_MIN = 1.5                 # bir sonraki dirence kadar risk/ödül en az 1:1,5
+MIN_GUN = float(os.getenv("PLAN_MIN_GUN", "10"))          # gün içinde en az bu kadar % yükselmiş olmalı (koşan hisse)
+HARIC = set("TSLL TSLQ TSLZ TSLR SOXL SOXS TQQQ SQQQ SPXL SPXS SPXU UPRO SDOW UDOW TNA TZA LABU LABD FNGU FNGD "
+            "NVDL NVDU NVDD NVDQ NVDX CONL CONY MSTU MSTX MSTZ AMDL AAPU GGLL AMZU MSFU PLTU METU UVXY SVXY UVIX VXX "
+            "BOIL KOLD UCO SCO TMF TMV YINN YANG NUGT DUST JNUG JDST GUSH DRIP DPST NAIL BITX ETHU SBIT BITI".split()) | \
+    set(x.strip().upper() for x in os.getenv("PLAN_HARIC", "").split(",") if x.strip())   # kaldıraçlı fonlar: kırılım botunun işi değil
 MIN_FIYAT = float(os.getenv("PLAN_MIN_FIYAT", "0.20"))   # bunun altına plan yok
 KURUS = 0.50                 # bunun altında spread en fazla %1 ve bilinmeli (kote yoksa sinyal yok)
 EMIR_K = 5.0                 # satış tarafı emir miktarı alışın 5 katından büyükse sinyal yok
@@ -552,6 +557,8 @@ class Planci:
         son = next((q for q in reversed(self.gecmis) if q["sym"] == sym), None)
         if son and T - (son.get("bitis") or son["t"]) < TEKRAR_SN:
             return self._nd(sym, T, "az önce bir plan bitti, 15 dk bekleniyor")
+        if sym in HARIC:
+            return self._nd(sym, T, "kaldıraçlı fon / ETF: plan kurulmaz")
         if c < MIN_FIYAT:
             return self._nd(sym, T, f"fiyat {MIN_FIYAT:.2f}$ altında".replace(".", ","))
         kn = self.kanal.get(sym)
@@ -592,6 +599,9 @@ class Planci:
         if (hareket < 2 and not sonen) or dv < (150_000 if x["ses"] != "regular" else 500_000):
             return self._nd(sym, T, f"hareket {hareket:+.1f}% / seans hacmi {dv / 1e3:.0f}K$ — en az +%2 ve "
                                     f"{'150K' if x['ses'] != 'regular' else '500K'}$ gerekli")
+        gmax = (max(c, x.get("hod") or c) / ref - 1) * 100
+        if gmax < MIN_GUN:
+            return self._nd(sym, T, f"gün içinde en fazla {gmax:+.1f}% — koşan hisse için en az +%{MIN_GUN:g}")
         tum = self.seviyeler(sym, tss, bars, ds, k, x)
         kume = [g for g in tum if g["puan"] >= MIN_PUAN]
         if not kume:

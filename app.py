@@ -7974,6 +7974,8 @@ async def yz_gun_sonu():
 PLAN_DURUM = {}                # "k:<id>" -> güncel durum satırı
 _PLAN_TG = {"gun": None, "n": 0}
 PLAN_TG_GUNLUK = int(os.getenv("PLAN_TG_GUNLUK", "20"))
+PLAN_MIN_K1 = float(os.getenv("PLAN_MIN_K1", "3"))        # K1 girişin en az % bu kadar üstünde değilse kanala gitmez
+PLAN_TG_UZAK = float(os.getenv("PLAN_TG_UZAK", "3"))      # giriş fiyatın % bu kadardan uzaksa yaklaşınca gönderilir
 PLAN_TG_HISSE = 2            # aynı hisse için günde en fazla 2 farklı seviye (yeniden başlamada da korunur)
 PLAN_TG_ARA = 30 * 60        # aynı hisseye iki plan mesajı arasında en az 30 dk
 
@@ -9739,11 +9741,19 @@ def plan_olaylari():
             _ogren_red = bool(_ih.get("aktif") and _ih["p"] < OGREN_ESIK and not p.get("liste"))
             if _ogren_red and not _neden_tg:
                 _neden_tg = f"öğrenme: tutma ihtimali %{_ih['p']} (< %{OGREN_ESIK})"
+            _k1p = (p["hedefler"][0] / p["giris"] - 1) * 100 if p.get("giris") else 0
+            _px0 = fiyat(sym)
+            _uz0 = (p["giris"] / _px0 - 1) * 100 if _px0 else 0
+            _kal = (f"K1 hedefi %{_k1p:.1f} (en az %{PLAN_MIN_K1:g})" if _k1p < PLAN_MIN_K1
+                    else f"giriş fiyatın %{_uz0:.1f} üstünde: %{PLAN_TG_UZAK:g}'e yaklaşınca gönderilecek" if _uz0 > PLAN_TG_UZAK else "")
+            p["ertele"] = 1 if _kal.startswith("giriş") else 0
+            if _kal and not _neden_tg:
+                _neden_tg = _kal
             if _neden_tg:
                 PLAN_TG_RED[sym] = (time.time(), f"{fp_(p['giris'])} planı: {_neden_tg}")
             if _ogren_red and _sec_ != "seyreltme" and not any(r_["id"] == p["id"] for r_ in KK["kayit"][-60:]):
                 kk_ekle(p, gizli=True)                       # kanala gitmez ama sonucu ölçülür: öğrenme kör kalmaz
-            if not _ogren_red and _sec_ != "seyreltme" and tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK \
+            if not _kal and not _ogren_red and _sec_ != "seyreltme" and tg.ok and PUSH_PREF.get("tg_plan", 1) and (kucuk or p["puan"] >= 3.5) and _PLAN_TG["n"] < PLAN_TG_GUNLUK \
                     and (spread_yuzde(sym) or 0) <= _spr_max(p) \
                     and not sustur_mu(sym) and hs[0] < PLAN_TG_HISSE and time.time() - hs[1] >= PLAN_TG_ARA:
                 hs[0] += 1
@@ -9784,7 +9794,7 @@ def plan_olaylari():
             if tgp_ and not tgp_.get("bitti"):
                 tgp_["bitti"], tgp_["bitti_t"] = ev, int(time.time())
                 YEDEK_ACIL[0] = YEDEK_ACIL[0] or time.time()
-        if ev == "onaylı" and not p.get("bitis") and tg.ok and not p.get("onay_tg"):
+        if ev == "onaylı" and not p.get("bitis") and tg.ok and not p.get("onay_tg") and key in tg.meta:   # kanala gitmeyen plana onay mesajı yok
             p["onay_tg"] = 1
             tg.send(kirilim_html(p), plan_grafik_ch(p, durum="onaylı"), sym=sym, reply=key, konu="plan", quiet=False)
             zincir(key, f"🟢 onaylandı {fk(p.get('e') or p['giris'])} ({p.get('tf', 1)} dk)")
@@ -9870,6 +9880,12 @@ def yaklasma_kontrol():
         say["gun"], say["n"] = gun, 0
     for sym, p in list(PLAN.planlar.items()):
         key = f"k:{p['id']}"
+        if p.get("ertele") and p.get("st") == "bekliyor" and key not in tg.meta:
+            px_ = fiyat(sym)                                   # uzak plan: girişe %3 kalınca kanala gönder
+            if px_ and 0 < (p["giris"] / px_ - 1) * 100 <= PLAN_TG_UZAK:
+                p["ertele"] = 0
+                PLAN.olay.append(("yeni", p))
+            continue
         if p.get("st") == "bekliyor" and key in tg.meta:
             # seviye geçildi ama onay yok: yeni mesaj atmadan plan mesajının altına yaz (kapanış saati / neden)
             px_ = fiyat(sym)
