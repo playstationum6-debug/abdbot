@@ -9838,12 +9838,19 @@ def takip_metni():
     if B:
         iyi = sum(1 for r in B if _kk_sonuc(r)[2] is True)
         sat.append(f"\n📊 Bugün kanalda {len(B)} kırılım · {iyi}'i K1+")
-    if ses == "post":
-        G = [g for g in gece_adaylari() if g.get("puan", 0) >= GECE_ESIK - 10][:3]
-        if G:
-            sat.append("\n🌙 <b>Gece adayları</b> <i>(seçilen ~30 dk önce ayrıca gelir)</i>")
-            for g in G:
-                sat.append(f"• <b>#{_h(g['sym'])}</b> +%{str(g['pct']).replace('.', ',')} · puan {g['puan']}")
+    if ses == "post" and getattr(scanner, "gain_src", None) == "post":
+        aday_ = {g["sym"]: g for g in gece_adaylari() if g.get("puan", 0) >= GECE_ESIK}
+        Y = [g for g in (scanner.gainers or []) if g.get("symbol") not in SYMBOLS and g.get("symbol") not in planmod.HARIC
+             and (g.get("percent_change") or 0) >= 5][:5]
+        if Y:
+            sat.append("\n🌙 <b>Kapanıştan sonra en çok yükselenler</b>")
+            for g in Y:
+                sym_ = g["symbol"]
+                n_ = ((scanner.runners.get(sym_) or {}).get("news") or {}).get("headline")
+                sat.append(f"{'⭐' if sym_ in aday_ else '•'} <b>#{_h(sym_)}</b> +%{str(round(g.get('percent_change') or 0, 1)).replace('.', ',')}"
+                           + (f" · {_h(tr_or(n_)[:60])}" if n_ else ""))
+            if aday_:
+                sat.append("<i>⭐ gece hissesi adayı · seçilenler AH kapanmadan ~40 dk önce ayrıca gelir</i>")
     sat.append("\n<i>Yatırım tavsiyesi değildir</i>")
     return "\n".join(sat)
 
