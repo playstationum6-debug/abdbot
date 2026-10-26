@@ -8429,7 +8429,7 @@ def kk_guncelle():
     now = time.time()
     deg = False
     for r in KK["kayit"][-80:]:
-        if r.get("kt") and r["gun"] == gun and r["st"] == "kırıldı":       # stop / K3 / gün sonu sonrası yükseliş sayılmaz
+        if r.get("kt") and r["gun"] == gun and r["st"] in ("kırıldı", "K3"):   # K3'ten sonra da gün içi zirve izlenir (stop / gün sonu sayılmaz)
             z = _zirve_since(r["sym"], r["kt"])                # kırılımdan sonraki en yüksek mum (gün içinde kalıcı)
             if z and z > (r.get("zirve") or 0):
                 r["zirve"] = z
@@ -9254,12 +9254,14 @@ ACILIS = {"gun": "", "liste": []}
 
 
 def acilis_adaylari():
-    """Haberli, öncesi seansta ≥ +%10, öncesi seans hacmi ≥ 1 M$, tepesine %10 yakın, offering yok."""
+    """Öncesi seansta güçlü: haberliyse ≥ +%10 ve ≥ 1 M$; habersizse (ücretsiz kaynaklar haberi sık kaçırıyor) ≥ +%20 ve
+    ≥ 2 M$. Tepesine %10 yakın, offering yok. Sıra: hacim (haberli olan 1,5 kat sayılır)."""
     out = []
     gun = datetime.now(ET).date()
     for sym, r_ in list(scanner.runners.items()):
-        if sym in SYMBOLS or sym in planmod.HARIC or not (r_ or {}).get("news"):
+        if sym in SYMBOLS or sym in planmod.HARIC:
             continue
+        haber = bool((r_ or {}).get("news"))
         if ((r_.get("sec") or {}).get("kind")) == "seyreltme":
             continue
         bs = store.bars.get(sym) or {}
@@ -9271,10 +9273,11 @@ def acilis_adaylari():
         px = fiyat(sym) or pre[-1][1][3]
         pc = (summary(sym) or {}).get("pc")
         pct = r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct")
-        if not px or px < planmod.MIN_FIYAT or (pct or 0) < 10 or dv < 1_000_000 or px < pmh * 0.90 or px >= pmh:
+        min_pct, min_dv = (10, 1_000_000) if haber else (20, 2_000_000)
+        if not px or px < planmod.MIN_FIYAT or (pct or 0) < min_pct or dv < min_dv or px < pmh * 0.90 or px >= pmh:
             continue
-        out.append({"sym": sym, "pmh": round(pmh, 4), "px": px, "pct": pct, "dv": dv, "pc": pc})
-    out.sort(key=lambda a: -a["dv"])
+        out.append({"sym": sym, "pmh": round(pmh, 4), "px": px, "pct": pct, "dv": dv, "pc": pc, "haber": haber})
+    out.sort(key=lambda a: -a["dv"] * (1.5 if a["haber"] else 1))
     return out
 
 
