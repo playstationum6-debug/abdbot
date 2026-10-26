@@ -26,17 +26,18 @@ import time
 from datetime import datetime
 
 AGIRLIK = {"taban": 2.0, "kaybedilen": 2.0, "pmh": 1.5, "pdh": float(os.getenv("PDH_PUAN", "2.0")),
-           "cgd": float(os.getenv("CGD_PUAN", "2.0")), "hod": 1.0, "yuvarlak": 0.5, "kanal": 3.0, "liste": 2.5,
+           "cgd": float(os.getenv("CGD_PUAN", "2.0")), "acilis": 3.0, "hod": 1.0, "yuvarlak": 0.5, "kanal": 3.0, "liste": 2.5,
            "direnç": 1.5, "tam sayı": 1.0, "pgh": 1.5}
 TUR_AD = {"taban": "sabahki / gün içi tabanın tavanı", "kaybedilen": "kaybedilen seviye (geri alma)",
           "pmh": "piyasa öncesi tepesi", "pdh": "dünkü tepe", "hod": "gün tepesi", "yuvarlak": "yuvarlak sayı",
           "kanal": "kanalın verdiği seviye", "liste": "sabah listesinin seviyesi",
           "direnç": "gün içinde birkaç kez dönülen tepe", "tam sayı": "tam dolar (herkesin baktığı sayı)",
-          "pgh": "önceki günlerin tepesi", "cgd": "çok günlük direnç (son 3 ayda birkaç kez dönülen tepe)"}
+          "pgh": "önceki günlerin tepesi", "cgd": "çok günlük direnç (son 3 ayda birkaç kez dönülen tepe)",
+          "acilis": "açılış hamlesi (piyasa öncesi tepesi)"}
 RED_AD = {"tukenme": "tükenme: en yüksek hacim tepe mumunda ve üst fitil gövdenin 2 katından uzun",
           "dusen": "art arda 3 düşen tepe + azalan hacim",
           "emir": "satış tarafındaki emirler alışın 5 katından fazla",
-          "acilis": "açılışın ilk 15 dakikası",
+          "acilis": "açılışın ilk 15 dakikası (açılış hamlesinde: normal seans başlamadı)",
           "hacim": "kırılım mumunun hacmi son 20 mumun 2 katına ulaşmadı",
           "spread": "alış-satış farkı %2'den büyük (0,50$ altında %1) ya da bilinmiyor"}
 
@@ -166,6 +167,12 @@ class Planci:
             return
         self.kanal[sym] = {"lvl": float(lvl), "stop": float(stop) if stop else None, "hedefler": hedefler or [],
                            "kanal": kanal, "t": t or time.time()}
+
+    def acilis_ekle(self, sym, lvl, t=None):
+        """Açılış hamlesi: haberli, piyasa öncesi güçlü hisse — normal seansın ilk 30 dk'sında öncesi seans tepesi kırılırsa."""
+        if lvl and lvl > 0:
+            self.liste[sym] = {"lvl": float(lvl), "stop": None, "hedefler": [], "neden": "açılış", "t": t or time.time(),
+                               "acilis": 1}
 
     def liste_ekle(self, sym, lvl, stop=None, hedefler=None, neden="", t=None):
         if not lvl or lvl <= 0:
@@ -389,7 +396,10 @@ class Planci:
         """Sinyali engelleyen kural (yoksa None)."""
         try:
             n = datetime.fromtimestamp(x["T"], self._et)
-            if x.get("ses") == "regular" and n.hour == 9 and 30 <= n.minute < 30 + ACILIS_BEKLE:
+            if (self.planlar.get(sym) or {}).get("acilis"):
+                if x.get("ses") != "regular":
+                    return "acilis"                          # açılış hamlesi sadece normal seansta onaylanır
+            elif x.get("ses") == "regular" and n.hour == 9 and 30 <= n.minute < 30 + ACILIS_BEKLE:
                 return "acilis"
         except Exception:
             pass
@@ -485,6 +495,9 @@ class Planci:
         if p and p["gun"] != str(x["day"]):
             self._bitir(p, "süre", "gün bitti", T)
             p = None
+        if p and p.get("acilis") and p.get("st") == "bekliyor" and datetime.fromtimestamp(T, eng.ET).hour >= 10:
+            self._bitir(p, "süre", "açılış penceresi (ilk 30 dk) bitti", T)
+            p = None
         onceki = [bars[tss[i]] for i in range(max(0, k - 20), k)]
         ort_v = sum(b[4] for b in onceki) / len(onceki) if onceki else 0
         x["_volr2"] = (x["v"] / ort_v) if ort_v > 0 else x.get("volr", 0)    # seans başında da çalışır
@@ -575,15 +588,19 @@ class Planci:
         if ls and time.time() - ls["t"] < 12 * 3600 and ls["lvl"] * 0.85 < c < ls["lvl"] * 1.005:
             kume = [g for g in self.seviyeler(sym, tss, bars, ds, k, x) if abs(g["ust"] / ls["lvl"] - 1) <= 0.015]
             g = kume[0] if kume else {"ust": ls["lvl"], "tur": set(), "dip": None, "bant": None}
-            g = dict(g, ust=ls["lvl"], tur=set(g["tur"]) | {"liste"})
+            g = dict(g, ust=ls["lvl"], tur=set(g["tur"]) | ({"acilis"} if ls.get("acilis") else {"liste"}))
             g["puan"] = sum(AGIRLIK[t] for t in g["tur"])
             pl = self._plan_kur(sym, x, g, T, "liste", None, ls.get("stop"))
             if pl:
                 pl["giris"] = round(ls["lvl"], 4)
+                if ls.get("acilis"):                           # açılış oynak: stop en az %3 aşağıda (K1 ≈ +%4,5)
+                    pl["stop"] = round(min(pl["stop"], pl["giris"] * 0.97), 4)
                 r_ = pl["giris"] - pl["stop"]
                 if r_ > 0:
                     pl["hedefler"] = [round(pl["giris"] + i * r_, 4) for i in (1.5, 2.5, 4)]
                 pl["liste"] = 1
+                if ls.get("acilis"):
+                    pl["acilis"] = 1
                 self.liste.pop(sym, None)
                 self.planlar[sym] = pl
                 self.olay.append(("yeni", pl))

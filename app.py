@@ -8194,7 +8194,7 @@ def _plan_html(p):
     return (f"⏳ <b>#{_h(p['sym'])}</b> <b>{fk(p['giris'])}</b> üstü kırarsa al\n"
             f"🔴 Stop <b>{fk(p['stop'])}</b>   🟢 Hedef {' · '.join(fk(x) for x in h)}"
             + (f"\n🧠 Tutma ihtimali %{ih}" if ih is not None else "")
-            + ("\n☀️ Günün listesinde" if p.get("liste") else ""))
+            + ("\n🔔 Açılış hamlesi · ilk 30 dk geçerli" if p.get("acilis") else "\n☀️ Günün listesinde" if p.get("liste") else ""))
 
 
 def kirilim_html(p, retest=False):
@@ -9187,6 +9187,7 @@ def saglik_satirlari():
             f"{'✅' if now - state.yahoo_ok < 600 else '⚠️'} Mum verisi: son {int((now - state.yahoo_ok) // 60) if state.yahoo_ok else '—'} dk önce"
             + (f" ({state.yahoo_err[:60]})" if state.yahoo_err and now - state.yahoo_ok > 600 else ""),
             f"⚡ Son canlı işlem: {int((now - son_canli) // 60) if son_canli else '—'} dk önce",
+            f"🔔 Açılış listesi: {', '.join(ACILIS['liste']) or ('bugün aday yok' if ACILIS['gun'] == _gun_et() else 'TR açılıştan 5 dk önce')}",
             f"⏱ Canlı onay: {CANLI_ONAY['n']} kez" + (f" · son {CANLI_ONAY['son']}" if CANLI_ONAY["son"] else ""),
             (f"⚡ Hızlı keşif: {HIZLI['n']} aday baktı · son eklenen {', '.join(HIZLI['eklenen'][-3:]) or '—'}" if HIZLI["t"] else "⚡ Hızlı keşif: öncesi/sonrası seansta çalışır"),
             f"📋 Koşan {len(scanner.runners)} · kırılım izleme {len(IZLE)} · aktif plan {len(PLAN.planlar)} · TradingView: {scanner.tv_status}",
@@ -9246,6 +9247,57 @@ async def saglik_loop():
                    "Bellek normale döndü.")
         except Exception as e:
             log.warning("Sağlık kontrolü hatası: %s", e)
+
+
+ACILIS_N = int(os.getenv("ACILIS_N", "3"))                # açılış listesindeki en fazla hisse (0 = kapalı)
+ACILIS = {"gun": "", "liste": []}
+
+
+def acilis_adaylari():
+    """Haberli, öncesi seansta ≥ +%10, öncesi seans hacmi ≥ 1 M$, tepesine %10 yakın, offering yok."""
+    out = []
+    gun = datetime.now(ET).date()
+    for sym, r_ in list(scanner.runners.items()):
+        if sym in SYMBOLS or sym in planmod.HARIC or not (r_ or {}).get("news"):
+            continue
+        if ((r_.get("sec") or {}).get("kind")) == "seyreltme":
+            continue
+        bs = store.bars.get(sym) or {}
+        pre = [(t, b) for t, b in bs.items() if datetime.fromtimestamp(t, ET).date() == gun and cal.session(t) == "pre"]
+        if len(pre) < 20:
+            continue
+        pmh = max(b[1] for _, b in pre)
+        dv = sum((b[4] or 0) * b[3] for _, b in pre)
+        px = fiyat(sym) or pre[-1][1][3]
+        pc = (summary(sym) or {}).get("pc")
+        pct = r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct")
+        if not px or px < planmod.MIN_FIYAT or (pct or 0) < 10 or dv < 1_000_000 or px < pmh * 0.90 or px >= pmh:
+            continue
+        out.append({"sym": sym, "pmh": round(pmh, 4), "px": px, "pct": pct, "dv": dv, "pc": pc})
+    out.sort(key=lambda a: -a["dv"])
+    return out
+
+
+async def acilis_loop():
+    """Normal seanstan 5 dk önce (09:25 ET): en güçlü haberli öncesi seans hisseleri açılış hamlesi planına alınır."""
+    await asyncio.sleep(60)
+    while True:
+        await asyncio.sleep(20)
+        try:
+            n = datetime.now(ET)
+            gun = str(n.date())
+            if ACILIS_N <= 0 or ACILIS["gun"] == gun or cal.session(time.time()) != "pre" or not (n.hour == 9 and 25 <= n.minute < 30):
+                continue
+            ACILIS["gun"] = gun
+            L = acilis_adaylari()[:ACILIS_N]
+            ACILIS["liste"] = [a["sym"] for a in L]
+            for a in L:
+                if a["sym"] in PLAN.planlar:
+                    PLAN._bitir(PLAN.planlar[a["sym"]], "iptal", "açılış hamlesi planıyla değişti")
+                PLAN.acilis_ekle(a["sym"], a["pmh"])
+            log.info("Açılış listesi: %s", ACILIS["liste"])
+        except Exception as e:
+            log.warning("Açılış listesi hatası: %s", e)
 
 
 CANLI1 = {}   # sym -> {dakika: [a, y, d, k, hacim]} Finnhub işlemlerinden canlı 1 dk mumlar (son 10 dk)
@@ -9867,7 +9919,8 @@ def plan_olaylari():
             _px0 = fiyat(sym)
             _uz0 = (p["giris"] / _px0 - 1) * 100 if _px0 else 0
             _kal = (f"K1 hedefi %{_k1p:.1f} (en az %{PLAN_MIN_K1:g})" if _k1p < PLAN_MIN_K1
-                    else f"giriş fiyatın %{_uz0:.1f} üstünde: %{PLAN_TG_UZAK:g}'e yaklaşınca gönderilecek" if _uz0 > PLAN_TG_UZAK else "")
+                    else f"giriş fiyatın %{_uz0:.1f} üstünde: %{PLAN_TG_UZAK:g}'e yaklaşınca gönderilecek"
+                    if _uz0 > PLAN_TG_UZAK and not p.get("acilis") else "")
             p["ertele"] = 1 if _kal.startswith("giriş") else 0
             if _kal and not _neden_tg:
                 _neden_tg = _kal
@@ -10566,7 +10619,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, cgd_loop, hizli_kesif_loop, canli_onay_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop, halt_loop)]
+                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, cgd_loop, hizli_kesif_loop, canli_onay_loop, acilis_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop, halt_loop)]
     yield
     for t in tasks:
         t.cancel()
