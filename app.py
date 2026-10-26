@@ -268,6 +268,7 @@ class State:
     sip_last = 0.0          # tüm borsaların hacmi (Alpaca SIP, 15 dk gecikmeli, ücretsiz plan)
     sip_err = ""
     sip_n = 0
+    sip_son = 0.0           # SIP'te en son çekilen an (sonrakiler sadece son ~20 dk: bellek sıçramasın)
     started = time.time()
 
 
@@ -1389,7 +1390,12 @@ async def iex_ext_volume(symbols):
     if now - state.sip_last >= 300:
         state.sip_last = now
         try:
-            await sip_ext_volume(symbols, ses_start(now), now - 16 * 60)
+            bas_ = ses_start(now)
+            if state.sip_son and state.sip_son > bas_:
+                bas_ = max(bas_, state.sip_son - 20 * 60)
+            kucuk_ = [s_ for s_ in symbols if s_ not in SYMBOLS]          # plan sadece küçük hisselerde: ana liste gereksiz
+            await sip_ext_volume(kucuk_, bas_, now - 16 * 60)
+            state.sip_son = now - 16 * 60
             state.sip_err = ""
         except Exception as e:
             state.sip_err = str(e)[:80]
@@ -1404,27 +1410,31 @@ async def sip_ext_volume(symbols, start, end):
     params = {"symbols": ",".join(symbols), "timeframe": "1Min", "feed": "sip", "limit": 10000,
               "start": datetime.fromtimestamp(start, UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "end": datetime.fromtimestamp(end, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}
-    got, n = {}, 0
+    n = 0
+    if not symbols:
+        return
+    params["limit"] = 3000                                  # küçük sayfalar: her sayfa işlenip atılır (bellek)
     async with httpx.AsyncClient(timeout=25) as c:
-        for _ in range(10):
+        for _ in range(30):
             r = await c.get("https://data.alpaca.markets/v2/stocks/bars", params=params, headers=alpaca_headers())
             if r.status_code != 200:
                 raise RuntimeError(f"SIP {r.status_code}: {r.text[:60]}")
             js = r.json()
+            del r
             for sym, rows in (js.get("bars") or {}).items():
-                d = got.setdefault(sym, {})
+                d = {}
                 for b in rows or []:
                     ts = int(parse_ts(b.get("t", "")) // 60 * 60)
                     if cal.session(ts) in ("pre", "post"):
                         d[ts] = float(b.get("v") or 0)
-                        n += 1
+                if d:
+                    store.set_xvol(sym, d)
+                    n += len(d)
             tok = js.get("next_page_token")
+            del js
             if not tok:
                 break
             params["page_token"] = tok
-    for sym, vols in got.items():
-        if vols:
-            store.set_xvol(sym, vols)
     store.flush()
     state.sip_n = n
 
