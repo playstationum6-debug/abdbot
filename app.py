@@ -9190,6 +9190,8 @@ def saglik_satirlari():
             f"{'✅' if now - state.yahoo_ok < 600 else '⚠️'} Mum verisi: son {int((now - state.yahoo_ok) // 60) if state.yahoo_ok else '—'} dk önce"
             + (f" ({state.yahoo_err[:60]})" if state.yahoo_err and now - state.yahoo_ok > 600 else ""),
             f"⚡ Son canlı işlem: {int((now - son_canli) // 60) if son_canli else '—'} dk önce",
+            f"🚀 Ani yükseliş: bugün {(backup.data.get('ani') or {}).get('n', 0) if (backup.data.get('ani') or {}).get('gun') == _gun_et() else 0} alarm"
+            + (f" · son {ANI['son']}" if ANI["son"] else "") + f" · TradingView {ANI['tv']} · {len(ANI_IZ)} hisse izleniyor",
             f"🔔 Açılış listesi: {', '.join(ACILIS['liste']) or ('bugün aday yok' if ACILIS['gun'] == _gun_et() else 'TR açılıştan 5 dk önce')}",
             f"⏱ Canlı onay: {CANLI_ONAY['n']} kez" + (f" · son {CANLI_ONAY['son']}" if CANLI_ONAY["son"] else ""),
             (f"⚡ Hızlı keşif: {HIZLI['n']} aday baktı · son eklenen {', '.join(HIZLI['eklenen'][-3:]) or '—'}" if HIZLI["t"] else "⚡ Hızlı keşif: öncesi/sonrası seansta çalışır"),
@@ -9250,6 +9252,149 @@ async def saglik_loop():
                    "Bellek normale döndü.")
         except Exception as e:
             log.warning("Sağlık kontrolü hatası: %s", e)
+
+
+# ------------------------------------------------------------------ ani yükseliş alarmı
+ANI_PCT = float(os.getenv("ANI_PCT", "5"))          # 3 dk içinde en az % yükseliş
+ANI_KAT = float(os.getenv("ANI_KAT", "5"))          # hacim hızı önceki 20 dk'nın en az bu katı
+ANI_DV = float(os.getenv("ANI_DV", "50000"))        # pencerede en az bu kadar $ işlem
+ANI_GUNLUK = int(os.getenv("ANI_GUNLUK", "10"))     # günde en fazla alarm (0 = kapalı)
+FCUM = {}                                           # sym -> Finnhub birikimli hacim (adet)
+ANI_IZ = {}                                         # (kaynak, sym) -> [(t, fiyat, birikimli hacim)] son 25 dk
+ANI = {"tv": "başlıyor", "tv_t": 0, "son": ""}
+
+
+async def ani_tv_tara(c, ses):
+    """TradingView: seansın en çok yükselenleri (gün içi değişim ≥ %3) — fiyat + birikimli hacim (30 sn'de bir)."""
+    k = {"pre": "premarket_", "post": "postmarket_"}.get(ses, "")
+    ch, px, vol = (f"{k}change", f"{k}close", f"{k}volume") if k else ("change", "close", "volume")
+    body = {"markets": ["america"], "symbols": {"query": {"types": []}, "tickers": []}, "options": {"lang": "en"},
+            "columns": ["name", ch, px, vol, "type"],
+            "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]},
+                       {"left": "exchange", "operation": "in_range", "right": ["NASDAQ", "NYSE", "AMEX"]},
+                       {"left": px, "operation": "greater", "right": planmod.MIN_FIYAT},
+                       {"left": vol, "operation": "greater", "right": 20000},
+                       {"left": ch, "operation": "greater", "right": 3}],
+            "sort": {"sortBy": ch, "sortOrder": "desc"}, "range": [0, 150]}
+    r = await c.post("https://scanner.tradingview.com/america/scan", json=body, headers={
+        "User-Agent": "Mozilla/5.0", "Origin": "https://www.tradingview.com", "Referer": "https://www.tradingview.com/"})
+    r.raise_for_status()
+    out = []
+    for row in (r.json() or {}).get("data") or []:
+        d = row.get("d") or []
+        try:
+            sym = str(d[0] or "").upper()
+            if sym and float(d[2] or 0) > 0:
+                out.append((sym, float(d[1] or 0), float(d[2]), float(d[3] or 0)))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _ani_kontrol(key, now):
+    """Son 3 dk'da ≥ ANI_PCT yükseliş + hacim hızı önceki 20 dk'nın ≥ ANI_KAT katı (+ en az ANI_DV $)."""
+    L = ANI_IZ.get(key) or []
+    if len(L) < 2:
+        return None
+    t1, p1, v1 = L[-1]
+    pen = [x for x in L if x[0] >= now - 180]
+    if len(pen) < 2:
+        return None
+    t0, p0, v0 = min(pen, key=lambda x: x[1])                # pencerenin dibi
+    if t0 >= t1 or p0 <= 0:
+        return None
+    pct = (p1 / p0 - 1) * 100
+    dv = max(0.0, v1 - v0) * p1
+    if pct < ANI_PCT or dv < ANI_DV:
+        return None
+    once = [x for x in L if now - 1500 <= x[0] < t0 - 60]
+    kat = None
+    if once:
+        ta, pa, va = once[0]
+        hiz_once = max(0.0, v0 - va) / max(60.0, t0 - ta)
+        hiz = max(0.0, v1 - v0) / max(30.0, t1 - t0)
+        kat = hiz / hiz_once if hiz_once > 0 else 99.0
+        if kat < ANI_KAT:
+            return None
+    tepe = max(x[1] for x in pen)
+    return {"pct": round(pct, 1), "dv": dv, "kat": kat, "dk": max(1, round((t1 - t0) / 60)), "px": p1, "tepe": tepe}
+
+
+async def ani_alarm(c, sym, a, gun_pct=None):
+    G = backup.data.setdefault("ani", {})
+    gun = _gun_et()
+    if G.get("gun") != gun:
+        G.clear()
+        G.update(gun=gun, n=0, son={})
+    if G["n"] >= ANI_GUNLUK or time.time() - G["son"].get(sym, 0) < 1800:
+        return
+    if sym in planmod.HARIC or sym in SYMBOLS or sustur_mu(sym) or a["px"] < planmod.MIN_FIYAT:
+        return
+    if (spread_yuzde(sym) or 0) > 3:
+        return
+    G["son"][sym] = time.time()
+    G["n"] += 1
+    lvl = planmod.guzel(max(a["tepe"], a["px"]) * 1.002)
+    try:
+        ensure_sym(sym)
+        await scanner._add(c, sym, gun_pct if gun_pct is not None else a["pct"], a["px"], "ani yükseliş")
+    except Exception as e:
+        log.debug("Ani yükseliş listeye eklenemedi %s: %s", sym, e)
+    if sym not in PLAN.planlar:
+        PLAN.liste_ekle(sym, lvl, neden="ani yükseliş")
+    kat = (f" · hacim {a['kat']:.0f}x" if a["kat"] < 50 else " · hacim 50x+") if a.get("kat") else f" · {a['dv'] / 1e3:.0f}K$ işlem"
+    n_ = ((scanner.runners.get(sym) or {}).get("news") or {}).get("headline")
+    html = (f"🚀 <b>#{_h(sym)} ani yükseliş</b> · {a['dk']} dk'da +%{str(a['pct']).replace('.', ',')}{kat}\n"
+            f"Şimdi <b>{fk(a['px'])}</b> · kırılım seviyesi <b>{fk(lvl)}</b>\n"
+            + (f"📰 {_h(tr_or(n_)[:90])}\n" if n_ else "")
+            + "<i>Üstünde hacimli kapanış gelirse ✅ KIRDI mesajı gelir · kovalamayın</i>")
+    ANI["son"] = f"{sym} {datetime.now(TR).strftime('%H:%M')}"
+    if tg.ok and KANAL_MOD == "onay":
+        tg.send(html, None, key=f"ani:{gun}:{sym}:{G['n']}", sym=sym, konu="ani", quiet=False)
+    log.info("Ani yükseliş: %s %+.1f%% (%s dk)", sym, a["pct"], a["dk"])
+    backup.dirty = True
+
+
+async def ani_loop():
+    """Her 10 sn: Finnhub'ın canlı dinlediği hisseler; her 30 sn: TradingView yükselenler. Ani sıçrama → kanala alarm + plan."""
+    if ANI_GUNLUK <= 0:
+        return
+    await asyncio.sleep(120)
+    async with httpx.AsyncClient(timeout=15) as c:
+        while True:
+            await asyncio.sleep(10)
+            try:
+                now = time.time()
+                ses = cal.session(now)
+                if ses == "closed":
+                    continue
+                guncel = []
+                if now - ANI["tv_t"] >= 30:
+                    ANI["tv_t"] = now
+                    try:
+                        for sym, ch, px, vol in await ani_tv_tara(c, ses):
+                            ANI_IZ.setdefault(("tv", sym), []).append((now, px, vol))
+                            guncel.append((("tv", sym), ch))
+                        ANI["tv"] = "çalışıyor"
+                    except Exception as e:
+                        ANI["tv"] = f"hata: {str(e)[:40]}"
+                for sym, c1 in list(CANLI1.items()):
+                    if not c1 or sym not in FCUM:
+                        continue
+                    px = c1[max(c1)][3]
+                    ANI_IZ.setdefault(("fh", sym), []).append((now, px, FCUM[sym]))
+                    guncel.append((("fh", sym), None))
+                for key, ch in guncel:
+                    L = ANI_IZ[key]
+                    while L and L[0][0] < now - 1500:
+                        L.pop(0)
+                    a = _ani_kontrol(key, now)
+                    if a:
+                        await ani_alarm(c, key[1], a, ch)
+                for k_ in [k_ for k_, L in ANI_IZ.items() if not L or L[-1][0] < now - 1500]:
+                    del ANI_IZ[k_]
+            except Exception as e:
+                log.warning("Ani yükseliş hatası: %s", e)
 
 
 ACILIS_N = int(os.getenv("ACILIS_N", "3"))                # açılış listesindeki en fazla hisse (0 = kapalı)
@@ -9412,6 +9557,8 @@ async def finnhub_loop():
                             for d in m.get("data") or []:
                                 s_, p_, v_, t_ = d.get("s"), float(d.get("p") or 0), float(d.get("v") or 0), (d.get("t") or 0) / 1000
                                 akis_islem(s_, p_, v_, t_)
+                                if s_:
+                                    FCUM[s_] = FCUM.get(s_, 0.0) + v_
                                 if s_ and p_ > 0:
                                     c1 = CANLI1.setdefault(s_, {})
                                     k1 = int(t_ // 60 * 60)
@@ -10763,7 +10910,7 @@ async def lifespan(app):
     tasks = [asyncio.create_task(f()) for f in (yahoo_loop, alpaca_loop, broadcaster, signal_loop, housekeeping,
                                                   scan_loop, bot_loop, fast_loop, news_loop, pattern_loop,
                                                   market_loop, push.loop, earnings_loop, bt_loop, tg.loop,
-                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, cgd_loop, hizli_kesif_loop, canli_onay_loop, acilis_loop, takip_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop, halt_loop)]
+                                                  rapor_loop, uyanik_loop, font_task, tg_komut_loop, tg_takip_loop, dis_loop, dinle_loop, denetci_loop, spread_loop, kt_loop, piyasa_uyari_loop, eko_loop, gun_trend_loop, cgd_loop, hizli_kesif_loop, canli_onay_loop, acilis_loop, takip_loop, ani_loop, oto_loop, secili_saat_loop, haberci_loop, kanal_loop, saglik_loop, finnhub_loop, krt_loop, halt_loop)]
     yield
     for t in tasks:
         t.cancel()
