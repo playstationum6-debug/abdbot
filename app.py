@@ -8829,7 +8829,30 @@ def hafta_ozet_gonder(chat=None):
 # Seans sonrası (after-hours) haberle yükselen, gücünü koruyan hisse; gece taşınır, ertesi sabah piyasa öncesinde satılır.
 GECE_ESIK = int(os.getenv("GECE_ESIK", "60"))       # bu puanın altı kanala gitmez (ama ölçülür)
 GECE_MAX = int(os.getenv("GECE_MAX", "3"))          # bir gecede en fazla kaç hisse
-GECE_HEDEF = float(os.getenv("GECE_HEDEF", "1.0"))   # sabah en yüksek fiyat girişin en az %X üstüne çıkarsa "tuttu"
+GECE_HEDEF = float(os.getenv("GECE_HEDEF", "10"))    # sabah en yüksek fiyat girişin en az %X üstüne çıkarsa "tuttu"
+GECE_MAX_FIYAT = float(os.getenv("GECE_MAX_FIYAT", "20"))
+GECE_MIN_DV = float(os.getenv("GECE_MIN_DV", "1000000"))   # seans sonrası en az bu kadar $ işlem
+GECE_24S = {"gun": "", "s": {}}                          # sym -> True: gece seansında (24 saat) işlem görüyor
+
+
+async def gece_24s_doldur():
+    """Adayların gece seansında işlem görüp görmediğini Alpaca'dan öğren (overnight_tradable). Günde hisse başına 1 istek."""
+    if not (ALPACA_KEY and ALPACA_SECRET) or getattr(scanner, "gain_src", None) != "post":
+        return
+    gun = _gun_et()
+    if GECE_24S["gun"] != gun:
+        GECE_24S.update(gun=gun, s={})
+    S = [g["symbol"] for g in (scanner.gainers or [])[:30] if g.get("symbol") and g["symbol"] not in GECE_24S["s"]]
+    if not S:
+        return
+    async with httpx.AsyncClient(timeout=10, headers=alpaca_headers()) as c:
+        for sym in S:
+            try:
+                r = await c.get(f"https://paper-api.alpaca.markets/v2/assets/{sym}")
+                if r.status_code == 200:
+                    GECE_24S["s"][sym] = bool(r.json().get("overnight_tradable"))
+            except Exception as e:
+                log.debug("24 saat kontrolü %s: %s", sym, e)
 
 
 def _haber_saat(n):
@@ -8852,16 +8875,18 @@ def gece_adaylari():
         n_ = r_.get("news") or {}
         sec = (r_.get("sec") or {}).get("kind")
         red = None
-        if not (6 <= pct <= 120):
+        if not (10 <= pct <= 120):
             red = f"seans sonrası %{pct:.0f}"
-        elif px < 0.8:
-            red = "fiyat 0,8$ altı"
+        elif not (planmod.MIN_FIYAT <= px <= GECE_MAX_FIYAT) or sym in planmod.HARIC or sym in SYMBOLS:
+            red = "fiyat aralığı dışı / büyük hisse"
+        elif GECE_24S["s"].get(sym):
+            red = "gece seansında işlem görüyor: sabah 11:00 açılış hamlesi olmaz"
+        elif px * vol < GECE_MIN_DV:
+            red = "seans sonrası hacim düşük"
         elif sec in ("seyreltme", "dikkat"):
             red = "SEC: hisse satışı riski"
         elif r_.get("news_kind") == "kötü":
             red = "kötü haber"
-        elif not n_:
-            red = "haber yok"
         if red:
             continue
         ht = _haber_saat(n_)
@@ -8869,8 +8894,10 @@ def gece_adaylari():
         if r_.get("news_kind") == "iyi":
             puan += 30
             neden.append("güçlü haber")
-        else:
+        elif n_:
             puan += 12
+        if GECE_24S["s"].get(sym) is False:
+            neden.append("gece kapalı: 11:00'de açılıyor")
         if ht and ht >= t16 - 1800:
             puan += 12
             neden.append("haber kapanıştan sonra")
@@ -8904,6 +8931,7 @@ def gece_adaylari():
         if spr is not None:
             puan += 5 if spr <= 1 else -10 if spr > 3 else 0
         out.append({"sym": sym, "pct": round(pct, 1), "px": son, "puan": puan, "neden": neden, "spr": spr,
+                    "s24": GECE_24S["s"].get(sym),
                     "haber": tr_or(n_.get("headline")) if n_ else "", "sec": sec})
     out.sort(key=lambda x: -x["puan"])
     return out
@@ -10012,6 +10040,11 @@ def takip_metni():
         iyi = sum(1 for r in B if _kk_sonuc(r)[2] is True)
         sat.append(f"\n📊 Bugün kanalda {len(B)} kırılım · {iyi}'i K1+")
     if ses == "post" and getattr(scanner, "gain_src", None) == "post":
+        if GECE_24S["gun"] != _gun_et() or len(GECE_24S["s"]) < 10:
+            try:
+                _gorev(gece_24s_doldur())
+            except Exception:
+                pass
         aday_ = {g["sym"]: g for g in gece_adaylari() if g.get("puan", 0) >= GECE_ESIK}
         Y = [g for g in (scanner.gainers or []) if g.get("symbol") not in SYMBOLS and g.get("symbol") not in planmod.HARIC
              and (g.get("percent_change") or 0) >= 5][:5]
@@ -10124,6 +10157,10 @@ async def kanal_loop():
             if 1160 <= hm < 1185 and G.get("gece") != gun:
                 G["gece"] = gun
                 kk_kaydet()
+                try:
+                    await gece_24s_doldur()
+                except Exception as e:
+                    log.warning("24 saat kontrolü: %s", e)
                 gece_gonder()
             if 575 <= hm < 700 and G.get("gece_deg") != gun:
                 G["gece_deg"] = gun
