@@ -100,6 +100,9 @@ def pencere_ogren(kayit, mevcut, kotu, min_conf):
             "neden": f"en iyi pencere {_saat(en[0])}–{_saat(en[1])} ET (toplam {en_skor:+.1f}R, mevcut {cur:+.1f}R)"}
 
 
+KORUNAN = {"kirilim", "onay"}   # ana kurgular: oto ayar bunları hiçbir zaman kapatmaz
+
+
 def kurgu_ogren(kayit, pencere, kotu, min_conf):
     """Pencere içindeki koşan hisse sonuçlarıyla kurgu aç/kapat. Dönüş: (yeni_kotu, olaylar, tablo)"""
     b, s = pencere
@@ -113,13 +116,13 @@ def kurgu_ogren(kayit, pencere, kotu, min_conf):
         tablo.append({"k": k, "n": n, "avg": round(a, 3), "kapali": k in kotu})
         if n < K_MIN_N:
             continue
-        if k not in kotu and a < K_KES:
+        if k not in kotu and a < K_KES and k not in KORUNAN:
             yeni.add(k)
             olay.append(("kapat", k, n, a))
         elif k in kotu and a > K_AC:
             yeni.discard(k)
             olay.append(("ac", k, n, a))
-    return yeni, olay, tablo
+    return yeni - KORUNAN, olay, tablo
 
 
 def ana_dilim_ogren(kayit, mevcut, min_conf):

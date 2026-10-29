@@ -25,6 +25,18 @@ import os
 import time
 from datetime import datetime
 
+STOP_PCT = float(os.getenv("STOP_PCT", "10")) / 100      # stop: girişin %10 altı (kırılımdan sonra)
+HEDEF_PCT = [float(v) / 100 for v in os.getenv("HEDEF_PCT", "5,10,20").split(",")]   # K1 / K2 / K3
+
+
+def sabit_stop_hedef(p, ref):
+    """Stop ve hedefler girişe göre sabit yüzde: stop %10 altı, K1 +%5, K2 +%10, K3 +%20."""
+    p["stop"] = round(ref * (1 - STOP_PCT), 4)
+    p["hedefler"] = [round(ref * (1 + h), 4) for h in HEDEF_PCT]
+    p["iptal_alt"] = p["stop"]                  # kırılımdan önce: 5 dk kapanış bu seviyenin altına inerse plan biter
+    return p
+
+
 AGIRLIK = {"taban": 2.0, "kaybedilen": 2.0, "pmh": 1.5, "pdh": float(os.getenv("PDH_PUAN", "2.0")),
            "cgd": float(os.getenv("CGD_PUAN", "2.0")), "acilis": 3.0, "hod": 1.0, "yuvarlak": 0.5, "kanal": 3.0, "liste": 2.5,
            "direnç": 1.5, "tam sayı": 1.0, "pgh": 1.5}
@@ -344,12 +356,7 @@ class Planci:
              "puan": round(g["puan"], 1), "st": "bekliyor", "t": T, "kt": None, "kaynak": kaynak, "kanal": kanal,
              "px": c, "uzak": round((giris / c - 1) * 100, 1), "ses": x.get("ses"), "sig": None, "k1": 0, "k2": 0,
              "gun": str(x["day"]), "bant": g.get("bant")}
-        p["iptal_alt"] = round(min(stop, (x.get("_dip20") or stop) * 0.995), 4)
-        # kural: stop kırılan direncin hemen altı (seviyenin %1 altı ya da 1 ATR, en fazla %4)
-        pay = min(max(lvl * 0.01, atr), lvl * 0.04)
-        p["stop"] = round(lvl - pay, 4)
-        r = giris - p["stop"]
-        p["hedefler"] = [round(giris + 1.5 * r, 4), round(giris + 2.5 * r, 4), round(giris + 4 * r, 4)]
+        sabit_stop_hedef(p, giris)
         p["dokunus"], p["zayif"] = g.get("dokunus", 0), g.get("zayif", 0)
         p["kurallar"] = ["seviye:" + t for t in sorted(g["tur"])] + (["2+ dönüş"] if g.get("dokunus", 0) >= 2 else []) + \
             (["zayıf seviye"] if g.get("zayif") else [])
@@ -368,11 +375,7 @@ class Planci:
         self.olay.append((st, p))
 
     def _aday(self, eng, p, c, T, tip, dip10=None, olay=True):
-        if (c - p["stop"]) / c > 0.10 and dip10:
-            # geri alma planında plan stopu (dip) çok uzak kalır: son 10 mumun dibi, en fazla %7
-            p["stop"] = round(max(dip10 * 0.995, c * 0.93), 4)
-            r_ = p["giris"] - p["stop"] if p["giris"] > p["stop"] else c - p["stop"]
-            p["hedefler"] = [round(c + r_, 4), round(c + 2 * r_, 4), round(c + 3 * r_, 4)]
+        sabit_stop_hedef(p, c)                          # kırılım fiyatına göre: stop %10 altı, K1/K2/K3 +%5/10/20
         risk = c - p["stop"]
         if risk <= 0 or risk / c > 0.12:
             return None
@@ -465,11 +468,7 @@ class Planci:
             self.retest.pop(sym, None)
             p2 = dict(p, id=p["id"] + "-rt", st="bekliyor", tip="retest2", vr=round(b[5] / ort, 1),
                       kurallar=(p.get("kurallar") or []) + ["kırılım+tekrar test"])
-            p2["stop"] = round(min(b[3], lvl) * 0.99, 4)
-            rr = b[4] - p2["stop"]
-            if rr <= 0:
-                return []
-            p2["hedefler"] = [round(b[4] + 1.5 * rr, 4), round(b[4] + 2.5 * rr, 4), round(b[4] + 4 * rr, 4)]
+            sabit_stop_hedef(p2, b[4])
             a = self._aday(eng, p2, b[4], T, "retest2", None, olay=False)
             if a:
                 self.olay.append(("retest", p2))
@@ -517,10 +516,18 @@ class Planci:
                 else:                                                # normal: 5 dk kapanış
                     b5 = B5[-1] if (B5 and blok_sonu(T)) else None
                     ort5 = (sum(q[5] for q in B5[-21:-1]) / max(1, len(B5[-21:-1]))) if b5 else 0
+                if b5 and b5[4] < p["giris"]:
+                    p["tut"] = 0
                 if b5 and b5[4] >= p["giris"]:                       # kural: direncin üstünde mum kapanışı
                     vr5 = b5[5] / ort5 if ort5 > 0 else 0
                     red = self._red(sym, B5, x) or (None if vr5 >= self.ayar.get("hacim_k", HACIM_K) else "hacim")
-                    if red:
+                    if red == "hacim" and x.get("ses") != "regular":
+                        # öncesi/sonrası seans hacmi eksik ölçülür: hacim yerine üst üste 2 kapanış seviye üstünde tutunsun
+                        p["tut"] = p.get("tut", 0) + 1
+                        red = None if p["tut"] >= 2 else "bekle"
+                    if red == "bekle":
+                        pass
+                    elif red:
                         self._red_kaydet(p, red)
                         if red == "hacim":
                             p["hacimsiz"] = p.get("hacimsiz", 0) + 1
@@ -541,8 +548,8 @@ class Planci:
                         else:
                             p["st"], p["kt"] = "kaçtı", T
                             self.olay.append(("kaçtı", p))
-                elif c < p.get("iptal_alt", p["stop"]):
-                    self._bitir(p, "iptal", "fiyat kırılımdan önce stop seviyesinin altında kapandı", T)
+                elif B5 and blok_sonu(T) and B5[-1][4] < p.get("iptal_alt", p["stop"]):   # 5 dk kapanış, fitil sayılmaz
+                    self._bitir(p, "iptal", "fiyat kırılımdan önce stop seviyesinin altında kapandı (5 dk)", T)
                 elif T - p["t"] > SURE_SN:
                     self._bitir(p, "süre", "kırılım gelmedi", T)
             elif p["st"] == "onaylı":
@@ -580,6 +587,7 @@ class Planci:
             pl = self._plan_kur(sym, x, g, T, "kanal", kn["kanal"], kn.get("stop"))
             if pl:
                 pl["giris"] = round(kn["lvl"], 4)
+                sabit_stop_hedef(pl, pl["giris"])
                 self.kanal.pop(sym, None)
                 self.planlar[sym] = pl
                 self.olay.append(("yeni", pl))
@@ -593,11 +601,7 @@ class Planci:
             pl = self._plan_kur(sym, x, g, T, "liste", None, ls.get("stop"))
             if pl:
                 pl["giris"] = round(ls["lvl"], 4)
-                if ls.get("acilis"):                           # açılış oynak: stop en az %3 aşağıda (K1 ≈ +%4,5)
-                    pl["stop"] = round(min(pl["stop"], pl["giris"] * 0.97), 4)
-                r_ = pl["giris"] - pl["stop"]
-                if r_ > 0:
-                    pl["hedefler"] = [round(pl["giris"] + i * r_, 4) for i in (1.5, 2.5, 4)]
+                sabit_stop_hedef(pl, pl["giris"])
                 pl["liste"] = 1
                 if ls.get("acilis"):
                     pl["acilis"] = 1
@@ -631,16 +635,12 @@ class Planci:
                 return self._nd(sym, T, f"{g['ust']} geri alma seviyesi ama düşüş sürüyor")   # düşüş sürüyor: dönüş başlamadan geri alma planı yok
         pl = self._plan_kur(sym, x, g, T)
         if pl:
-            # kural: bir sonraki dirence kadar risk/ödül en az 1:1,5 (yer yoksa plan yok)
-            r_ = pl["giris"] - pl["stop"]
+            # kural: bir sonraki dirence en az K1 (+%5) kadar yer olmalı
             ust = [q["ust"] for q in tum if q["ust"] > pl["giris"] * 1.005 and q["puan"] >= 1.5]   # gerçek direnç (yuvarlak sayı tek başına değil)
-            if ust and r_ > 0:
+            if ust:
                 nx = min(ust)
-                if (nx - pl["giris"]) / r_ < RR_MIN:
-                    return self._nd(sym, T, f"{pl['giris']} planı: sonraki direnç {nx} çok yakın, risk/ödül "
-                                            f"1:{(nx - pl['giris']) / r_:.1f} (en az 1:{RR_MIN})")
-                if nx > pl["hedefler"][1]:
-                    pl["hedefler"][2] = round(nx, 4)
+                if nx < pl["hedefler"][0]:
+                    return self._nd(sym, T, f"{pl['giris']} planı: sonraki direnç {nx} çok yakın (K1 {pl['hedefler'][0]} altında)")
                 pl["sonraki"] = round(nx, 4)
             self.planlar[sym] = pl
             self.olay.append(("yeni", pl))

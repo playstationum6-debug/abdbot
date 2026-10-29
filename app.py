@@ -2436,7 +2436,8 @@ def secici_neden(sig):
         return "büyük hisse: bu listede kârlı dilim yok (sitede izleme)"
     b, s = int(BOT_CFG.get("pencere_bas", 30)), int(BOT_CFG.get("pencere_son", 240))
     dk = acilis_dk(sig.get("t") or time.time())
-    if sig.get("ses") != "regular" or not (b <= dk < s):
+    # pencere sadece normal seansın ortasına uygulanır: öncesi seans ve açılış (ilk dakikalar) her zaman açık
+    if sig.get("ses") == "post" or (sig.get("ses") == "regular" and dk >= s):
         t1, t2 = pencere_tr()
         return f"saat penceresi dışında: en iyi dilim {t1}–{t2} TR (normal seans)"
     if sig.get("setup") in secici_kotu() and sig.get("setup") not in (BOT_CFG.get("zorla") or []):
@@ -2460,7 +2461,8 @@ OGREN_GUNLUK = []                                  # [{"t", "tur", "b": başlık
 
 
 def secici_kotu():
-    return set(OTO.get("kotu") or SECICI_KOTU) if BOT_CFG.get("oto_ayar", 1) else SECICI_KOTU
+    k = set(OTO.get("kotu") or SECICI_KOTU) if BOT_CFG.get("oto_ayar", 1) else set(SECICI_KOTU)
+    return k - otoayar.KORUNAN                      # kırılım ve onay hiçbir zaman kapanmaz
 
 
 def ana_dilim(sig):
@@ -9957,6 +9959,9 @@ def hareketli(sym):
 
 
 TAKIP_N = int(os.getenv("TAKIP_N", "5"))
+KESIF_N = int(os.getenv("KESIF_N", "3"))                 # takip listesinde erken keşif satırı (0 = kapalı)
+KESIF_PCT = float(os.getenv("KESIF_PCT", "30"))          # günlük en az % yükseliş
+KESIF_MAX_FIYAT = float(os.getenv("KESIF_MAX_FIYAT", "20"))
 
 
 def takip_metni():
@@ -9981,6 +9986,27 @@ def takip_metni():
                        + (" · <b>hacim artıyor</b>" if h else "") + (" · 🔔 açılış" if p.get("acilis") else ""))
     elif ses != "closed":
         sat.append("<i>Şu an kırılıma yakın hisse yok · bot tarıyor</i>")
+    if ses in ("pre", "regular") and KESIF_N > 0:
+        # 🚀 Erken keşif: ani yükseliş alarmı veren ya da +%30 üstü giden ucuz hisseler, kırılımdan ÖNCE listede
+        G_ = backup.data.get("ani") or {}
+        ani_ = set(G_.get("son") or {}) if G_.get("gun") == _gun_et() else set()
+        gor = {a_[1] for a_ in L[:TAKIP_N]}
+        K = {}
+        for g in (scanner.gainers or []):
+            s_, pc, px_ = g.get("symbol"), g.get("percent_change") or 0, g.get("price") or 0
+            if s_ and pc >= KESIF_PCT and planmod.MIN_FIYAT <= px_ <= KESIF_MAX_FIYAT:
+                K[s_] = (pc, px_)
+        for s_ in ani_:
+            r_ = scanner.runners.get(s_) or {}
+            K.setdefault(s_, (r_.get("pct") or 0, fiyat(s_) or r_.get("price") or 0))
+        K = sorted(((s_ in ani_, pc, s_, px_) for s_, (pc, px_) in K.items()
+                    if s_ not in gor and s_ not in planmod.HARIC and s_ not in SYMBOLS and px_), reverse=True)[:KESIF_N]
+        if K:
+            sat.append("\n🚀 <b>Erken keşif</b> · <i>hacimle koşanlar, seviye kırılınca KIRDI gelir</i>")
+            for ani_mi, pc, s_, px_ in K:
+                p_ = PLAN.planlar.get(s_)
+                sv = f"seviye <b>{fk(p_['giris'])}</b>" if p_ and p_.get("st") == "bekliyor" else "seviye hazırlanıyor"
+                sat.append(f"{'⚡' if ani_mi else '•'} <b>#{_h(s_)}</b> +%{str(round(pc, 1)).replace('.', ',')} · {fk(px_)} · {sv}")
     B = [r for r in KK["kayit"] if r["gun"] == _gun_et() and _gorunur(r) and r.get("kt") and r["st"] != "sahte"]
     if B:
         iyi = sum(1 for r in B if _kk_sonuc(r)[2] is True)
