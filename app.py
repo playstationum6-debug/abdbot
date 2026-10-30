@@ -5568,12 +5568,114 @@ async def cgd_loop():
                     continue
                 rows = await get_daily(sym)
                 CGD[sym] = (gun, cgd_hesapla(rows, gun) if rows else [])
+                try:
+                    KOS_GECMIS[sym] = (gun, kos_gecmis(rows, gun) if rows else {})
+                except Exception:
+                    pass
                 await asyncio.sleep(0.5)
             for k in [k for k, v in CGD.items() if v[0] != gun]:
                 del CGD[k]
+            for k in [k for k, v in KOS_GECMIS.items() if v[0] != gun]:
+                del KOS_GECMIS[k]
         except Exception as e:
             log.debug("Çok günlük direnç hatası: %s", e)
         await asyncio.sleep(120)
+
+
+# ----------------------------------------------------------------- 🧬 katalizör: haber türü · sıcak tema · eski koşucu · 1./2. gün
+KOS_GECMIS = {}   # sym -> (gün, {"eski": son 3 ayın en büyük günlük yükselişi %, "dun": dünkü %})
+
+_HABER_GUCLU = [(r"\bfda\b.*(approv|clear|grant|accept)|breakthrough (therapy|device)|approval", "FDA / onay"),
+                (r"acqui|merger|buyout|takeover|to be acquired|definitive agreement|tender offer", "satın alma / birleşme"),
+                (r"(nvidia|amazon|microsoft|google|alphabet|apple|meta|openai|tesla|spacex|pentagon|department of (defense|war)|\bdod\b|u\.s\. army|navy|nasa)", "dev şirketle anlaşma (küçük hisse için güçlü)"),
+                (r"contract award|awarded .*contract|purchase order|\$\d+(\.\d+)? ?(million|billion) (contract|order|deal)", "büyük sözleşme"),
+                (r"record revenue|beats|raises (full.year )?guidance|positive topline|met primary endpoint|statistically significant", "güçlü sonuç / bilanço")]
+_HABER_ORTA = [(r"partner|collaborat|agreement|launch|patent|order|expan|milestone|pilot|letter of intent|\bmou\b|strategic", "ortaklık / ürün")]
+_HABER_TUZAK = [(r"to present|conference|webinar|participate|fireside|investor day", "konferans haberi (zayıf)"),
+                (r"reverse (stock )?split|offering|priced|registered direct|warrant|at.the.market|private placement", "hisse satışı / bölünme"),
+                (r"deficiency|delist|non.?compliance|going concern", "borsa uyarısı")]
+_TEMA = {"yapay zeka": r"\bai\b|artificial intelligence|gpu|data cent|machine learning|llm|agentic",
+         "kuantum": r"quantum", "kripto": r"bitcoin|crypto|blockchain|ethereum|\btoken|solana|digital asset|treasury strategy",
+         "savunma / drone": r"defen[cs]e|drone|military|missile|army|counter.uas",
+         "nükleer / enerji": r"nuclear|uranium|\bsmr\b|reactor|fusion", "uzay": r"space|satellite|rocket|lunar|orbit",
+         "robot": r"robot|humanoid|autonomous", "biyotek": r"\bfda\b|phase [123]|clinical|trial|therap"}
+_TEMA_C = {"t": 0, "d": {}}
+
+
+def kos_gecmis(rows, gun):
+    R = [r for r in rows if r[0] < gun][-66:]
+    eski, dun = 0.0, None
+    for i in range(1, len(R) - 1):                         # dün hariç (dün "2. gün" olarak ayrı sayılır)
+        if R[i - 1][4]:
+            ch = (R[i][2] / R[i - 1][4] - 1) * 100            # gün içi tepe / önceki kapanış
+            eski = max(eski, ch)
+    if len(R) >= 2 and R[-2][4]:
+        dun = round((R[-1][4] / R[-2][4] - 1) * 100, 1)
+    return {"eski": round(eski), "dun": dun}
+
+
+def _haber(sym):
+    return ((scanner.runners.get(sym) or {}).get("news") or {})
+
+
+def haber_turu_tr(baslik):
+    h = (baslik or "").lower()
+    for L, p in ((_HABER_TUZAK, -10), (_HABER_GUCLU, 20), (_HABER_ORTA, 8)):
+        for rx, ad in L:
+            if re.search(rx, h):
+                return ad, p
+    return None, 0
+
+
+def tema_bul(baslik):
+    h = (baslik or "").lower()
+    return [t for t, rx in _TEMA.items() if re.search(rx, h)]
+
+
+def tema_sayac():
+    """Bugün +%20 ve üstü koşan hisselerin haber temaları (60 sn önbellek)."""
+    if time.time() - _TEMA_C["t"] < 60:
+        return _TEMA_C["d"]
+    d = {}
+    for sym, r_ in list(scanner.runners.items()):
+        if (r_.get("pct") or 0) >= 20:
+            for t in tema_bul(((r_.get("news") or {}).get("headline")) or ""):
+                d.setdefault(t, set()).add(sym)
+    _TEMA_C.update(t=time.time(), d=d)
+    return d
+
+
+def katalizor(sym):
+    """Hissenin hikâye puanı: haber türü, haber saati, sıcak tema, eski koşucu, 2. gün. {"puan", "et": [etiketler]}"""
+    puan, et = 0, []
+    n_ = _haber(sym)
+    hb = n_.get("headline") or ""
+    tur, p_ = haber_turu_tr(hb)
+    if tur:
+        puan += p_
+        et.append(("🧬 " if p_ > 0 else "⚠️ ") + tur)
+    ht = _haber_saat(n_) if n_ else None
+    if ht:
+        d = datetime.fromtimestamp(ht, ET)
+        bugun = datetime.now(ET).date()
+        if (d.date() == bugun and (d.hour < 9 or d.hour == 9 and d.minute < 30)) or (d.date() < bugun and d.hour >= 16 and (bugun - d.date()).days <= 3):
+            puan += 5
+            et.append("📰 taze haber (seans öncesi)")
+    tc = tema_sayac()
+    for t in tema_bul(hb):
+        n = len(tc.get(t) or ())
+        if n >= 3:
+            puan += 10
+            et.append(f"🔥 sıcak tema: {t} ({n} hisse koşuyor)")
+            break
+    g = (KOS_GECMIS.get(sym) or (None, {}))[1]
+    if (g.get("eski") or 0) >= 100:
+        puan += 8
+        et.append(f"🏃 eski koşucu (3 ayda bir gün +%{g['eski']})")
+    if (g.get("dun") or 0) >= 50:
+        puan -= 10
+        et.append(f"⚠️ 2. gün (dün {fy(g['dun'])}): ilk günden sonra düşüş riski")
+    return {"puan": puan, "et": et}
 
 
 def gunluk_trend(sym):
@@ -8231,6 +8333,18 @@ def _plan_html(p):
 OGLE_MAX = int(os.getenv("OGLE_MAX", "2"))      # ABD 11:00–14:00 (öğle) en fazla bu kadar KIRDI; günlük sınır sabaha kalsın
 
 
+PLAN_MAX_FIYAT = float(os.getenv("PLAN_MAX_FIYAT", "20"))   # bu fiyatın üstü ve ana listedeki büyük hisseler kanala KIRDI olarak gitmez
+
+
+def buyuk_kapi(sym, px):
+    """Büyük / pahalı hisse: veri 20$ üstü kırılımlarda +%5 oranını %20 gösteriyor; uygulamada ölçülür, kanala gitmez."""
+    if sym in SYMBOLS or sym in planmod.HARIC:
+        return "büyük hisse (ana liste / fon)"
+    if PLAN_MAX_FIYAT > 0 and px and px > PLAN_MAX_FIYAT:
+        return f"fiyat {fk(px)} > {fk(PLAN_MAX_FIYAT)} (büyük hisse)"
+    return ""
+
+
 def ogle_kapi():
     n_ = datetime.now(ET)
     m = n_.hour * 60 + n_.minute
@@ -8329,6 +8443,12 @@ def kirilim_html(p, retest=False):
     hik = ((scanner.runners.get(p["sym"]) or {}).get("sec") or {}).get("hikaye") or []
     if hik:
         out.append("📑 " + _h(hik[0]))
+    try:
+        _k = katalizor(p["sym"])
+        if _k["et"]:
+            out.append(_h(" · ".join(_k["et"][:3])))
+    except Exception:
+        pass
     if px and e_ and px > e_ * 1.02:
         out.append(f"⚠️ Fiyat {fk(px)}, girişten {fy(_yuzde(px, e_))} yukarıda · kovalama")
     return "\n".join(out)
@@ -8990,7 +9110,8 @@ ERKEN_MAX_FIYAT = float(os.getenv("ERKEN_MAX_FIYAT", "20"))
 
 def erken_ekle(sym, px, haberli, gun_pct):
     """Ani yükseliş anında kırılım beklemeden giriş: sadece uygulamada, ölçülür (kanala gitmez)."""
-    if not (planmod.MIN_FIYAT <= px <= ERKEN_MAX_FIYAT) or not (haberli or (gun_pct or 0) >= 20):
+    kat_ = katalizor(sym)
+    if not (planmod.MIN_FIYAT <= px <= ERKEN_MAX_FIYAT) or not (haberli or (gun_pct or 0) >= 20) or kat_["puan"] < 0:
         return
     E = backup.data.setdefault("erken", {"kayit": []})
     gun = _gun_et()
@@ -9265,6 +9386,9 @@ def gece_adaylari():
         if _rot and _rot >= 1:
             puan += 10
             neden.append(f"hacim float'un {_rot:g}x")
+        _k = katalizor(sym)
+        puan += _k["puan"]
+        neden += [e.split(" ", 1)[-1] for e in _k["et"]]
         hik = (r_.get("sec") or {}).get("hikaye") or []
         if any("424B" in h or "raf kaydı" in h for h in hik):
             puan -= 15                                    # yakın zamanda izahname / raf kaydı: sabah satış baskısı
@@ -10380,7 +10504,8 @@ def takip_metni():
             sat.append(f"{'🔥' if h else '⏳'} <b>#{_h(sym)}</b> {fk(p['giris'])} kırarsa · %{str(round(uz, 1)).replace('.', ',')} kaldı"
                        + (" · <b>hacim artıyor</b>" if h else "") + (" · 🔔 açılış" if p.get("acilis") else "")
                        + (f" · 🔄 {str(_rot).replace('.', ',')}x" if _rot and _rot >= 1 else "")
-                       + (" · 🩳" if _sh and _sh >= 15 and _f and _f <= 20e6 else ""))
+                       + (" · 🩳" if _sh and _sh >= 15 and _f and _f <= 20e6 else "")
+                       + (" · 🧬" if katalizor(sym)["puan"] >= 20 else ""))
     elif ses != "closed":
         sat.append("<i>Şu an kırılıma yakın hisse yok · bot tarıyor</i>")
     if ses in ("pre", "regular") and KESIF_N > 0:
@@ -10665,7 +10790,8 @@ def plan_olaylari():
                           or (f"bu hisseye bugün {PLAN_TG_HISSE} kırılım gitti" if hs_[0] >= PLAN_TG_HISSE else "")
                           or (f"spread %{spread_yuzde(sym)}" if (spread_yuzde(sym) or 0) > _spr_max(p) else "")
                           or akis_kapi(sym)
-                          or ogle_kapi())
+                          or ogle_kapi()
+                          or buyuk_kapi(sym, ana_.get("e") or ana_.get("giris")))
                 if neden_:
                     PLAN_TG_RED[sym] = (time.time(), f"{fp_(p['giris'])} kırılımı kanala gitmedi: {neden_}")
                 else:
