@@ -38,7 +38,7 @@ def sabit_stop_hedef(p, ref):
 
 
 AGIRLIK = {"taban": 2.0, "kaybedilen": 2.0, "pmh": 1.5, "pdh": float(os.getenv("PDH_PUAN", "2.0")),
-           "cgd": float(os.getenv("CGD_PUAN", "2.0")), "acilis": 3.0, "hod": 1.0, "yuvarlak": 0.5, "kanal": 3.0, "liste": 2.5,
+           "cgd": float(os.getenv("CGD_PUAN", "2.0")), "acilis": 3.0, "hod": float(os.getenv("HOD_PUAN", "0.5")), "yuvarlak": 0.5, "kanal": 3.0, "liste": 2.5,
            "direnç": 1.5, "tam sayı": 1.0, "pgh": 1.5}
 TUR_AD = {"taban": "sabahki / gün içi tabanın tavanı", "kaybedilen": "kaybedilen seviye (geri alma)",
           "pmh": "piyasa öncesi tepesi", "pdh": "dünkü tepe", "hod": "gün tepesi", "yuvarlak": "yuvarlak sayı",
