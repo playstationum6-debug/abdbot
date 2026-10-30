@@ -2289,7 +2289,7 @@ def feed_add(k, sym, txt, sub="", tone="", t=None, url="", key=None, extra=None)
     if s0 and k in ("sinyal", "plan"):
         kk = (k, s0)
         tekrar = time.time() - _TG_SON.get(kk, 0) < (600 if k == "sinyal" else 900)
-    if k == "sinyal" and (ex.get("golge") or sustur_mu(s0) or ex.get("tg_kalite")):
+    if k == "sinyal" and (ex.get("golge") or sustur_mu(s0) or ex.get("tg_kalite") or KANAL_MOD == "onay"):
         pass                                     # kurgu gölgede / kapalı / kalite süzgeci: sinyal sadece sitede, Telegram'a gitmez
     elif k == "sinyal" and ex.get("super") and PUSH_PREF.get("tg_super", 1) and tg.ok:
         _TG_SON[("sinyal", s0)] = time.time()
@@ -2602,6 +2602,8 @@ async def oto_loop():
 
 def tg_kalite(sig):
     """None: Telegram'a gidebilir. Değilse nedeni (sinyal sitede kalır, sicile girmez)."""
+    if sig.get("sym") in planmod.HARIC:
+        return "kaldıraçlı fon / ETF"
     sn_ = secici_neden(sig)
     if sn_:
         return sn_
@@ -4427,7 +4429,7 @@ async def rapor_loop():
             t_, s_ = gun_sonu_raporu()
             try:
                 gh, gch = gunsonu_tg()
-                gex = {"tg_html": gh + f"\n<i>{_h(s_)}</i>", "chart": gch}
+                gex = {"tg_html": gh + f"\n<i>{_h(s_)}</i>", "chart": gch, "tg_skip": 1 if KANAL_MOD == "onay" else 0}
             except Exception as e:
                 log.warning("Gün sonu kartı hatası: %s", e)
                 gex = None
@@ -4455,7 +4457,7 @@ async def rapor_loop():
                     tg.send("🧠 <b>Yapay zekâ · gün sonu dersi</b>\n" + _h(ders[:2500]), quiet=True, konu="rapor")
             except Exception as e:
                 log.warning("Yapay zekâ dersi hatası: %s", e)
-            if datetime.now(ET).weekday() == 4 and tg.ok and PUSH_PREF["tg_rapor"]:   # cuma: haftalık rapor
+            if datetime.now(ET).weekday() == 4 and tg.ok and PUSH_PREF["tg_rapor"] and KANAL_MOD != "onay":   # cuma: haftalık rapor (onay modunda hafta_ozet_gonder gider)
                 try:
                     haftalik_gonder()
                 except Exception as e:
@@ -6857,10 +6859,12 @@ async def tg_komut(text, chat, thread=None):
     elif cmd in ("hafta", "haftalik", "haftalık", "ozet", "özet"):
         if not hafta_ozet_gonder(chat=chat):
             send("📅 Bu hafta henüz sonuçlanmış kırılım yok.")
+    elif cmd in ("kacan", "kaçan", "kacanlar"):
+        send(kacan_dedektif() or "🕵️ Bugün dinlenen kanallardan hisse gelmedi.")
     elif cmd in ("gece", "after"):
         A = gece_adaylari()
         if not A:
-            send("🌙 Şu an seans sonrası aday yok (bu komut ABD seans sonrasında, 23:00–03:00 TR arası çalışır).")
+            send(f"🌙 Şu an seans sonrası aday yok (bu komut ABD seans sonrasında, {et_tr(16)}–{et_tr(20)} TR arası çalışır).")
         else:
             send("🌙 <b>Gece adayları</b> (kanala ≥" + str(GECE_ESIK) + " puan gider)\n" + "\n".join(
                 f"{'✅' if a['puan'] >= GECE_ESIK else '·'} #{_h(a['sym'])} {fk(a['px'])} {fy(a['pct'])} · puan {a['puan']} · {_h(', '.join(a['neden']))}"
@@ -7760,7 +7764,7 @@ def gunsonu_tg():
 def sabah_tg():
     """🌅 Sabah brifingi: seans saati, izlenecekler, önemli veri, bilanço, piyasa havası."""
     pl = cal.plan() or {}
-    out = [f"🌅 <b>Günaydın · Seans {_h(pl.get('open') or '16:30')}'da</b>"]
+    out = [f"🌅 <b>Günaydın · Seans {_h(pl.get('open') or et_tr(9, 30))}'da</b>"]
     izle = [x["s"] for x in (MARKET.get("gain") or [])[:3]] + [r for r, i in scanner.runners.items() if i.get("news")][:3]
     izle = list(dict.fromkeys(izle))[:5]
     if izle:
@@ -8210,6 +8214,9 @@ def kirilim_html(p, retest=False):
     out = [bas, f"🔴 Stop <b>{fk(p['stop'])}</b>   🟢 Hedef {' · '.join(fk(x) for x in h)}"]
     if p.get("acilis"):
         out.append("🔔 Açılış hamlesi")
+    hik = ((scanner.runners.get(p["sym"]) or {}).get("sec") or {}).get("hikaye") or []
+    if hik:
+        out.append("📑 " + _h(hik[0]))
     if px and e_ and px > e_ * 1.02:
         out.append(f"⚠️ Fiyat {fk(px)}, girişten {fy(_yuzde(px, e_))} yukarıda · kovalama")
     return "\n".join(out)
@@ -8278,6 +8285,72 @@ def _plan_html_eski(p):
 # ----------------------------------------------------------------- kanal ekleri: karne · radar · ders · hacim profili · alarm · float
 def _gun_et():
     return str(datetime.now(ET).date())
+
+
+def et_tr(h, m=0, gun=None):
+    """ABD (ET) saatini Türkiye saatine çevirir: yaz/kış saati farkı otomatik. 'HH:MM'"""
+    g = gun or datetime.now(ET).date()
+    return datetime(g.year, g.month, g.day, h, m, tzinfo=ET).astimezone(TR).strftime("%H:%M")
+
+
+_GUN_AD = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+
+
+def duyuru_kontrol():
+    """📢 Otomatik bilgilendirme: yaz/kış saati değişimi (3 gün önce) · tatil ve erken kapanış (bir gün önce)."""
+    if not tg.ok:
+        return
+    tr_ = datetime.now(TR)
+    if not (11 <= tr_.hour < 22):
+        return
+    D = KK["gon"].setdefault("duyuru", {})
+    if not isinstance(D, dict):
+        D = KK["gon"]["duyuru"] = {}
+    bugun = datetime.now(ET).date()
+    off0 = datetime(bugun.year, bugun.month, bugun.day, 12, tzinfo=ET).utcoffset()
+    for i in range(1, 4):                                   # 1) saat değişimi
+        d = bugun + timedelta(days=i)
+        off = datetime(d.year, d.month, d.day, 12, tzinfo=ET).utcoffset()
+        if off == off0:
+            continue
+        key = f"saat:{d}"
+        if key not in D:
+            g = d
+            while g.weekday() >= 5:
+                g += timedelta(days=1)
+            kis = off < off0
+            html = (f"📢 <b>BİLGİLENDİRME · ABD {'kış' if kis else 'yaz'} saati</b>\n"
+                    f"{d.day} {_AY[d.month - 1]} itibarıyla ABD'de {'kış' if kis else 'yaz'} saatine geçiliyor. "
+                    f"ABD borsalarının Türkiye saatine göre işlem saatleri <b>1 saat {'ileri' if kis else 'geri'}</b> kayıyor.\n\n"
+                    f"📌 <b>{g.day} {_AY[g.month - 1]} {_GUN_AD[g.weekday()]}</b> itibarıyla:\n"
+                    f"• Piyasa öncesi: {et_tr(4, 0, g)} – {et_tr(9, 30, g)}\n"
+                    f"• Normal seans: {et_tr(9, 30, g)} – {et_tr(16, 0, g)}\n"
+                    f"• Seans sonrası: {et_tr(16, 0, g)} – {et_tr(20, 0, g)}\n"
+                    f"<i>Bot saatleri kendiliğinden ayarlar</i>")
+            tg.send(html, None, key="duyuru:" + key, konu="rapor", quiet=True)
+            D[key] = 1
+            kk_kaydet()
+        break
+    if getattr(cal, "source", "") != "alpaca" or not (19 <= tr_.hour < 22):
+        return
+    y = tr_.date() + timedelta(days=1)                      # 2) yarın (ilk hafta içi günü) tatil / erken kapanış
+    while y.weekday() >= 5:
+        y += timedelta(days=1)
+    if y not in cal.days and y <= max(cal.days, default=y):
+        key, msg = f"tatil:{y}", (f"📢 <b>BİLGİLENDİRME</b>\n{y.day} {_AY[y.month - 1]} {_GUN_AD[y.weekday()]} "
+                                  f"ABD borsaları <b>tatil nedeniyle kapalı</b>. Piyasa öncesi ve sonrası seans da yok.")
+    elif y in cal.days and cal.days[y]["close"] < dtime(16, 0):
+        c_ = cal.days[y]["close"]
+        key, msg = f"erken:{y}", (f"📢 <b>BİLGİLENDİRME</b>\n{y.day} {_AY[y.month - 1]} {_GUN_AD[y.weekday()]} ABD borsaları "
+                                  f"<b>erken kapanıyor</b>: normal seans TR {et_tr(c_.hour, c_.minute, y)}'de biter.")
+    else:
+        return
+    if key not in D:
+        tg.send(msg, None, key="duyuru:" + key, konu="rapor", quiet=True)
+        D[key] = 1
+        for k_ in sorted(D)[:-30]:
+            D.pop(k_, None)
+        kk_kaydet()
 
 
 def kk_kaydet():
@@ -8767,6 +8840,120 @@ def _fy0(x):
     return "—" if x is None else fy(x)
 
 
+# ----------------------------------------------------------------- ⚡ erken giriş ölçümü · 🕵️ kaçan hisse dedektifi
+ERKEN_MAX_FIYAT = float(os.getenv("ERKEN_MAX_FIYAT", "20"))
+
+
+def erken_ekle(sym, px, haberli, gun_pct):
+    """Ani yükseliş anında kırılım beklemeden giriş: sadece uygulamada, ölçülür (kanala gitmez)."""
+    if not (planmod.MIN_FIYAT <= px <= ERKEN_MAX_FIYAT) or not (haberli or (gun_pct or 0) >= 20):
+        return
+    E = backup.data.setdefault("erken", {"kayit": []})
+    gun = _gun_et()
+    if any(r["sym"] == sym and r["gun"] == gun for r in E["kayit"]):
+        return
+    r = {"sym": sym, "gun": gun, "t": int(time.time()), "giris": round(px, 4), "stop": round(px * 0.9, 4),
+         "hed": [round(px * (1 + h), 4) for h in planmod.HEDEF_PCT], "tepe": px, "dip": px, "st": "açık", "k": 0}
+    E["kayit"].append(r)
+    del E["kayit"][:-400]
+    backup.dirty = True
+    feed_add("plan", sym, f"⚡ ERKEN · {fk(px)} (ölçüm, kanala gitmez)",
+             sub=f"stop {fk(r['stop'])}   K1 {fk(r['hed'][0])}   K2 {fk(r['hed'][1])}   K3 {fk(r['hed'][2])}",
+             tone="bilgi", extra={"tg_skip_plan": 1, "tg_skip": 1})
+
+
+def erken_izle():
+    """Açık erken girişleri canlı fiyatla izler: önce stop mu, hedef mi."""
+    E = backup.data.get("erken") or {}
+    gun = _gun_et()
+    for r in E.get("kayit") or []:
+        if r["st"] != "açık":
+            continue
+        if r["gun"] != gun:
+            r["st"] = f"K{r['k']}" if r["k"] else "süre"
+            backup.dirty = True
+            continue
+        px = fiyat(r["sym"])
+        if not px:
+            continue
+        r["tepe"], r["dip"] = max(r["tepe"], px), min(r["dip"], px)
+        k = sum(1 for h in r["hed"] if r["tepe"] >= h)
+        if k != r["k"]:
+            r["k"] = k
+            backup.dirty = True
+        if px <= r["stop"]:
+            r["st"] = "stop"
+            backup.dirty = True
+        elif k >= 3:
+            r["st"] = "K3"
+            backup.dirty = True
+
+
+def erken_karne(gun_say=10):
+    E = [r for r in (backup.data.get("erken") or {}).get("kayit") or [] if r["st"] != "açık"]
+    cut = str(datetime.now(ET).date() - timedelta(days=gun_say))
+    E = [r for r in E if r["gun"] >= cut]
+    if not E:
+        return None
+    k1 = sum(1 for r in E if r["k"] >= 1)
+    st = sum(1 for r in E if r["st"] == "stop" and not r["k"])
+    return {"n": len(E), "k1": k1, "stop": st, "wr": round(100 * k1 / len(E))}
+
+
+def kacan_dedektif():
+    """Dinlenen kanalların bugün paylaştığı ama bizim kanala KIRDI vermediğimiz hisseler ve nedenleri (sadece uygulamada)."""
+    gun = _gun_et()
+    t0 = datetime.fromisoformat(gun).replace(hour=4, tzinfo=ET).timestamp()
+    bizim = {r["sym"] for r in KK["kayit"] if r["gun"] == gun and _gorunur(r) and r.get("kt")}
+    bizim |= {r["sym"] for r in KK["gece"] if r.get("gitti") and (time.time() - r["t"]) < 30 * 3600}
+    kanal = {}
+    for i in (dis.st or {}).get("items") or []:
+        if (i.get("t") or 0) >= t0 and i.get("sym") and i.get("dir", 1) > 0:
+            kanal.setdefault(i["sym"], set()).add(i.get("kanal") or "?")
+    kac = [s_ for s_ in kanal if s_ not in bizim]
+    if not kanal:
+        return None
+    sat, kat = [], {}
+    for s_ in kac:
+        ps = [p for p in PLAN.gecmis if p["sym"] == s_ and p.get("gun") == gun]
+        if PLAN.planlar.get(s_):
+            n_ = f"plan hâlâ bekliyor ({fk(PLAN.planlar[s_]['giris'])})"
+        elif any(p.get("st") == "onaylı" for p in ps):
+            n_ = "kırıldı ama kanala gitmedi: " + ((PLAN_TG_RED.get(s_) or (0, "sınır"))[1].split(": ", 1)[-1])
+        elif ps:
+            n_ = "plan kuruldu ama " + (ps[-1].get("neden") or ps[-1].get("st") or "")
+        elif s_ in PLAN.neden:
+            n_ = "plan kurulmadı: " + PLAN.neden[s_][1]
+        elif s_ in scanner.runners:
+            n_ = "listede ama seviye çıkmadı"
+        elif s_ in getattr(scanner, "red", {}):
+            n_ = "listeye alınmadı: " + scanner.red[s_]["n"]
+        else:
+            n_ = "hiç görmedi (tarama listesine girmedi)"
+        k_ = re.sub(r"[-+]?\d+([.,]\d+)?", "#", n_).split(" (")[0][:45]
+        kat.setdefault(k_, []).append(s_)
+        sat.append(f"• #{_h(s_)} ({', '.join(sorted(kanal[s_]))[:40]}) · {_h(n_[:110])}")
+    A = backup.data.setdefault("kacan", {})
+    A[gun] = {k_: len(v) for k_, v in kat.items()}
+    for g_ in sorted(A)[:-10]:
+        A.pop(g_, None)
+    backup.dirty = True
+    out = [f"🕵️ <b>Kaçan hisse dedektifi</b> · kanallar {len(kanal)} hisse paylaştı, biz {len(kanal) - len(kac)} tanesini verdik"]
+    out += sat[:15] or ["• Kaçan yok 🎉"]
+    tekrar = {}
+    for g_ in sorted(A)[-5:]:
+        for k_, n in A[g_].items():
+            tekrar[k_] = tekrar.get(k_, 0) + n
+    oner = [(n, k_) for k_, n in tekrar.items() if n >= 3]
+    if oner:
+        out.append("\n💡 <b>Son 5 günde tekrar eden kör nokta</b>")
+        out += [f"• {_h(k_)} · {n} hisse" for n, k_ in sorted(oner, reverse=True)[:3]]
+    ek = erken_karne()
+    if ek:
+        out.append(f"\n⚡ Erken giriş ölçümü (10 gün): {ek['n']} hisse · K1+ (+%5) <b>%{ek['wr']}</b> · stop {ek['stop']}")
+    return "\n".join(out)
+
+
 def hafta_ozet_gonder(chat=None):
     """Haftalık özet: her kırılım tek satır (giriş → K1 → K2 → K3 | zirve), sonra toplu özet. Tutmayanlar da sayılır."""
     bugun = datetime.now(ET).date()
@@ -8880,7 +9067,7 @@ def gece_adaylari():
         elif not (planmod.MIN_FIYAT <= px <= GECE_MAX_FIYAT) or sym in planmod.HARIC or sym in SYMBOLS:
             red = "fiyat aralığı dışı / büyük hisse"
         elif GECE_24S["s"].get(sym):
-            red = "gece seansında işlem görüyor: sabah 11:00 açılış hamlesi olmaz"
+            red = f"gece seansında işlem görüyor: sabah {_sabah_tr()} açılış hamlesi olmaz"
         elif px * vol < GECE_MIN_DV:
             red = "seans sonrası hacim düşük"
         elif sec in ("seyreltme", "dikkat"):
@@ -8897,7 +9084,7 @@ def gece_adaylari():
         elif n_:
             puan += 12
         if GECE_24S["s"].get(sym) is False:
-            neden.append("gece kapalı: 11:00'de açılıyor")
+            neden.append(f"gece kapalı: {_sabah_tr()}'de açılıyor")
         if ht and ht >= t16 - 1800:
             puan += 12
             neden.append("haber kapanıştan sonra")
@@ -8930,7 +9117,10 @@ def gece_adaylari():
         spr = spread_yuzde(sym)
         if spr is not None:
             puan += 5 if spr <= 1 else -10 if spr > 3 else 0
-        out.append({"sym": sym, "pct": round(pct, 1), "px": son, "puan": puan, "neden": neden, "spr": spr,
+        hik = (r_.get("sec") or {}).get("hikaye") or []
+        if any("424B" in h or "raf kaydı" in h for h in hik):
+            puan -= 15                                    # yakın zamanda izahname / raf kaydı: sabah satış baskısı
+        out.append({"sym": sym, "pct": round(pct, 1), "px": son, "puan": puan, "neden": neden, "spr": spr, "hikaye": hik,
                     "s24": GECE_24S["s"].get(sym),
                     "haber": tr_or(n_.get("headline")) if n_ else "", "sec": sec})
     out.sort(key=lambda x: -x["puan"])
@@ -8958,10 +9148,14 @@ def gece_gonder(zorla=False, chat=None):
         rec = dict(a, gun=gun, t=int(time.time()), giris=a["px"], gitti=a in secilen, mid=None)
         KK["gece"].append(rec)
         if a in secilen and tg.ok:
+            g_ = a["px"]
             html = (f"🌙 <b>GECE HİSSESİ · #{_h(a['sym'])}</b>\n"
-                    f"Alış <b>{fk(a['px'])}</b> civarı · seans sonrası <b>{fy(a['pct'])}</b>\n"
+                    f"Alış <b>{fk(g_)}</b> civarı · seans sonrası <b>{fy(a['pct'])}</b>\n"
+                    f"🟢 Hedef <b>{fk(g_ * (1 + GECE_HEDEF / 100))}</b> (+%{GECE_HEDEF:g}) · {fk(g_ * (1 + 2 * GECE_HEDEF / 100))} (+%{2 * GECE_HEDEF:g})\n"
+                    f"🔴 Stop <b>{fk(g_ * 0.9)}</b> (−%10)\n"
                     + (f"📰 {_h(a['haber'][:90])}\n" if a.get("haber") else "")
-                    + f"🌅 Sabah {sabah}'da piyasa öncesi açılışta satış\n"
+                    + "".join(f"📑 {_h(h)}\n" for h in (a.get("hikaye") or [])[:2])
+                    + f"🌅 Gece seansı yok · sabah {sabah}'da piyasa öncesi açılışla hareket\n"
                     f"<i>⚠️ Gece taşıma riski: sabah aşağı da açılabilir</i>")
             rec["key"] = f"gece:{gun}:{a['sym']}"
             tg.send(html, None, key=rec["key"], sym=a["sym"], chat=chat, konu="plan", quiet=False)
@@ -8994,12 +9188,23 @@ async def gece_degerlendir():
             continue
         g = r["giris"]
         ac, hi, kp = P[0][1], max(b[2] for b in P), P[-1][4]
+        ilk = None                                         # hedef mi stop mu önce geldi (mum sırasıyla)
+        for b in P:
+            if b[3] <= g * 0.9:
+                ilk = "stop"
+                break
+            if b[2] >= g * (1 + GECE_HEDEF / 100):
+                ilk = "hedef"
+                break
         r.update(acilis=round((ac / g - 1) * 100, 1), en_yuksek=round((hi / g - 1) * 100, 1), kapanis=round((kp / g - 1) * 100, 1),
-                 sonuc="tuttu" if hi >= g * (1 + GECE_HEDEF / 100) else "tutmadı")
+                 sonuc="tuttu" if ilk == "hedef" else "tutmadı", ilk=ilk)
         deg = True
         if r.get("gitti") and tg.ok:
-            tg.send(f"🌅 <b>#{_h(r['sym'])}</b> sabah: açılış <b>{fy(r['acilis'])}</b> · en yüksek <b>{fy(r['en_yuksek'])}</b> "
-                    + ("✅" if r["sonuc"] == "tuttu" else "❌"), None, sym=r["sym"], reply=r.get("key"), konu="plan", quiet=True)
+            iki = hi >= g * (1 + 2 * GECE_HEDEF / 100)
+            ds_ = ("🎯 +%{:g} hedef ✅".format(2 * GECE_HEDEF if iki else GECE_HEDEF) if ilk == "hedef"
+                   else "🔴 stop (−%10) ❌" if ilk == "stop" else "hedefe ulaşmadı ❌")
+            tg.send(f"🌅 <b>#{_h(r['sym'])}</b> sabah: açılış <b>{fy(r['acilis'])}</b> · en yüksek <b>{fy(r['en_yuksek'])}</b> · {ds_}",
+                    None, sym=r["sym"], reply=r.get("key"), konu="plan", quiet=True)
     if deg:
         kk_kaydet()
 
@@ -9372,6 +9577,10 @@ async def ani_alarm(c, sym, a, gun_pct=None):
         log.debug("Ani yükseliş listeye eklenemedi %s: %s", sym, e)
     if sym not in PLAN.planlar:
         PLAN.liste_ekle(sym, lvl, neden="ani yükseliş")
+    try:
+        erken_ekle(sym, a["px"], bool(((scanner.runners.get(sym) or {}).get("news") or {}).get("headline")), gun_pct)
+    except Exception as e:
+        log.debug("Erken giriş kaydı %s: %s", sym, e)
     kat = (f" · hacim {a['kat']:.0f}x" if a["kat"] < 50 else " · hacim 50x+") if a.get("kat") else f" · {a['dv'] / 1e3:.0f}K$ işlem"
     n_ = ((scanner.runners.get(sym) or {}).get("news") or {}).get("headline")
     html = (f"🚀 <b>#{_h(sym)} ani yükseliş</b> · {a['dk']} dk'da +%{str(a['pct']).replace('.', ',')}{kat}\n"
@@ -10142,6 +10351,14 @@ async def kanal_loop():
         except Exception as e:
             log.warning("Sabitleme hatası: %s", e)
         try:
+            duyuru_kontrol()
+        except Exception as e:
+            log.warning("Duyuru hatası: %s", e)
+        try:
+            erken_izle()
+        except Exception as e:
+            log.warning("Erken giriş izleme hatası: %s", e)
+        try:
             if not tg.ok or not PUSH_PREF.get("tg_plan", 1):
                 continue
             n = datetime.now(ET)
@@ -10169,6 +10386,13 @@ async def kanal_loop():
                 G["karne"] = gun
                 kk_kaydet()
                 karne_gonder()
+            if 980 <= hm < 1010 and G.get("kacan") != gun:
+                G["kacan"] = gun
+                kk_kaydet()
+                k_ = kacan_dedektif()
+                if k_:
+                    feed_add("rapor", "", "🕵️ Kaçan hisse dedektifi", sub=re.sub(r"<[^>]+>", "", k_)[:1500],
+                             tone="bilgi", extra={"tg_skip": 1, "tg_html": k_})
             if n.weekday() == 4 and 995 <= hm < 1025 and G.get("ozet") != gun:
                 G["ozet"] = gun
                 kk_kaydet()

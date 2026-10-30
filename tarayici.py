@@ -314,23 +314,32 @@ class Scanner:
                         self.news_pending.pop(sym, None)
         return added
 
-    async def tv_movers(self, c, ses, desc=True, n=60):
+    async def tv_movers(self, c, ses, desc=True, n=100):
         """TradingView tarayıcısı: bütün ABD piyasasında öncesi/sonrası seansın en çok yükselen (desc) ya da
         düşen hisseleri. Dönüş Alpaca movers biçiminde: [{symbol, percent_change, price, volume}]"""
         k = "premarket" if ses == "pre" else "postmarket"
+        if ses == "regular":                      # normal seans: günlük değişim (Alpaca ilk 50'nin dışını da görmek için)
+            cols = ["name", "change", "close", "volume", "exchange", "type", "close"]
+            flt = [{"left": "close", "operation": "greater", "right": 0},
+                   {"left": "volume", "operation": "greater", "right": TV_LIST_VOL * 50},
+                   {"left": "change", "operation": "greater" if desc else "less", "right": 0}]
+            srt = "change"
+        else:
+            cols = ["name", f"{k}_change", f"{k}_close", f"{k}_volume", "exchange", "type", "close"]
+            flt = [{"left": f"{k}_close", "operation": "greater", "right": 0},
+                   {"left": f"{k}_volume", "operation": "greater", "right": TV_LIST_VOL},
+                   {"left": f"{k}_change", "operation": "greater" if desc else "less", "right": 0}]
+            srt = f"{k}_change"
         body = {
             "markets": ["america"],
             "symbols": {"query": {"types": []}, "tickers": []},
             "options": {"lang": "en"},
-            "columns": ["name", f"{k}_change", f"{k}_close", f"{k}_volume", "exchange", "type", "close"],
+            "columns": cols,
             "filter": [
                 {"left": "type", "operation": "in_range", "right": ["stock", "dr"]},
                 {"left": "exchange", "operation": "in_range", "right": ["NASDAQ", "NYSE", "AMEX"]},
-                {"left": f"{k}_close", "operation": "greater", "right": 0},
-                {"left": f"{k}_volume", "operation": "greater", "right": TV_LIST_VOL},
-                {"left": f"{k}_change", "operation": "greater" if desc else "less", "right": 0},
-            ],
-            "sort": {"sortBy": f"{k}_change", "sortOrder": "desc" if desc else "asc"},
+            ] + flt,
+            "sort": {"sortBy": srt, "sortOrder": "desc" if desc else "asc"},
             "range": [0, n],
         }
         r = await c.post(TV_URL, json=body, headers={
@@ -438,6 +447,16 @@ class Scanner:
                 mv.raise_for_status()
                 mj = mv.json()
                 gainers = mj.get("gainers") or []
+                if ses == "regular" and time.time() - getattr(self, "_tvg_t", 0) > 60:
+                    # Alpaca sadece ilk 50'yi verir: TradingView gün içi en çok yükselen 100 hisse eklenir (EDBL, CLDI gibi)
+                    self._tvg_t = time.time()
+                    try:
+                        self._tvg = await self.tv_movers(c, "regular", True, 100)
+                    except Exception:
+                        self._tvg = []
+                if ses == "regular" and getattr(self, "_tvg", None):
+                    gor_ = {g.get("symbol") for g in gainers}
+                    gainers = gainers + [g for g in self._tvg if g["symbol"] not in gor_]
                 # Keşfet sayfası: bütün piyasanın en çok yükselen / düşen / en yüksek hacimli hisseleri
                 if ses not in ("pre", "post") or self.gain_src == "alpaca":
                     self.gainers = [g for g in gainers if SYM_RE.match(g.get("symbol", "")) and is_common(g.get("symbol", ""))][:30]
@@ -586,23 +605,36 @@ class Scanner:
         dates = rec.get("filingDate") or []
         items = rec.get("items") or [""] * len(forms)
         today = datetime.now(timezone.utc).date()
-        shelf = None
-        for i, f in enumerate(forms[:60]):
+        shelf, sonuc, hik = None, None, []
+        for i, f in enumerate(forms[:120]):
             try:
                 age = (today - datetime.strptime(dates[i], "%Y-%m-%d").date()).days
             except Exception:
                 continue
-            if age > 30:
+            if age > 90:
                 break
             it = items[i] if i < len(items) else ""
+            g_ = dates[i][8:10] + "." + dates[i][5:7]
+            if f == "8-K" and "3.01" in (it or "") and not any("Nasdaq" in h for h in hik):
+                hik.append(f"Nasdaq/borsa uyarısı ({g_}) · 1$ altı kalırsa listeden çıkma riski")
+            if age <= 30 and f == "8-K" and "5.03" in (it or "") and not any("bölünme" in h for h in hik):
+                hik.append(f"esas sözleşme değişikliği ({g_}) · ters bölünme olabilir")
+            if age <= 30 and f.startswith("424B") and not any("424B" in h for h in hik):
+                hik.append(f"424B izahname ({g_}) · hisse/warrant satışı")
+            if age > 30 or sonuc:
+                continue
             if age <= 3 and (f in SEC_DILUTE or (f in ("8-K", "6-K") and "3.02" in (it or ""))):
                 why = "hisse ihracı / izahname" if f in SEC_DILUTE else "kayıtsız hisse satışı (8-K 3.02)"
-                return {"kind": "seyreltme", "form": f, "date": dates[i],
-                        "msg": f"SEC: {dates[i]} tarihli {f} — {why}. Alış yapılmaz."}
+                sonuc = {"kind": "seyreltme", "form": f, "date": dates[i],
+                         "msg": f"SEC: {dates[i]} tarihli {f} — {why}. Alış yapılmaz."}
+                continue
             if f in SEC_SHELF and shelf is None:
                 shelf = {"kind": "dikkat", "form": f, "date": dates[i],
                          "msg": f"SEC: {dates[i]} tarihli {f} raf kaydı — şirket her an hisse satabilir"}
-        return shelf or {"kind": "temiz", "msg": "SEC: son 30 günde seyreltme bildirimi yok"}
+                hik.append(f"raf kaydı {f} ({g_}) · şirket hisse satabilir")
+        out = sonuc or shelf or {"kind": "temiz", "msg": "SEC: son 30 günde seyreltme bildirimi yok"}
+        out["hikaye"] = hik[:3]          # 📑 kısa hikaye: borsa uyarısı, ters bölünme, izahname, raf kaydı
+        return out
 
     async def model_bul(self, c=None):
         """Model kaldırılmış / adı değişmişse (404): hesabın kullanabildiği en yeni 'flash' modelini otomatik seç."""
