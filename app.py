@@ -11013,12 +11013,20 @@ def plan_takip():
         # kırılım bozuldu: onaydan sonra fiyat seviyenin %1 altına döndü
         if px < lvl * 0.99:
             p["bozuldu"] = int(time.time())
-            pos_ = next((q for q in bot.positions if q.get("sig") == p.get("sig") and q["st"] in botmod.OPEN_ST), None)
-            gonder(f"⚠️ <b>KIRILIM BOZULDU · #{_h(p['sym'])}</b>\n"
-                   f"Fiyat <code>{fk(px)}</code> ile kırılım seviyesi <code>{fk(lvl)}</code> altına döndü"
-                   f" (kırılımdan sonraki tepe {fy(tepe_pct)}).\n"
-                   + (f"<i>Bot içeride: stop <code>{fk(pos_['stop'])}</code></i>" if pos_ else "<i>Seviye geri alınmadan yeni giriş yok.</i>"),
-                   "bozuldu")
+            r_ = next((r for r in reversed(KK["kayit"][-150:]) if r["id"] == p["id"]
+                       or r["sym"] == p["sym"] and r["gun"] == gun_ and r.get("kt") and abs((r.get("giris") or 0) / lvl - 1) <= 0.03), None)
+            if r_ is not None:
+                # tepe karnedeki kalıcı kayıttan (yeniden başlamada sıfırlanmasın)
+                tepe_pct = max(tepe_pct, _tepe_pct(r_) or -99)
+                if r_.get("bozuldu_tg") or (r_.get("k") or 0) >= 1:
+                    continue                          # K1+ gelmiş ya da zaten bildirilmiş: mesaj yok (hedefler alındı)
+                r_["bozuldu_tg"] = 1
+                kk_kaydet()
+            if time.time() - (p.get("ot") or p.get("t") or 0) > 45 * 60:
+                continue                              # kırılımın üstünden 45 dk geçti: geç uyarı anlamsız
+            gonder(f"⚠️ <b>KIRILIM ZAYIFLADI · #{_h(p['sym'])}</b>\n"
+                   f"Fiyat <code>{fk(px)}</code> kırılım seviyesi <code>{fk(lvl)}</code> altına döndü, K1 gelmedi.\n"
+                   f"🔴 Stop <code>{fk(p['stop'])}</code> geçerli · seviye geri alınmadan yeni giriş yok.", "bozuldu")
             continue
         # ilerleme: seviyeden +%10, +%20 … (her eşik bir kez)
         es = []          # ilerleme mesajları artık karne kayıtlarından (ilerleme_kontrol): yeniden başlamada da sürer
