@@ -8345,6 +8345,16 @@ def buyuk_kapi(sym, px):
     return ""
 
 
+PLAN_TG_POST = int(os.getenv("PLAN_TG_POST", "3"))   # seans sonrasına ayrı KIRDI hakkı (gündüz sınırından bağımsız)
+
+
+def post_say():
+    """Bugün seans sonrasında (16:00 ET sonrası) kanala giden kırılımlar."""
+    gun = _gun_et()
+    t16 = datetime.now(ET).replace(hour=16, minute=0, second=0, microsecond=0).timestamp()
+    return sum(1 for r in KK["kayit"] if r["gun"] == gun and _gorunur(r) and (r.get("kt") or 0) >= t16)
+
+
 def ogle_kapi():
     n_ = datetime.now(ET)
     m = n_.hour * 60 + n_.minute
@@ -9770,7 +9780,10 @@ async def saglik_loop():
 ANI_PCT = float(os.getenv("ANI_PCT", "5"))          # 3 dk içinde en az % yükseliş
 ANI_KAT = float(os.getenv("ANI_KAT", "5"))          # hacim hızı önceki 20 dk'nın en az bu katı
 ANI_DV = float(os.getenv("ANI_DV", "50000"))        # pencerede en az bu kadar $ işlem
-ANI_GUNLUK = int(os.getenv("ANI_GUNLUK", "10"))     # günde en fazla alarm (0 = kapalı)
+ANI_GUNLUK = int(os.getenv("ANI_GUNLUK", "14"))     # günde en fazla alarm (0 = kapalı)
+ANI_PRE = int(os.getenv("ANI_PRE", "4"))             # seans başına ayrı hak: gündüz dolan hak geceyi yemesin
+ANI_REG = int(os.getenv("ANI_REG", "6"))
+ANI_POST = int(os.getenv("ANI_POST", "4"))
 FCUM = {}                                           # sym -> Finnhub birikimli hacim (adet)
 ANI_IZ = {}                                         # (kaynak, sym) -> [(t, fiyat, birikimli hacim)] son 25 dk
 ANI = {"tv": "başlıyor", "tv_t": 0, "son": ""}
@@ -9803,6 +9816,30 @@ async def ani_tv_tara(c, ses):
     return out
 
 
+RADAR_KAT = float(os.getenv("RADAR_KAT", "50"))       # 📡 hacim radarı: dakikalık hacim hızı önceki 20 dk'nın ≥ 50 katı
+RADAR_PCT = float(os.getenv("RADAR_PCT", "3"))        # ve fiyat ≥ +%3
+RADAR_DV = float(os.getenv("RADAR_DV", "20000"))      # ve ≥ 20 bin $ işlem
+
+
+def _radar(L, once, t0, p0, v0, t1, p1, v1, pct, dv, now):
+    """Hacim radarı: fiyat henüz az yükselmişken hacim patlaması (seans dışında en erken uyarı)."""
+    if pct < RADAR_PCT or dv < RADAR_DV or t1 <= t0:
+        return None
+    hiz = max(0.0, v1 - v0) / max(30.0, t1 - t0)
+    if once:
+        ta, pa, va = once[0]
+        hiz_once = max(0.0, v0 - va) / max(60.0, t0 - ta)
+        kat = hiz / hiz_once if hiz_once > 0 else 999.0
+    elif L[0][0] > now - 300 and cal.session(now) in ("pre", "post"):
+        kat = 999.0                                    # listeye yeni düştü (önceden hacimsiz/yatay): seans dışında patlama
+    else:
+        return None
+    if kat < RADAR_KAT:
+        return None
+    return {"pct": round(pct, 1), "dv": dv, "kat": kat, "dk": max(1, round((t1 - t0) / 60)), "px": p1,
+            "tepe": max(x[1] for x in L if x[0] >= now - 180), "radar": 1}
+
+
 def _ani_kontrol(key, now):
     """Son 3 dk'da ≥ ANI_PCT yükseliş + hacim hızı önceki 20 dk'nın ≥ ANI_KAT katı (+ en az ANI_DV $)."""
     L = ANI_IZ.get(key) or []
@@ -9817,9 +9854,12 @@ def _ani_kontrol(key, now):
         return None
     pct = (p1 / p0 - 1) * 100
     dv = max(0.0, v1 - v0) * p1
+    once = [x for x in L if now - 1500 <= x[0] < t0 - 60]
+    radar = _radar(L, once, t0, p0, v0, t1, p1, v1, pct, dv, now)
+    if radar:
+        return radar
     if pct < ANI_PCT or dv < ANI_DV:
         return None
-    once = [x for x in L if now - 1500 <= x[0] < t0 - 60]
     kat = None
     if once:
         ta, pa, va = once[0]
@@ -9838,14 +9878,25 @@ async def ani_alarm(c, sym, a, gun_pct=None):
     if G.get("gun") != gun:
         G.clear()
         G.update(gun=gun, n=0, son={})
-    if G["n"] >= ANI_GUNLUK or time.time() - G["son"].get(sym, 0) < 1800:
+    ses_ = cal.session(time.time())
+    hak = {"pre": ANI_PRE, "regular": ANI_REG, "post": ANI_POST}.get(ses_, 0)
+    ns = G.setdefault("ns", {})
+    if G["n"] >= ANI_GUNLUK or ns.get(ses_, 0) >= hak or time.time() - G["son"].get(sym, 0) < 1800:
         return
-    if sym in planmod.HARIC or sym in SYMBOLS or sustur_mu(sym) or a["px"] < planmod.MIN_FIYAT:
+    if sym in planmod.HARIC or sym in SYMBOLS or sustur_mu(sym) or a["px"] < planmod.MIN_FIYAT or a["px"] > PLAN_MAX_FIYAT > 0:
         return
+    if hak - ns.get(ses_, 0) <= 2:                    # son 2 hak: sadece haberli / güçlü katalizörlü hisseye
+        try:
+            kat_ = katalizor(sym)
+        except Exception:
+            kat_ = {"puan": 0}
+        if not ((scanner.runners.get(sym) or {}).get("news") or kat_["puan"] >= 10):
+            return
     if (spread_yuzde(sym) or 0) > 3:
         return
     G["son"][sym] = time.time()
     G["n"] += 1
+    ns[ses_] = ns.get(ses_, 0) + 1
     lvl = planmod.guzel(max(a["tepe"], a["px"]) * 1.002)
     try:
         ensure_sym(sym)
@@ -9860,7 +9911,8 @@ async def ani_alarm(c, sym, a, gun_pct=None):
         log.debug("Erken giriş kaydı %s: %s", sym, e)
     kat = (f" · hacim {a['kat']:.0f}x" if a["kat"] < 50 else " · hacim 50x+") if a.get("kat") else f" · {a['dv'] / 1e3:.0f}K$ işlem"
     n_ = ((scanner.runners.get(sym) or {}).get("news") or {}).get("headline")
-    html = (f"🚀 <b>#{_h(sym)} ani yükseliş</b> · {a['dk']} dk'da +%{str(a['pct']).replace('.', ',')}{kat}\n"
+    html = ((f"📡 <b>#{_h(sym)} hacim patlaması</b> · {a['dk']} dk'da +%{str(a['pct']).replace('.', ',')}{kat}\n") if a.get("radar") else
+            f"🚀 <b>#{_h(sym)} ani yükseliş</b> · {a['dk']} dk'da +%{str(a['pct']).replace('.', ',')}{kat}\n"
             f"Şimdi <b>{fk(a['px'])}</b> · kırılım seviyesi <b>{fk(lvl)}</b>\n"
             + (f"📰 {_h(tr_or(n_)[:90])}\n" if n_ else "")
             + "<i>Üstünde hacimli kapanış gelirse ✅ KIRDI mesajı gelir · kovalamayın</i>")
@@ -10786,7 +10838,9 @@ def plan_olaylari():
                     hs_[0] = max(hs_[0], tk_.get("n", 0))
                 neden_ = (ana_.get("kanal_red") or ("Telegram kapalı" if not tg.ok else "")
                           or ("hisse susturuldu" if sustur_mu(sym) else "")
-                          or (f"günlük sınır doldu ({PLAN_TG_GUNLUK})" if _PLAN_TG["n"] >= PLAN_TG_GUNLUK else "")
+                          or ((f"seans sonrası sınırı doldu ({PLAN_TG_POST})" if post_say() >= PLAN_TG_POST else "")
+                              if cal.session(time.time()) == "post" else
+                              (f"günlük sınır doldu ({PLAN_TG_GUNLUK})" if _PLAN_TG["n"] - post_say() >= PLAN_TG_GUNLUK else ""))
                           or (f"bu hisseye bugün {PLAN_TG_HISSE} kırılım gitti" if hs_[0] >= PLAN_TG_HISSE else "")
                           or (f"spread %{spread_yuzde(sym)}" if (spread_yuzde(sym) or 0) > _spr_max(p) else "")
                           or akis_kapi(sym)
