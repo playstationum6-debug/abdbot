@@ -6875,6 +6875,8 @@ async def tg_komut(text, chat, thread=None):
     send = lambda html, png=None, sym=None: tg.send(html, {"png": png} if png else None, sym=sym, chat=chat,
                                                     thread=thread)
     if cmd in ("start", "yardim", "yardım", "help"):
+        send(YARDIM_KISA)
+    elif cmd in ("tum", "tüm", "tumkomutlar"):
         send(YARDIM)
     elif cmd == "sahip":
         if not sahip_chat() or str(sahip_chat()) == str(chat):
@@ -7135,7 +7137,16 @@ async def tg_komut(text, chat, thread=None):
         send("Bilinmeyen komut. /yardim yaz.")
 
 
-KOMUTLAR = (("planlar", "📐 Aktif kırılım planları"), ("yz", "🧠 Yapay zekâ analizi: /yz QNME"), ("sor", "🧠 Yapay zekâya sor: /sor bugün nasıl gitti"),
+YARDIM_KISA = ("<b>Komutlar</b>\n"
+               "/liste — ☀️ günün listesi\n/planlar — 📐 kırılım bekleyen planlar\n/hisse QNME — hisse kartı\n"
+               "/analiz QNME — analiz ve plan\n/neden QNME — bot neden vermedi\n/kacan — 🕵️ kanalların verip bizim kaçırdıklarımız\n"
+               "/gece — 🌙 gece hissesi adayları\n/hafta — 📅 haftanın özeti\n/karne — tüm sonuçlar\n/saglik — 🩺 bot sağlığı\n\n"
+               "<i>Diğer bütün komutlar: /tum</i>")
+KOMUTLAR = (("liste", "☀️ Günün listesi"), ("planlar", "📐 Kırılım bekleyen planlar"), ("hisse", "Hisse kartı: /hisse QNME"),
+            ("analiz", "Analiz ve plan: /analiz QNME"), ("neden", "Bot neden vermedi: /neden QNME"),
+            ("kacan", "🕵️ Kaçan hisseler"), ("gece", "🌙 Gece hissesi adayları"), ("hafta", "📅 Haftanın özeti"),
+            ("karne", "Tüm sonuçlar"), ("saglik", "🩺 Bot sağlığı"), ("tum", "Bütün komutlar"))
+KOMUTLAR_ESKI = (("planlar", "📐 Aktif kırılım planları"), ("yz", "🧠 Yapay zekâ analizi: /yz QNME"), ("sor", "🧠 Yapay zekâya sor: /sor bugün nasıl gitti"),
             ("neden", "Bot bu hisseye neden girmedi: /neden VIVK"), ("super", "💎 Bugünün süper fırsatları"), ("hisse", "Hisse kartı: /hisse QNME"), ("panel", "Kontrol panelini yeniden kur"), ("durum", "Bot ve para durumu"), ("pozisyon", "Açık pozisyonlar"),
             ("karne", "Sonuçlar + grafik"), ("analiz", "Hisse analizi: /analiz QNME"),
             ("alarm", "Fiyat alarmı: /alarm QNME 0.90"), ("alarmlar", "Kurulu alarmlar"), ("rapor", "Gün sonu raporu"),
@@ -7153,7 +7164,8 @@ async def tg_kurulum():
     tg.chat_type = ch.get("type", "")
     tg.forum = bool(ch.get("is_forum"))
     cmds = [{"command": c, "description": d} for c, d in KOMUTLAR]
-    await tg.api("deleteMyCommands")                       # botun özelinde menü yok
+    await tg.api("deleteMyCommands")
+    await tg.api("setMyCommands", commands=cmds)            # botun özelinde de aynı sade menü
     if tg.chat_type in ("group", "supergroup"):            # grupta "/" menüsü sadece yöneticilere görünür
         await tg.api("setMyCommands", commands=cmds, scope={"type": "chat_administrators", "chat_id": _chat_id()})
     if MINI_APP:
@@ -8355,6 +8367,104 @@ def post_say():
     return sum(1 for r in KK["kayit"] if r["gun"] == gun and _gorunur(r) and (r.get("kt") or 0) >= t16)
 
 
+GEC_UYARI = float(os.getenv("GEC_UYARI", "100"))   # hisse bugün bu kadar % yükselmişse KIRDI'ya uyarı
+GEC_MAX = float(os.getenv("GEC_MAX", "200"))       # bu kadar yükselmişse KIRDI kanala gitmez (hareketin çoğu geride)
+
+
+def gun_pct(sym):
+    r_ = scanner.runners.get(sym) or {}
+    v = r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct")
+    return v
+
+
+def gec_kapi(sym):
+    g = gun_pct(sym)
+    return f"geç kırılım: hisse bugün {fy(g)} (hareketin çoğu geride)" if g is not None and GEC_MAX > 0 and g >= GEC_MAX else ""
+
+
+TAKIBIM_SEANS = int(os.getenv("TAKIBIM_SEANS", "2"))   # 📌 TAKİBİMDE: seans başına en fazla mesaj (0 = kapalı)
+TAKIBIM_UZAK = float(os.getenv("TAKIBIM_UZAK", "5"))  # seviyeye en fazla % uzaklık
+
+
+def _tkp():
+    T = KK["gon"].setdefault("tkp", {})
+    if T.get("gun") != _gun_et():
+        T.clear()
+        T.update(gun=_gun_et(), h={}, ns={})
+    return T
+
+
+def takip_key(sym):
+    h = (_tkp().get("h") or {}).get(sym)
+    return h["key"] if h else None
+
+
+def takibim_kontrol():
+    """Kaliteli hisse kırılım seviyesine yaklaşınca tek mesaj: '📌 TAKİBİMDE · X kırarsa giriş'. KIRDI bu mesaja yanıt gelir."""
+    if TAKIBIM_SEANS <= 0 or not tg.ok or KANAL_MOD != "onay":
+        return
+    ses_ = cal.session(time.time())
+    if ses_ not in ("pre", "regular", "post") or ogle_kapi() != "" or _ogle_mi():
+        return
+    T = _tkp()
+    for sym, h in list(T["h"].items()):                    # kırmadan biten takip: mesaj sessizce güncellenir
+        if h.get("bitti"):
+            continue
+        p_ = PLAN.planlar.get(sym)
+        kir_ = any(r["sym"] == sym and r["gun"] == T["gun"] and _gorunur(r) and r.get("kt") for r in KK["kayit"][-120:])
+        if kir_:
+            h["bitti"] = 1
+        elif not p_ or p_.get("id") != h["id"]:
+            h["bitti"] = 1
+            zincir(h["key"], "❌ kırmadı · takip bitti")
+    if T["ns"].get(ses_, 0) >= TAKIBIM_SEANS:
+        return
+    aday = []
+    for sym, p in list(PLAN.planlar.items()):
+        if p.get("st") != "bekliyor" or sym in T["h"] or sym in SYMBOLS or sym in planmod.HARIC or sustur_mu(sym):
+            continue
+        if p["giris"] > PLAN_MAX_FIYAT > 0 or (spread_yuzde(sym) or 0) > _spr_max(p) or gec_kapi(sym):
+            continue
+        px = fiyat(sym)
+        if not px:
+            continue
+        uz = (p["giris"] / px - 1) * 100
+        if not (0.3 <= uz <= TAKIBIM_UZAK):
+            continue
+        k_ = katalizor(sym)
+        haber = bool(_haber(sym))
+        if (p.get("puan") or 0) < 3 or not (haber or k_["puan"] >= 8) or k_["puan"] < 0:
+            continue
+        o_ = akis_ozet(sym, 5)
+        if o_ and o_["n"] >= 15 and o_["pct"] < 45:
+            continue
+        _f, rot, _sh = dolasim(sym)
+        skor = (p.get("puan") or 0) * 2 + k_["puan"] / 5 + min(3, rot or 0) - uz / 2
+        aday.append((skor, sym, p, px, uz, k_, rot))
+    if not aday:
+        return
+    skor, sym, p, px, uz, k_, rot = max(aday, key=lambda a: a[0])
+    h_ = p["hedefler"][:3]
+    neden = [e for e in k_["et"][:2]]
+    if rot and rot >= 1:
+        neden.append(f"🔄 float {str(rot).replace('.', ',')}x döndü")
+    html = (f"📌 <b>TAKİBİMDE · #{_h(sym)}</b>\n"
+            f"<b>{fk(p['giris'])}</b> kırarsa giriş · 🔴 stop {fk(p['stop'])} · 🟢 {' / '.join(fk(x) for x in h_)}\n"
+            + (_h(" · ".join(neden)) + "\n" if neden else "")
+            + f"Şu an {fk(px)} · seviyeye %{str(round(uz, 1)).replace('.', ',')} kaldı\n"
+            "<i>Kırılırsa bu mesaja ✅ KIRDI yanıtı gelir · yatırım tavsiyesi değildir</i>")
+    key = f"tkp:{p['id']}"
+    tg.send(html, plan_grafik_ch(p), key=key, sym=sym, konu="plan", quiet=False)
+    T["h"][sym] = {"key": key, "id": p["id"], "giris": p["giris"], "t": int(time.time())}
+    T["ns"][ses_] = T["ns"].get(ses_, 0) + 1
+    kk_kaydet()
+
+
+def _ogle_mi():
+    n_ = datetime.now(ET)
+    return 660 <= n_.hour * 60 + n_.minute < 840
+
+
 def ogle_kapi():
     n_ = datetime.now(ET)
     m = n_.hour * 60 + n_.minute
@@ -8436,6 +8546,9 @@ def kirilim_html(p, retest=False):
            f"🏃 K1 ve K2'de üçte bir sat · son üçte bir zirvenin %{KOS_IZ:g} altına inene kadar taşınır"]
     if p.get("acilis"):
         out.append("🔔 Açılış hamlesi")
+    g_ = gun_pct(p["sym"])
+    if g_ is not None and g_ >= GEC_UYARI:
+        out.append(f"⚠️ Hisse bugün {fy(g_)}: hareketin çoğu geride · yarım lot")
     for f_ in (lambda: akis_satir(p["sym"]), lambda: dolasim_satir(p["sym"])):
         try:
             x_ = f_()
@@ -10696,6 +10809,10 @@ async def kanal_loop():
         except Exception as e:
             log.warning("Erken giriş izleme hatası: %s", e)
         try:
+            takibim_kontrol()
+        except Exception as e:
+            log.warning("Takibimde hatası: %s", e)
+        try:
             if not tg.ok or not PUSH_PREF.get("tg_plan", 1):
                 continue
             n = datetime.now(ET)
@@ -10703,7 +10820,7 @@ async def kanal_loop():
                 continue
             gun, hm = str(n.date()), n.hour * 60 + n.minute
             G = KK["gon"]
-            for ad, dk in (("radar1", 590), ("radar2", 660), ("radar3", 810)):   # 16:50 · 18:00 · 20:30 TR
+            for ad, dk in ((() if KANAL_MOD == "onay" else (("radar1", 590), ("radar2", 660), ("radar3", 810)))):   # onay modunda 📌 TAKİBİMDE var
                 if dk <= hm < dk + 20 and G.get(ad) != gun:
                     if radar_gonder() or hm >= dk + 19:
                         G[ad] = gun
@@ -10845,6 +10962,7 @@ def plan_olaylari():
                           or (f"spread %{spread_yuzde(sym)}" if (spread_yuzde(sym) or 0) > _spr_max(p) else "")
                           or akis_kapi(sym)
                           or ogle_kapi()
+                          or gec_kapi(sym)
                           or buyuk_kapi(sym, ana_.get("e") or ana_.get("giris")))
                 if neden_:
                     PLAN_TG_RED[sym] = (time.time(), f"{fp_(p['giris'])} kırılımı kanala gitmedi: {neden_}")
@@ -10855,6 +10973,7 @@ def plan_olaylari():
                     _PLAN_TG["n"] += 1
                     PLAN_DURUM[kok_] = DURUM_AD["onaylı"]
                     tg.send(kirilim_html(p, retest=ev == "retest"), plan_grafik_ch(p, durum="onaylı"), key=kok_, sym=sym,
+                            reply=takip_key(sym),
                             konu="plan", quiet=False, durum=DURUM_AD["onaylı"], mk=plan_dugmeler(p))
                     r_ = next((r_ for r_ in reversed(KK["kayit"][-120:]) if r_["id"] == ana_["id"]), None)
                     if r_ is not None:
@@ -10896,7 +11015,7 @@ def plan_olaylari():
             tg.send(kirilim_html(p), plan_grafik_ch(p, durum="onaylı"), sym=sym, reply=key, konu="plan", quiet=False)
             zincir(key, f"🟢 onaylandı {fk(p.get('e') or p['giris'])} ({p.get('tf', 1)} dk)")
         sa = datetime.fromtimestamp(p.get("ot") or p.get("bitis") or time.time(), TR).strftime("%H:%M")
-        if ev == "onaylı" and BOT_CFG.get("secici", 1):
+        if ev == "onaylı" and BOT_CFG.get("secici", 1) and KANAL_MOD != "onay":
             sg_ = engine.by_id.get(p.get("sig") or "")
             if sg_ is not None and not secili_mi(sg_):
                 sa += " · 👁 <i>seçili saat dışında: izleme</i>"
