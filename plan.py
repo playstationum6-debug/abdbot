@@ -110,6 +110,7 @@ def dusen_tepeler(B):
     return a[2] > b[2] > c[2] and a[5] > b[5] > c[5]
 
 MIN_PUAN = 2.0
+INCE_DV = float(os.getenv("INCE_DV", "75000"))   # öncesi seans, haberli ve +%20 hissede en az bu kadar $ işlem
 # ---- kurallar (kanal bildirimleri için; işlem açılmaz)
 BIRLESTIR = 0.02             # %2'den yakın seviyeler tek bölge
 HACIM_K = 2.0                # kırılım mumu hacmi ≥ son 20 mum ortalamasının 2 katı
@@ -167,6 +168,7 @@ class Planci:
         self._bant = {}              # sym -> (k, bantlar) önbellek
         self._seq = 0
         self.uygun = None            # app.py: hangi hisselerde kendi planını kursun (kanal seviyesi her zaman)
+        self.esnek = None            # app.py: haberli / güçlü katalizörlü mü (öncesi seansta düşük hacim eşiği)
         self.liste = {}              # sym -> sabah listesi seviyesi {"lvl","stop","hedefler","neden","t"} (gün boyu geçerli)
         self.kote_fn = None          # app.py: sym -> (alış, satış, ts, alış_adet, satış_adet)
         self.retest = {}             # sym -> kırılımı tutmuş plan (eski direnç destek olarak test edilecek)
@@ -617,9 +619,12 @@ class Planci:
         hareket = (c / ref - 1) * 100
         sonen = bool(x.get("hod") and x["hod"] / ref >= 1.25)       # bugün koşup sönen hisse (WFF gibi)
         dv = x.get("ses_dv") or 0
-        if (hareket < 2 and not sonen) or dv < (150_000 if x["ses"] != "regular" else 500_000):
+        esik = 150_000 if x["ses"] != "regular" else 500_000
+        if x["ses"] != "regular" and hareket >= 20 and self.esnek and self.esnek(sym):
+            esik = INCE_DV                                       # haberli ve +%20: ince hacimde de seviye çizilir (yarım lot)
+        if (hareket < 2 and not sonen) or dv < esik:
             return self._nd(sym, T, f"hareket {hareket:+.1f}% / seans hacmi {dv / 1e3:.0f}K$ — en az +%2 ve "
-                                    f"{'150K' if x['ses'] != 'regular' else '500K'}$ gerekli")
+                                    f"{esik / 1e3:.0f}K$ gerekli")
         gmax = (max(c, x.get("hod") or c) / ref - 1) * 100
         if gmax < MIN_GUN:
             return self._nd(sym, T, f"gün içinde en fazla {gmax:+.1f}% — koşan hisse için en az +%{MIN_GUN:g}")
@@ -634,6 +639,8 @@ class Planci:
             if c < dip30 * 1.04:
                 return self._nd(sym, T, f"{g['ust']} geri alma seviyesi ama düşüş sürüyor")   # düşüş sürüyor: dönüş başlamadan geri alma planı yok
         pl = self._plan_kur(sym, x, g, T)
+        if pl and x["ses"] != "regular" and dv < 150_000:
+            pl["ince"] = 1
         if pl:
             # kural: bir sonraki dirence en az K1 (+%5) kadar yer olmalı
             ust = [q["ust"] for q in tum if q["ust"] > pl["giris"] * 1.005 and q["puan"] >= 1.5]   # gerçek direnç (yuvarlak sayı tek başına değil)

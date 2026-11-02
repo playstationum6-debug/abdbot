@@ -823,6 +823,7 @@ class _Hepsi:
 
 engine.sadece_plan = _Hepsi() if SADECE_PLAN else set()
 PLAN.uygun = lambda s_: s_ not in SYMBOLS        # büyük hisselerde sadece kanalın verdiği seviye
+PLAN.esnek = lambda s_: bool(_haber(s_)) or katalizor(s_)["puan"] >= 8
 IZLE = {}                             # kırılım planı için izlenen (henüz koşan listesinde olmayan) hisseler
 
 
@@ -7350,16 +7351,25 @@ async def dis_iletildi(m):
 DIS_TETIK = asyncio.Event()
 
 
+KANAL_BESLE = int(os.getenv("KANAL_BESLE", "1"))   # 1: dinlenen kanalların hissesi izlemeye alınır · 0: sadece karşılaştırma
+
+
 async def dis_oto(m):
     """Dinleyicinin okuduğu kanal mesajı. Sinyal değilse sessizce geçer. Döner: kaydedildi mi."""
     it, _ = dis.ekle(m, ses_of=cal.session)
-    plan_kanal(it)
+    if KANAL_BESLE:
+        plan_kanal(it)
     if not it:
         return False
     backup.data["dis"] = dis.st
     yedek_hemen(60)
     sym = it["sym"]
-    if tarayici.SYM_RE.match(sym) and time.time() - it["t"] < 6 * 3600:
+    if tarayici.SYM_RE.match(sym) and time.time() - it["t"] < 6 * 3600 and KANAL_BESLE:
+        if sym not in scanner.runners and sym not in PLAN.planlar and sym not in SYMBOLS:
+            KB = backup.data.setdefault("kanal_kaynak", {})          # 👂 bu hisseyi bot kanal sayesinde gördü
+            KB.setdefault(_gun_et(), {}).setdefault(sym, int(time.time()))
+            for g_ in sorted(KB)[:-15]:
+                KB.pop(g_, None)
         ensure_sym(sym)
         VIEWED[sym] = time.time()
         try:
@@ -8372,9 +8382,18 @@ GEC_MAX = float(os.getenv("GEC_MAX", "200"))       # bu kadar yükselmişse KIRD
 
 
 def gun_pct(sym):
+    """Bugünkü hareket: bugün 04:00 ET'den sonraki ilk mumun açılışına göre (dünkü haber boşluğu sayılmaz)."""
+    try:
+        t0 = datetime.now(ET).replace(hour=4, minute=0, second=0, microsecond=0).timestamp()
+        b = store.bars.get(sym) or {}
+        ilk = min((t for t in b if t >= t0), default=None)
+        px = fiyat(sym)
+        if ilk is not None and px and b[ilk][0]:
+            return round((px / b[ilk][0] - 1) * 100, 1)
+    except Exception:
+        pass
     r_ = scanner.runners.get(sym) or {}
-    v = r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct")
-    return v
+    return r_.get("pct_now") if r_.get("pct_now") is not None else r_.get("pct")
 
 
 def gec_kapi(sym):
@@ -8549,6 +8568,8 @@ def kirilim_html(p, retest=False):
     g_ = gun_pct(p["sym"])
     if g_ is not None and g_ >= GEC_UYARI:
         out.append(f"⚠️ Hisse bugün {fy(g_)}: hareketin çoğu geride · yarım lot")
+    elif p.get("ince") or (_plan_bul(p["id"][:-3], p["sym"]) or {}).get("ince"):
+        out.append("⚠️ İnce hacim (öncesi seans) · yarım lot")
     for f_ in (lambda: akis_satir(p["sym"]), lambda: dolasim_satir(p["sym"])):
         try:
             x_ = f_()
@@ -8858,7 +8879,8 @@ def kk_ekle(p, kirildi=False, gizli=False):
         return
     if c_ is not None:                                    # henüz kırılmamış eski kayıt: yenisi yerine geçer
         KK["kayit"].remove(c_)
-    KK["kayit"].append({"id": p["id"], "sym": p["sym"], "giris": e_ if kirildi else p["giris"], "stop": p["stop"],
+    _kb = ((backup.data.get("kanal_kaynak") or {}).get(_gun_et()) or {}).get(p["sym"])
+    KK["kayit"].append({"id": p["id"], "sym": p["sym"], **({"kaynak": "kanal"} if _kb and _kb < time.time() else {}), "giris": e_ if kirildi else p["giris"], "stop": p["stop"],
                         "hed": p["hedefler"][:3], "t": int(time.time()), "gun": _gun_et(),
                         "st": "kırıldı" if kirildi else "bekliyor", "kt": time.time() if kirildi else None,
                         "tepe": e_ if kirildi else None, "dip": e_ if kirildi else None, "k": 0, "tur": p.get("tur") or [],
@@ -9336,6 +9358,12 @@ def kacan_dedektif():
     if oner:
         out.append("\n💡 <b>Son 5 günde tekrar eden kör nokta</b>")
         out += [f"• {_h(k_)} · {n} hisse" for n, k_ in sorted(oner, reverse=True)[:3]]
+    K10 = [r for r in KK["kayit"] if r.get("kt") and _gorunur(r) and r["gun"] >= str(datetime.now(ET).date() - timedelta(days=10))
+           and r["st"] not in ("bekliyor", "kırılmadı", "onaysız")]
+    for ad_, L_ in (("🤖 Botun kendi bulduğu", [r for r in K10 if r.get("kaynak") != "kanal"]),
+                    ("👂 Kanal sayesinde bulduğu", [r for r in K10 if r.get("kaynak") == "kanal"])):
+        if L_:
+            out.append(f"{ad_}: {len(L_)} KIRDI · +%5 oranı %{round(100 * sum(1 for r in L_ if (_tepe_pct(r) or 0) >= 5) / len(L_))}")
     ek = erken_karne()
     if ek:
         out.append(f"\n⚡ Erken giriş ölçümü (10 gün): {ek['n']} hisse · K1+ (+%5) <b>%{ek['wr']}</b> · stop {ek['stop']}")
