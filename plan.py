@@ -168,7 +168,8 @@ class Planci:
         self._bant = {}              # sym -> (k, bantlar) önbellek
         self._seq = 0
         self.uygun = None            # app.py: hangi hisselerde kendi planını kursun (kanal seviyesi her zaman)
-        self.esnek = None            # app.py: haberli / güçlü katalizörlü mü (öncesi seansta düşük hacim eşiği)
+        self.esnek = None
+        self.hedef_fn = None         # app.py: benzer kırılımlara göre akıllı hedef [K1, K2, K3] (yoksa sabit %5/10/20)            # app.py: haberli / güçlü katalizörlü mü (öncesi seansta düşük hacim eşiği)
         self.liste = {}              # sym -> sabah listesi seviyesi {"lvl","stop","hedefler","neden","t"} (gün boyu geçerli)
         self.kote_fn = None          # app.py: sym -> (alış, satış, ts, alış_adet, satış_adet)
         self.retest = {}             # sym -> kırılımı tutmuş plan (eski direnç destek olarak test edilecek)
@@ -378,6 +379,13 @@ class Planci:
 
     def _aday(self, eng, p, c, T, tip, dip10=None, olay=True):
         sabit_stop_hedef(p, c)                          # kırılım fiyatına göre: stop %10 altı, K1/K2/K3 +%5/10/20
+        if self.hedef_fn:
+            try:
+                h_ = self.hedef_fn(p["sym"], c, T)
+                if h_:
+                    p["hedefler"], p["akilli"] = h_, 1
+            except Exception:
+                pass
         risk = c - p["stop"]
         if risk <= 0 or risk / c > 0.12:
             return None
@@ -468,7 +476,7 @@ class Planci:
             if red in ("tukenme", "emir", "spread", "acilis"):   # geri çekilmede düşen tepe doğal: o kural burada yok
                 return []
             self.retest.pop(sym, None)
-            p2 = dict(p, id=p["id"] + "-rt", st="bekliyor", tip="retest2", vr=round(b[5] / ort, 1),
+            p2 = dict(p, id=p["id"] + "-rt", st="bekliyor", tip="retest2", vr=round(b[5] / ort, 1), onay_tg=None, rt_tg=None,
                       kurallar=(p.get("kurallar") or []) + ["kırılım+tekrar test"])
             sabit_stop_hedef(p2, b[4])
             a = self._aday(eng, p2, b[4], T, "retest2", None, olay=False)

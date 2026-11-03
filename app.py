@@ -824,6 +824,7 @@ class _Hepsi:
 engine.sadece_plan = _Hepsi() if SADECE_PLAN else set()
 PLAN.uygun = lambda s_: s_ not in SYMBOLS        # büyük hisselerde sadece kanalın verdiği seviye
 PLAN.esnek = lambda s_: bool(_haber(s_)) or katalizor(s_)["puan"] >= 8
+PLAN.hedef_fn = lambda s_, g_, t_: akilli_hedef(s_, g_, t_)
 IZLE = {}                             # kırılım planı için izlenen (henüz koşan listesinde olmayan) hisseler
 
 
@@ -6988,6 +6989,8 @@ async def tg_komut(text, chat, thread=None):
     elif cmd in ("hafta", "haftalik", "haftalık", "ozet", "özet"):
         if not hafta_ozet_gonder(chat=chat):
             send("📅 Bu hafta henüz sonuçlanmış kırılım yok.")
+    elif cmd in ("karsilastir", "karşılaştır", "kiyas"):
+        send(karsilastir_tg() or "📊 Bu hafta henüz karşılaştırılacak kırılım yok.")
     elif cmd in ("kacan", "kaçan", "kacanlar"):
         send(kacan_dedektif() or "🕵️ Bugün dinlenen kanallardan hisse gelmedi.")
     elif cmd in ("gece", "after"):
@@ -7140,12 +7143,12 @@ async def tg_komut(text, chat, thread=None):
 
 YARDIM_KISA = ("<b>Komutlar</b>\n"
                "/liste — ☀️ günün listesi\n/planlar — 📐 kırılım bekleyen planlar\n/hisse QNME — hisse kartı\n"
-               "/analiz QNME — analiz ve plan\n/neden QNME — bot neden vermedi\n/kacan — 🕵️ kanalların verip bizim kaçırdıklarımız\n"
+               "/analiz QNME — analiz ve plan\n/neden QNME — bot neden vermedi\n/kacan — 🕵️ kanalların verip bizim kaçırdıklarımız\n/karsilastir — 📊 bu hafta kanallarla karşılaştırma\n"
                "/gece — 🌙 gece hissesi adayları\n/hafta — 📅 haftanın özeti\n/karne — tüm sonuçlar\n/saglik — 🩺 bot sağlığı\n\n"
                "<i>Diğer bütün komutlar: /tum</i>")
 KOMUTLAR = (("liste", "☀️ Günün listesi"), ("planlar", "📐 Kırılım bekleyen planlar"), ("hisse", "Hisse kartı: /hisse QNME"),
             ("analiz", "Analiz ve plan: /analiz QNME"), ("neden", "Bot neden vermedi: /neden QNME"),
-            ("kacan", "🕵️ Kaçan hisseler"), ("gece", "🌙 Gece hissesi adayları"), ("hafta", "📅 Haftanın özeti"),
+            ("kacan", "🕵️ Kaçan hisseler"), ("karsilastir", "📊 Kanallarla karşılaştırma"), ("gece", "🌙 Gece hissesi adayları"), ("hafta", "📅 Haftanın özeti"),
             ("karne", "Tüm sonuçlar"), ("saglik", "🩺 Bot sağlığı"), ("tum", "Bütün komutlar"))
 KOMUTLAR_ESKI = (("planlar", "📐 Aktif kırılım planları"), ("yz", "🧠 Yapay zekâ analizi: /yz QNME"), ("sor", "🧠 Yapay zekâya sor: /sor bugün nasıl gitti"),
             ("neden", "Bot bu hisseye neden girmedi: /neden VIVK"), ("super", "💎 Bugünün süper fırsatları"), ("hisse", "Hisse kartı: /hisse QNME"), ("panel", "Kontrol panelini yeniden kur"), ("durum", "Bot ve para durumu"), ("pozisyon", "Açık pozisyonlar"),
@@ -8352,6 +8355,7 @@ def _plan_html(p):
             + ("\n🔔 Açılış hamlesi · ilk 30 dk geçerli" if p.get("acilis") else "\n☀️ Günün listesinde" if p.get("liste") else ""))
 
 
+OGLE_ISTISNA = int(os.getenv("OGLE_ISTISNA", "15"))   # öğle sınırına takılmayan katalizör puanı (alarm almışsa)
 OGLE_MAX = int(os.getenv("OGLE_MAX", "2"))      # ABD 11:00–14:00 (öğle) en fazla bu kadar KIRDI; günlük sınır sabaha kalsın
 
 
@@ -8484,11 +8488,18 @@ def _ogle_mi():
     return 660 <= n_.hour * 60 + n_.minute < 840
 
 
-def ogle_kapi():
+def ogle_kapi(sym=None):
     n_ = datetime.now(ET)
     m = n_.hour * 60 + n_.minute
     if not (660 <= m < 840) or OGLE_MAX < 0:
         return ""
+    if sym:                                               # istisna: bugün 🚀/📡 alarm almış ve katalizörü güçlü (VCIG +%162)
+        G_ = backup.data.get("ani") or {}
+        try:
+            if G_.get("gun") == _gun_et() and sym in (G_.get("son") or {}) and katalizor(sym)["puan"] >= OGLE_ISTISNA:
+                return ""
+        except Exception:
+            pass
     gun = _gun_et()
     t0 = n_.replace(hour=11, minute=0, second=0, microsecond=0).timestamp()
     say = sum(1 for r in KK["kayit"] if r["gun"] == gun and _gorunur(r) and (r.get("kt") or 0) >= t0)
@@ -8527,6 +8538,22 @@ def benzer_karne(sym, giris, t=None):
     Z.sort()
     return {"n": len(Z), "k1": round(100 * sum(1 for z in Z if z >= 5) / len(Z)), "med": Z[len(Z) // 2],
             "ust": Z[int(len(Z) * 0.75)]}
+
+
+AKILLI_HEDEF = int(os.getenv("AKILLI_HEDEF", "1"))   # 1: hedefler benzer kırılımların zirvesine göre · 0: sabit %5/10/20
+
+
+def akilli_hedef(sym, giris, t):
+    """K1 = medyanın %60'ı (3–5) · K2 = medyan (6–20) · K3 = iyi çeyrek (K2+4 – 50). Yeterli örnek yoksa None."""
+    if not AKILLI_HEDEF:
+        return None
+    bk = benzer_karne(sym, giris, t)
+    if not bk:
+        return None
+    k2 = min(20.0, max(6.0, bk["med"]))
+    k1 = min(5.0, max(3.0, bk["med"] * 0.6))
+    k3 = min(50.0, max(k2 + 4, bk["ust"]))
+    return [round(giris * (1 + k / 100), 4) for k in (k1, k2, k3)]
 
 
 def dolasim(sym):
@@ -8581,7 +8608,7 @@ def kirilim_html(p, retest=False):
         bk = benzer_karne(p["sym"], e_, p.get("ot"))
         if bk:
             out.append(f"🎯 Benzer {bk['n']} kırılım: %{bk['k1']}'i +%5'e ulaştı · zirve medyanı {fy(bk['med'])}"
-                       f" · iyi olanlar {fy(bk['ust'])}+")
+                       f" · iyi olanlar {fy(bk['ust'])}+" + (" · hedefler buna göre" if p.get("akilli") else ""))
     except Exception:
         pass
     hik = ((scanner.runners.get(p["sym"]) or {}).get("sec") or {}).get("hikaye") or []
@@ -8869,9 +8896,9 @@ def _kk_cift(sym, giris, gun):
                  and r.get("giris") and abs(giris / r["giris"] - 1) <= 0.01), None)
 
 
-def kk_ekle(p, kirildi=False, gizli=False):
+def kk_ekle(p, kirildi=False, gizli=False, retest=False):
     e_ = p.get("e") or p["giris"]
-    c_ = _kk_cift(p["sym"], e_ if kirildi else p["giris"], _gun_et())
+    c_ = None if retest else _kk_cift(p["sym"], e_ if kirildi else p["giris"], _gun_et())
     if c_ is not None and c_.get("kt"):                   # 3) aynı seviye bugün zaten kırıldı: ikinci kez sayılmaz (GCTK hatası)
         if not gizli:
             c_.pop("gizli", None)
@@ -8880,7 +8907,8 @@ def kk_ekle(p, kirildi=False, gizli=False):
     if c_ is not None:                                    # henüz kırılmamış eski kayıt: yenisi yerine geçer
         KK["kayit"].remove(c_)
     _kb = ((backup.data.get("kanal_kaynak") or {}).get(_gun_et()) or {}).get(p["sym"])
-    KK["kayit"].append({"id": p["id"], "sym": p["sym"], **({"kaynak": "kanal"} if _kb and _kb < time.time() else {}), "giris": e_ if kirildi else p["giris"], "stop": p["stop"],
+    KK["kayit"].append({"id": p["id"], "sym": p["sym"], **({"kaynak": "kanal"} if _kb and _kb < time.time() else {}),
+                        **({"retest": 1} if retest else {}), "giris": e_ if kirildi else p["giris"], "stop": p["stop"],
                         "hed": p["hedefler"][:3], "t": int(time.time()), "gun": _gun_et(),
                         "st": "kırıldı" if kirildi else "bekliyor", "kt": time.time() if kirildi else None,
                         "tepe": e_ if kirildi else None, "dip": e_ if kirildi else None, "k": 0, "tur": p.get("tur") or [],
@@ -9367,6 +9395,56 @@ def kacan_dedektif():
     ek = erken_karne()
     if ek:
         out.append(f"\n⚡ Erken giriş ölçümü (10 gün): {ek['n']} hisse · K1+ (+%5) <b>%{ek['wr']}</b> · stop {ek['stop']}")
+    return "\n".join(out)
+
+
+RETEST_KANAL = int(os.getenv("RETEST_KANAL", "1"))  # 🔁 ikinci şans (geri çekilip tutunan kırılım) kanala gider
+_KANAL_AD = {"NasdaqPatronu": "Patron", "nasdaq_arda1": "Arda", "nasdaqhunter0": "Hunter", "nasdaqkaplani": "Kaplanı",
+             "AlperenNsdq": "Alperen", "nasdaqnotlarim01": "Notlarım", "nasdaqakademi": "Akademi"}
+
+
+def karsilastir_tg(gun_say=None):
+    """📊 Bu hafta: bizim KIRDI'lar ile dinlenen kanalların paylaşımları (kanalların sonucu botun gölge ölçümü)."""
+    bugun = datetime.now(ET).date()
+    bas = bugun - timedelta(days=gun_say or bugun.weekday())
+    t0 = datetime(bas.year, bas.month, bas.day, 0, 0, tzinfo=ET).timestamp()
+    biz = {}
+    for r in KK["kayit"]:
+        if r["gun"] >= str(bas) and _gorunur(r) and r.get("kt") and r["st"] not in ("bekliyor", "kırılmadı", "onaysız"):
+            k_ = (r["sym"], r["gun"])
+            if k_ not in biz or r["kt"] < biz[k_]["kt"]:
+                biz[k_] = r
+    if not biz:
+        return None
+    zb = [_tepe_pct(r) or 0 for r in biz.values()]
+    stp = sum(1 for r in biz.values() if r["st"] in ("stop", "sahte") and not r.get("k"))
+    out = [f"📊 <b>HAFTALIK KARŞILAŞTIRMA</b> · {bas.strftime('%d.%m')}–{bugun.strftime('%d.%m')}",
+           f"🤖 <b>Biz</b>: {len(biz)} KIRDI · +%5 <b>%{round(100 * sum(z >= 5 for z in zb) / len(zb))}</b>"
+           f" · +%20 {sum(z >= 20 for z in zb)} · K1'siz stop {stp}"]
+    K = {}
+    for i in (dis.st or {}).get("items") or []:
+        if (i.get("t") or 0) >= t0 and i.get("sym") and i.get("dir", 1) > 0:
+            gun_ = str(datetime.fromtimestamp(i["t"], ET).date())
+            K.setdefault(i.get("kanal") or "?", {}).setdefault((i["sym"], gun_), i)
+    sadece_onlar = {}
+    for kanal, M in sorted(K.items(), key=lambda kv: -len(kv[1])):
+        mf = [x.get("mfe") for x in M.values() if x.get("mfe") is not None]
+        ort = [k_ for k_ in M if k_ in biz]
+        once = sum(1 for k_ in ort if biz[k_]["kt"] < M[k_]["t"])
+        for k_, x in M.items():
+            if k_ not in biz:
+                sadece_onlar[k_] = max(sadece_onlar.get(k_, -99), x.get("mfe") or 0)
+        out.append(f"• <b>{_h(_KANAL_AD.get(kanal, kanal))}</b>: {len(M)} hisse"
+                   + (f" · +%5 %{round(100 * sum(m >= 5 for m in mf) / len(mf))}" if mf else "")
+                   + f" · ortak {len(ort)} (biz önce {once} / onlar önce {len(ort) - once})")
+    if sadece_onlar:
+        en = sorted(sadece_onlar.items(), key=lambda kv: -kv[1])[:4]
+        out.append(f"\n🙈 Onların verip bizim vermediğimiz: <b>{len(sadece_onlar)}</b> hisse · en iyileri "
+                   + ", ".join(f"#{_h(k_[0])} {fy(v)}" for k_, v in en))
+    sadece_biz = [k_ for k_ in biz if not any(k_ in M for M in K.values())]
+    if sadece_biz:
+        out.append(f"✨ Sadece bizim verdiğimiz: <b>{len(sadece_biz)}</b> hisse")
+    out.append("<i>Kanalların sonucu, verdikleri seviyeden botun gölge ölçümüdür (en iyi ihtimal: zirve)</i>")
     return "\n".join(out)
 
 
@@ -10875,6 +10953,15 @@ async def kanal_loop():
                 if k_:
                     feed_add("rapor", "", "🕵️ Kaçan hisse dedektifi", sub=re.sub(r"<[^>]+>", "", k_)[:1500],
                              tone="bilgi", extra={"tg_skip": 1, "tg_html": k_})
+            if n.weekday() == 4 and 1000 <= hm < 1030 and G.get("karsi") != gun:
+                G["karsi"] = gun
+                kk_kaydet()
+                k_ = karsilastir_tg()
+                if k_:
+                    feed_add("rapor", "", "📊 Haftalık karşılaştırma", sub=re.sub(r"<[^>]+>", "", k_)[:1500],
+                             tone="bilgi", extra={"tg_skip": 1, "tg_html": k_})
+                    if sahip_chat():
+                        tg.send(k_, None, chat=sahip_chat(), quiet=True)
             if n.weekday() == 4 and 995 <= hm < 1025 and G.get("ozet") != gun:
                 G["ozet"] = gun
                 kk_kaydet()
@@ -10973,8 +11060,9 @@ def plan_olaylari():
                 if kucuk and YZM.hazir and BOT_CFG.get("yz_yetki", 1) and YZM.kalan() > 60:
                     _gorev(plan_yz(p))
             continue
-        if KANAL_MOD == "onay" and ev in ("onaylı", "retest") and not p.get("bitis") and not p.get("onay_tg"):
-            kok_ = key if ev == "onaylı" else "k:" + p["id"][:-3]
+        if KANAL_MOD == "onay" and ev in ("onaylı", "retest") and not p.get("bitis") \
+                and not (p.get("rt_tg") if ev == "retest" else p.get("onay_tg")) and (ev == "onaylı" or RETEST_KANAL):
+            kok_ = key                                       # 🔁 tekrar giriş kendi mesajıyla gider, ilk KIRDI'ya yanıt olarak
             if kok_ not in tg.meta:
                 ana_ = p if ev == "onaylı" else (_plan_bul(p["id"][:-3], sym) or p)
                 hs_ = _PLAN_TG.setdefault("sym", {}).setdefault(sym, [0, 0])
@@ -10989,22 +11077,24 @@ def plan_olaylari():
                           or (f"bu hisseye bugün {PLAN_TG_HISSE} kırılım gitti" if hs_[0] >= PLAN_TG_HISSE else "")
                           or (f"spread %{spread_yuzde(sym)}" if (spread_yuzde(sym) or 0) > _spr_max(p) else "")
                           or akis_kapi(sym)
-                          or ogle_kapi()
+                          or ogle_kapi(sym)
                           or gec_kapi(sym)
                           or buyuk_kapi(sym, ana_.get("e") or ana_.get("giris")))
                 if neden_:
                     PLAN_TG_RED[sym] = (time.time(), f"{fp_(p['giris'])} kırılımı kanala gitmedi: {neden_}")
                 else:
-                    p["onay_tg"] = 1
+                    p["rt_tg" if ev == "retest" else "onay_tg"] = 1
                     hs_[0] += 1
                     hs_[1] = time.time()
                     _PLAN_TG["n"] += 1
                     PLAN_DURUM[kok_] = DURUM_AD["onaylı"]
                     tg.send(kirilim_html(p, retest=ev == "retest"), plan_grafik_ch(p, durum="onaylı"), key=kok_, sym=sym,
-                            reply=takip_key(sym),
+                            reply=(("k:" + p["id"][:-3]) if ev == "retest" and ("k:" + p["id"][:-3]) in tg.meta else takip_key(sym)),
                             konu="plan", quiet=False, durum=DURUM_AD["onaylı"], mk=plan_dugmeler(p))
-                    r_ = next((r_ for r_ in reversed(KK["kayit"][-120:]) if r_["id"] == ana_["id"]), None)
-                    if r_ is not None:
+                    r_ = next((r_ for r_ in reversed(KK["kayit"][-120:]) if r_["id"] == ana_["id"]), None) if ev != "retest" else None
+                    if ev == "retest":
+                        kk_ekle(p, kirildi=True, retest=True)     # ikinci şans ayrı ölçülür
+                    elif r_ is not None:
                         r_.pop("gizli", None)                 # artık kanalda: karnede görünür
                     else:
                         kk_ekle(p, kirildi=True)
