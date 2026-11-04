@@ -422,8 +422,9 @@ class Planci:
             return "dusen"
         k_ = self.kote_fn(sym) if self.kote_fn else None
         kurus = (x.get("c") or 1) < KURUS and not self.bt
-        if kurus and not (k_ and time.time() - k_[2] < 180):
-            return "spread"                                  # 0,50$ altı: alış-satış bilinmeden sinyal yok
+        if kurus and not (k_ and time.time() - k_[2] < 180) and x.get("ses") == "regular":
+            return "spread"                                  # 0,50$ altı: normal seansta alış-satış bilinmeden sinyal yok
+            # öncesi/sonrası seansta ücretsiz kote yok: tutunma + alım baskısı aranır, mesajda "yarım lot · limit emir" yazar
         if k_ and time.time() - k_[2] < 180:
             if k_[0] > 0 and k_[1] > k_[0] and (k_[1] - k_[0]) / ((k_[0] + k_[1]) / 2) > (0.01 if kurus else 0.02):
                 return "spread"
@@ -493,8 +494,8 @@ class Planci:
         ix = eng._index(tss, bars)
         day = ix["days"][k]
         ds = ix["start"][day]
-        if k - ds < 20 or x["ses"] == "closed":
-            return []
+        if k - ds < (3 if x["ses"] == "pre" else 20) or x["ses"] == "closed":
+            return []                                   # öncesi seans: 3. dakikadan itibaren (dünkü tepe, çok günlük direnç, yuvarlak sayı hazır)
         x["_ix"] = ix
         self._et = eng.ET
         p = self.planlar.get(sym)
@@ -573,6 +574,9 @@ class Planci:
             elif p["st"] == "kaçtı":
                 if c > p["giris"] * 1.10:
                     self._bitir(p, "süre", "kaçtı ve %10'dan fazla uzaklaştı: yeni seviyeye bakılıyor", T)
+                elif c < p["lvl"] * 0.99 and not p.get("yeniden") and c > p["stop"]:
+                    p["st"], p["yeniden"], p["tut"] = "bekliyor", 1, 0      # stop %10: seviyeye dönüş bitiş değil, yeniden kırılım beklenir (RDAC)
+                    self._nd(sym, T, f"kaçtı ve {p['lvl']} altına döndü: yeniden kırılım bekleniyor")
                 elif c < p["lvl"] * 0.99:
                     self._bitir(p, "sahte", f"kaçtıktan sonra {p['lvl']} altına döndü", T)
                 elif B5 and blok_sonu(T) and B5[-1][3] <= p["giris"] * 1.02 and B5[-1][4] >= p["lvl"] and B5[-1][4] > B5[-1][1]:
