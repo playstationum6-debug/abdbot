@@ -1577,7 +1577,7 @@ BLOK_USD = float(os.getenv("BLOK_USD", "25000"))      # tek işlemde bu kadar $ 
 AKIS_MIN = int(os.getenv("AKIS_MIN", "45"))           # kırılım anında son 2 dk alım payı bunun altındaysa KIRDI kanala gitmez (0 = kapalı)
 KOTE = {}            # sembol -> (alış, satış, ts)  IEX en iyi alış/satış
 KK = {"kayit": [], "alarm": [], "float": {}, "gon": {}, "sahip": "", "tgplan": {}, "cizgi": [], "tahmin": [], "gece": [], "short": {}}
-SURUM = "4 Kasım · gece puanı + erken seviye"   # /saglik'te görünür: doğru dosya yüklendi mi
+SURUM = "17 Kasım · Kırılım Radarı"   # /saglik'te görünür: doğru dosya yüklendi mi
 KOMISYON = float(os.getenv("KOMISYON", "1.5"))     # satış başına broker komisyonu ($)
 YEDEK_ACIL = [0]     # plan mesajı gitti: 2 dk içinde yedekle (yeniden başlamada aynı plan tekrar gitmesin)   # kanal ekleri: kırılım karnesi, fiyat alarmı, float, gönderim izleri
 SPREAD_MAX = float(os.getenv("SPREAD_MAX", "2.0"))   # % üstü: plan mesajı gönderilmez (kayma riski)
@@ -3738,7 +3738,8 @@ async def signal_loop():
                     log.info("SİNYAL %s %s %s güven=%s giriş=%s stop=%s hedef=%s", sig["sym"],
                              "AL" if sig["dir"] > 0 else "SAT", sig["setup"], sig["conf"], sig["e"], sig["s"], sig["h"])
                     feed_signal(sig)
-                    bot.consider(sig, now)
+                    if SANAL_BOT:
+                        bot.consider(sig, now)
                     yz_planla(sig)
             except Exception as e:
                 log.warning("Sinyal hatası %s: %s", sym, e)
@@ -3870,7 +3871,8 @@ async def fast_loop():
                         log.info("HIZLI SİNYAL %s AL güven=%s giriş=%s stop=%s hedef=%s",
                                  sym, sig["conf"], sig["e"], sig["s"], sig["h"])
                         feed_signal(sig)
-                        bot.consider(sig, now)
+                        if SANAL_BOT:
+                            bot.consider(sig, now)
                         yz_planla(sig)
                 except Exception as e:
                     log.warning("Hızlı kırılım hatası %s: %s", sym, e)
@@ -6749,8 +6751,44 @@ def tg_pozisyon_tablosu(baslik=True):
     return (head + body + f"\nBugün kapanan: {td['n']} işlem, {td['pnl']:+.2f} $ · Para {b['capital']['total']:.2f} $")
 
 
+KANAL_ADI = os.getenv("KANAL_ADI", "Kırılım Radarı")
+SANAL_BOT = int(os.getenv("SANAL_BOT", "0"))   # 0: eski kurgularla otomatik sanal işlem kapalı · karne KIRDI planlarından
+
+
+def kirdi_karne(gun_say=30):
+    """Kanala giden KIRDI'lar · her plana LOT_USD, plan kurallarıyla (K1/K2 + izleyen stop, stop %10, komisyon dahil)."""
+    cut = str(datetime.now(ET).date() - timedelta(days=gun_say))
+    L = [r for r in KK["kayit"] if r["gun"] >= cut and _gorunur(r) and r.get("kt") and r["st"] not in ("bekliyor", "kırılmadı", "onaysız")]
+    if not L:
+        return None
+    z = [_tepe_pct(r) or 0 for r in L]
+    usd = 0
+    for r in L:
+        try:
+            p_ = _plan_sonuc(r)
+            usd += p_[1] if p_ else 0
+        except Exception:
+            pass
+    return {"n": len(L), "k5": round(100 * sum(x >= 5 for x in z) / len(z)), "k20": sum(x >= 20 for x in z),
+            "stop": sum(1 for r in L if r["st"] in ("stop", "sahte") and not r.get("k")), "usd": round(usd)}
+
+
+def kirdi_karne_satir(gun_say=30):
+    try:
+        k = kirdi_karne(gun_say)
+    except Exception:
+        return ""
+    return (f"{k['n']} KIRDI · +%5 ulaşan %{k['k5']} · +%20 {k['k20']} · K1'siz stop {k['stop']}"
+            f" · plana uysaydın {'+' if k['usd'] >= 0 else ''}{k['usd']}$") if k else ""
+
+
 def tg_karne(gun=None):
     """gun=None: tüm zamanlar; gun=7: son 7 gün (haftalık rapor)."""
+    if not SANAL_BOT:
+        gs = gun or 30
+        return (f"🏁 <b>KIRDI karnesi</b> · son {gs} gün · kanala gidenler\n"
+                + (kirdi_karne_satir(gs) or "Henüz sonuçlanmış KIRDI yok")
+                + f"\n<i>Her plana {planmod.LOT_USD:g}$ · K1 ve K2'de üçte bir · son parça izleyen stop · stop %10 · komisyon dahil</i>"), None
     b = bot.summary()
     k = b["karne"] or {}
     closed = [p for p in bot.positions if p["st"] == "kapandı" and p.get("pnl") is not None]
@@ -8138,7 +8176,8 @@ async def _yz_calis(sig, tekrar):
                              f"cevap verene kadar fiyat girişten 0,5R uzaklaştı, kovalanmıyor", sig["sym"])
             return
         sig["_yz_tekrar"] = 1
-        bot.consider(sig, now, onayli=True)
+        if SANAL_BOT:
+            bot.consider(sig, now, onayli=True)
 
 
 def yz_bot_ozeti():
@@ -8421,6 +8460,20 @@ def _tkp():
 def takip_key(sym):
     h = (_tkp().get("h") or {}).get(sym)
     return h["key"] if h else None
+
+
+_YEDEK_UYARI = {"t": 0}
+
+
+def yedek_alarm():
+    """Yedek 2 saattir alınamıyorsa sahibine Telegram'dan haber (6 saatte bir): bot yeniden başlarsa veri kaybolmasın."""
+    if not backup.enabled or not tg.ok or not sahip_chat():
+        return
+    if backup.last_ok and time.time() - backup.last_ok > 7200 and time.time() - _YEDEK_UYARI["t"] > 6 * 3600:
+        _YEDEK_UYARI["t"] = time.time()
+        tg.send(f"⚠️ <b>YEDEK ALINAMIYOR</b> · son yedek {int((time.time() - backup.last_ok) / 3600)} saat önce\n"
+                f"Durum: {_h(str(backup.status)[:120])}\nGH_TOKEN süresi dolmuş olabilir. Bot yeniden başlarsa son veriler kaybolur.",
+                None, chat=sahip_chat(), quiet=False)
 
 
 def plan_temizle():
@@ -9685,19 +9738,57 @@ def gece_gonder(zorla=False, chat=None):
         KK["gece"].append(rec)
         if a in secilen and tg.ok:
             g_ = a["px"]
-            html = (f"🌙 <b>GECE HİSSESİ · #{_h(a['sym'])}</b>\n"
-                    f"Alış <b>{fk(g_)}</b> civarı · seans sonrası <b>{fy(a['pct'])}</b>\n"
-                    f"🟢 Hedef <b>{fk(g_ * (1 + GECE_HEDEF / 100))}</b> (+%{GECE_HEDEF:g}) · {fk(g_ * (1 + 2 * GECE_HEDEF / 100))} (+%{2 * GECE_HEDEF:g})\n"
-                    f"🔴 Stop <b>{fk(g_ * 0.9)}</b> (−%10)\n"
+            html = (f"🌙 <b>GECE ADAYI · #{_h(a['sym'])}</b>\n"
+                    f"Seans sonrası <b>{fy(a['pct'])}</b> · şu an {fk(g_)}\n"
+                    f"🌅 <b>Giriş sabah {sabah} açılışta verilir</b> · gece alım yok (hisselerin çoğu sabah aşağı açılıyor)\n"
+                    f"<i>Açılış +%{GECE_GAP_MAX:g} üstündeyse atlanır</i>\n"
                     + (f"📰 {_h(a['haber'][:90])}\n" if a.get("haber") else "")
                     + "".join(f"📑 {_h(h)}\n" for h in (a.get("hikaye") or [])[:2])
-                    + f"🌅 Gece seansı yok · sabah {sabah}'da piyasa öncesi açılışla hareket\n"
-                    f"<i>⚠️ Gece taşıma riski: sabah aşağı da açılabilir</i>")
+                    )
             rec["key"] = f"gece:{gun}:{a['sym']}"
             tg.send(html, None, key=rec["key"], sym=a["sym"], chat=chat, konu="plan", quiet=False)
     del KK["gece"][:-300]
     kk_kaydet()
     return len(secilen)
+
+
+_GS = {"t": 0}
+GECE_GAP_MAX = float(os.getenv("GECE_GAP_MAX", "20"))   # sabah açılış AH fiyatının bu kadar üstündeyse atla (CIIT, MERC)
+
+
+async def gece_sabah():
+    """🌅 Öncesi seans açılışı (04:05 ET sonrası): gece adayına sabah girişi. Seviye = ilk 5 dk tepesi, stop = açılışın %8 altı."""
+    bugun = _gun_et()
+    for r in KK["gece"]:
+        if not r.get("gitti") or r["gun"] >= bugun or r.get("sabah") or time.time() - r["t"] > 30 * 3600:
+            continue
+        try:
+            B = await asyncio.to_thread(yahoo_mum, r["sym"], "1d", "1m", True)
+        except Exception:
+            continue
+        g0 = datetime.fromisoformat(bugun).replace(tzinfo=ET)
+        t0 = g0.replace(hour=4).timestamp()
+        P = [b for b in B if t0 <= b[0] < t0 + 300]
+        if len(P) < 3:
+            continue
+        ac, tepe = P[0][1], max(b[2] for b in P)
+        gap = (ac / r["giris"] - 1) * 100
+        r["sabah"] = {"ac": round(ac, 4), "gap": round(gap, 1), "lvl": round(tepe, 4)}
+        if gap > GECE_GAP_MAX:
+            r["sabah"]["atla"] = 1
+            if tg.ok:
+                tg.send(f"🌅 <b>#{_h(r['sym'])}</b> açıldı {fk(ac)} · gece fiyatına göre <b>{fy(gap)}</b>\n"
+                        f"⛔ Gap fazla: giriş yok (açılıştan sonra düşme riski yüksek)",
+                        None, sym=r["sym"], reply=r.get("key"), konu="plan", quiet=True)
+            continue
+        stop_ = round(ac * 0.92, 4)
+        PLAN.liste_ekle(r["sym"], tepe, stop=stop_, neden="gece adayı · sabah açılış")
+        if tg.ok:
+            tg.send(f"🌅 <b>#{_h(r['sym'])} açıldı</b> {fk(ac)} ({fy(gap)} gece fiyatına göre)\n"
+                    f"📌 İlk 5 dk tepesi <b>{fk(tepe)}</b> kırılırsa giriş · 🔴 stop {fk(stop_)}\n"
+                    f"<i>Kırılınca ✅ KIRDI mesajı gelir</i>",
+                    None, sym=r["sym"], reply=r.get("key"), konu="plan", quiet=False)
+    kk_kaydet()
 
 
 async def gece_degerlendir():
@@ -9722,8 +9813,9 @@ async def gece_degerlendir():
                 r["sonuc"] = "veri yok"
                 deg = True
             continue
-        g = r["giris"]
+        g = P[0][1]                                        # karne artık sabah açılış fiyatına göre (gece fiyatı değil)
         ac, hi, kp = P[0][1], max(b[2] for b in P), P[-1][4]
+        r["baz"] = "açılış"
         ilk = None                                         # hedef mi stop mu önce geldi (mum sırasıyla)
         for b in P:
             if b[3] <= g * 0.9:
@@ -9732,7 +9824,7 @@ async def gece_degerlendir():
             if b[2] >= g * (1 + GECE_HEDEF / 100):
                 ilk = "hedef"
                 break
-        r.update(acilis=round((ac / g - 1) * 100, 1), en_yuksek=round((hi / g - 1) * 100, 1), kapanis=round((kp / g - 1) * 100, 1),
+        r.update(acilis=round((ac / r["giris"] - 1) * 100, 1), en_yuksek=round((hi / g - 1) * 100, 1), kapanis=round((kp / g - 1) * 100, 1),
                  sonuc="tuttu" if ilk == "hedef" else "tutmadı", ilk=ilk)
         deg = True
         if r.get("gitti") and tg.ok:
@@ -9768,7 +9860,7 @@ def karne_gonder():
                     "sag": (f"{_fy0(r['tepe_pct'])} · +{round(planmod.LOT_USD * r['tepe_pct'] / 100)}$" if (r.get("tepe_pct") or 0) > 0
                             else _fy0(r["tepe_pct"])) if r["st"] not in ("kırılmadı", "bekliyor") else "—", "renk": r["renk"],
                     "cubuk": min(1, max(0, (r["tepe_pct"] or 0) / 30)) if r.get("tepe_pct") else None})
-    png = _kart({"baslik": "Günün Kırılım Karnesi", "rozet": "KARNE", "renk": "up" if (o["wr"] or 0) >= 50 else "acc",
+    png = _kart({"baslik": f"{KANAL_ADI} · Gün Sonu", "rozet": "KARNE", "renk": "up" if (o["wr"] or 0) >= 50 else "acc",
                  "saat": datetime.now(TR).strftime("%d.%m.%Y"), "alt": "Kanala giden her kırılım planının gerçek sonucu",
                  "kutular": [("Gönderilen", str(o["gonderilen"]), None), ("Kırılan", str(o["kirilan"]), None),
                              ("K1+ oranı", "—" if o["wr"] is None else f"%{o['wr']}", "up" if (o["wr"] or 0) >= 50 else "dn"),
@@ -9959,7 +10051,11 @@ def saglik_satirlari():
     dun = sorted(k for k in SAGLIK["plan"] if k < gun)[-1:] or [None]
     o = karne_ozet(dun[0]) if dun[0] else None
     bas_bugun = sum(1 for t in backup.data.get("starts", []) if t >= time.time() - 86400)
+    _yd = (time.time() - backup.last_ok) / 60 if backup.last_ok else None
     return [f"🏷️ Sürüm: {SURUM}",
+            (f"{'✅' if _yd is not None and _yd < 120 else '⚠️'} Yedek: "
+             + (f"son {int(_yd)} dk önce" if _yd is not None else "henüz alınamadı") + f" · {backup.status}") if backup.enabled
+            else "⚠️ Yedek kapalı (GH_TOKEN yok)",
             f"{'✅' if state.iex == 'bağlı' else '⚠️'} Alpaca IEX: {state.iex} · {len(akis_semboller())} hisse canlı",
             f"{'✅' if FINN['durum'] == 'bağlı' else '➖'} Finnhub: {FINN['durum']}" + (f" · {len(FINN['abone'])} hisse" if FINN["abone"] else ""),
             f"{'✅' if not state.sip_err else '⚠️'} Öncesi/sonrası hacim: " + (f"SIP hata ({state.sip_err[:50]})" if state.sip_err else
@@ -10791,7 +10887,12 @@ KESIF_MAX_FIYAT = float(os.getenv("KESIF_MAX_FIYAT", "20"))
 
 def takip_metni():
     ses = cal.session(time.time())
-    sat = [f"📋 <b>TAKİP LİSTESİ</b> · {datetime.now(TR).strftime('%H:%M')} TR · {SES_TR_.get(ses, '')}"]
+    _ks = kirdi_karne_satir()
+    sat = [f"⚡ <b>{_h(KANAL_ADI)}</b> · ABD küçük hisse kırılımları\n"
+           "📌 TAKİBİMDE = seviye yaklaştı · ✅ KIRDI = giriş/stop/hedef · 🚀 = ilerleme · 🌙 = gece adayı (giriş sabah)\n"
+           + (f"🏁 30 gün: {_ks}\n" if _ks else "")
+           + "<i>Kazanan da kaybeden de yazılır · yatırım tavsiyesi değildir</i>\n",
+           f"📋 <b>TAKİP LİSTESİ</b> · {datetime.now(TR).strftime('%H:%M')} TR · {SES_TR_.get(ses, '')}"]
     L = []
     for sym, p in list(PLAN.planlar.items()):
         if p.get("st") != "bekliyor" or p.get("kanal_red"):
@@ -10951,6 +11052,10 @@ async def kanal_loop():
         except Exception as e:
             log.warning("Erken giriş izleme hatası: %s", e)
         try:
+            yedek_alarm()
+        except Exception as e:
+            log.warning("Yedek alarmı hatası: %s", e)
+        try:
             plan_temizle()
         except Exception as e:
             log.warning("Plan temizliği hatası: %s", e)
@@ -10979,6 +11084,9 @@ async def kanal_loop():
                 except Exception as e:
                     log.warning("24 saat kontrolü: %s", e)
                 gece_gonder()
+            if 245 <= hm < 330 and time.time() - _GS["t"] > 90:
+                _GS["t"] = time.time()
+                _gorev(gece_sabah())
             if 575 <= hm < 700 and G.get("gece_deg") != gun:
                 G["gece_deg"] = gun
                 _gorev(gece_degerlendir())
@@ -11854,6 +11962,8 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
+from fastapi.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=800)   # veri tasarrufu: cevaplar ~%75 küçülür (Render bandwidth)
 TOKEN = hashlib.sha256(f"{SITE_USER}:{SITE_PASSWORD}:abdbot".encode()).hexdigest() if SITE_PASSWORD else ""
 
 

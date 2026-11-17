@@ -425,7 +425,7 @@ async function anaYukle(){try{const d=await gJ('/api/canli');CANLI=d.liste||[];$
 let DS=null,DT=null,DD=null,dAral='1';
 const AUR='';
 function detayAc(sym){titre();DS=sym;DD=null;$('det').innerHTML=`${AUR}<div class="nb"><button onclick="detayKapat()" aria-label="Geri">‹</button><b>${esc(sym)}</b><button onclick="paylas()" aria-label="Paylaş">↗</button></div><div class="dh"><div class="dlg">${esc(sym.slice(0,5))}</div><div><div class="s">${esc(sym)}</div><div class="hb">yükleniyor…</div></div></div><div class="isk" style="height:260px;margin-top:14px"></div><div class="isk" style="height:180px"></div><div class="isk"></div>`;
-  $('det').classList.add('on');document.querySelector('.scr:not(.gizli)').classList.add('itik');$('det').scrollTop=0;detayYukle(true);clearInterval(DT);DT=setInterval(()=>detayYukle(false),4000);
+  $('det').classList.add('on');document.querySelector('.scr:not(.gizli)').classList.add('itik');$('det').scrollTop=0;detayYukle(true);clearInterval(DT);DT=setInterval(()=>{if(!document.hidden)detayYukle(false)},8000);
   if(TG&&TG.BackButton){TG.BackButton.show();TG.BackButton.onClick(detayKapat)}history.pushState({d:1},'')}
 function detayKapat(){titre();MG&&MG.sil();MG=null;$('det').classList.remove('on');for(const s of document.querySelectorAll('.scr'))s.classList.remove('itik');clearInterval(DT);DS=null;if(TG&&TG.BackButton)TG.BackButton.hide()}
 window.addEventListener('popstate',()=>{if(DS)detayKapat()});
@@ -586,7 +586,7 @@ function paylas(){if(!DD)return;const z=(DD.girseydin||[]).find(g=>g.tepe!=null)
 $('ctaP').onclick=paylas;
 /* ---------------- canlı */
 let cT=null,cOnce={},cIlk=true;
-async function canliYukle(){clearInterval(cT);cIlk=true;await canliCiz();cT=setInterval(()=>{if(sekme==='canli')canliCiz();else clearInterval(cT)},3000)}
+async function canliYukle(){clearInterval(cT);cIlk=true;await canliCiz();cT=setInterval(()=>{if(document.hidden)return;if(sekme==='canli')canliCiz();else clearInterval(cT)},6000)}
 async function canliCiz(){try{const d=await gJ('/api/canli');$('cP').textContent=(d.piyasa||'')+' · '+new Date().toLocaleTimeString('tr-TR');
   $('cG').innerHTML=(d.liste||[]).map((x,i)=>{const cl=x.st==='kırıldı'?'kir':x.st==='yaklaşıyor'?'yak':x.st==='sahte'?'sah':x.st==='stop'?'stp':'';const o=cOnce[x.sym];if(o&&o!==x.st&&(x.st==='kırıldı'||x.st==='yaklaşıyor')){ada(x.st==='kırıldı'?`🟢 ${x.sym} kırıldı`:`🎯 ${x.sym} yaklaşıyor`,`${fp(x.px)} · giriş ${fp(x.giris)}`);if(x.st==='kırıldı')konfeti(30)}cOnce[x.sym]=x.st;
     const u=x.uzak==null?null:Math.max(0,x.uzak),w=x.st==='kırıldı'?100:u==null?0:Math.max(4,100-u/6*100);
@@ -739,7 +739,7 @@ $('araL').onclick=e=>{const r=e.target.closest('.row');if(r)detayAc(r.dataset.s)
 $('sesS').classList.toggle('on',SES);$('sesT').onclick=()=>{SES=!SES;yerel('ses',SES);$('sesS').classList.toggle('on',SES);titre(12,'medium');if(SES){zil();setTimeout(()=>soyle('Sesli uyarı açık'),600)}};
 /* ---------------- başlat */
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
-segAyarla();indAyarla();anaYukle();bilYukle();setInterval(()=>{if(sekme==='ana'&&!DS)anaYukle()},5000);setInterval(bilYukle,15000);
+segAyarla();indAyarla();anaYukle();bilYukle();setInterval(()=>{if(!document.hidden&&sekme==='ana'&&!DS)anaYukle()},15000);setInterval(()=>{if(!document.hidden)bilYukle()},30000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){anaYukle();bilYukle()}});
 </script>
 </body>
